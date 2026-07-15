@@ -9,6 +9,18 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.7.13] — 2026-07-15
+
+### Added
+
+- **Server regression tests locking the audit fixes.** New pathway suites:
+  `session-running-pathways` (lab-results IDOR, order-labs case binding, exam
+  tenant/case trinity), `course-admin-pathways` (co-teacher visibility, window
+  read-merge, join-code normalisation, case-move authorisation), and the
+  registration/approval-queue pathways (park/approve/reject/re-apply, invite
+  skips queue, closed-admits-invite, lockout east of UTC, suspended login).
+  Shared `tests/utils/authHttp.js` helper for HTTP + DB seeding.
+
 ## [2.7.12] — 2026-07-15
 
 ### Fixed

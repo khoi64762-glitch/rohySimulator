@@ -112,9 +112,16 @@ describe.each(['open', 'approval', 'invite', 'closed'])(
                 // bypasses the policy). Everyone after them needs one.
                 expect(res.status).toBe(403);
                 expect(res.body.code).toBe('invite_required');
+            } else if (mode === 'approval') {
+                // The queue has landed (migration 0038): a self-registering
+                // applicant is now PARKED for an admin, not admitted. 202 with
+                // approval_pending and no token — before the queue existed this
+                // fell through to a plain-student 201, silently running `open`.
+                expect(res.status).toBe(202);
+                expect(res.body.code).toBe('approval_pending');
+                expect(res.body.token).toBeUndefined();
             } else {
-                // open (and, until the approval queue lands, 'approval') still
-                // admit a self-registering student.
+                // open still admits a self-registering student outright.
                 expect(res.status).toBe(201);
                 expect(res.body.user.role).toBe('student');
             }

@@ -370,14 +370,23 @@ describe('registration invites', () => {
 
         afterAll(async () => { if (closedServer) await closedServer.close(); });
 
-        // Closed means closed. Honouring outstanding invites here would make
-        // 'closed' silently equivalent to 'invite' and surprise the admin who
-        // just locked the door. (The invites are suspended, not revoked — flip
-        // back to invite mode and they work again.)
-        it('rejects even a valid invite', async () => {
+        // Closed governs STRANGERS, not named invitees. A valid invite is an
+        // exception an admin issued by hand — the same admin who closed the door —
+        // so it still opens it. This is the contract the login card (AuthGate) and
+        // the release notes have promised since 2.7.6; honouring it here is what
+        // stops an invited person from being walked through the whole form and then
+        // told to "ask an administrator" by the administrator who invited them.
+        // To suspend outstanding invites you revoke them — closing the mode is not
+        // a bulk-revoke.
+        it('admits a valid invite through the closed door', async () => {
+            // Regression lock: the closed branch used to fire for everyone
+            // (`mode === 'closed'`), rejecting even a valid invite with 403
+            // registration_closed. It is now `mode === 'closed' && !invite`.
             // NB: every character must be IN the alphabet. A token containing
-            // I/L/O would be stripped by normalizeCode() and never match, so
-            // this test would pass for the wrong reason (invite_not_found).
+            // I/L/O would be stripped by normalizeCode() and never match — the
+            // register call would then 400 (invite_not_found) and this 201
+            // expectation would fail, so the canonical token keeps the success
+            // path exercising a genuinely valid invite.
             const token = 'ABCDEFGH2345';
             const db = await openDb(closedServer.dbPath);
             await pRun(
@@ -388,8 +397,9 @@ describe('registration invites', () => {
             await closeDb(db);
 
             const res = await register(closedServer.baseUrl, 'invited-but-closed', { invite: token });
-            expect(res.status).toBe(403);
-            expect(res.body.code).toBe('registration_closed');
+            expect(res.status).toBe(201);
+            expect(res.body.user.role).toBe('student');   // the role the invite carried
+            expect(res.body.token).toBeTruthy();           // invited ⇒ logged straight in
         });
     });
 });
