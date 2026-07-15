@@ -9,6 +9,27 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.7.10] — 2026-07-15
+
+### Added
+
+- **Registration approval queue (migration 0038).** `approval` mode was
+  selectable and advertised by the public probe, but `/auth/register` had no
+  branch for it — it behaved exactly like `open`, admitting everyone with a token.
+  It now parks an applicant in `registration_requests` (hashed at request time,
+  never a user row) and an admin approves or rejects from the Users workspace; on
+  approval the hash moves into the new `users` row untouched, so the applicant
+  signs in with the password they chose. A valid invite skips the queue.
+
+### Fixed
+
+- **Auth-entry hardening (audit).** Account lockout compared a SQLite UTC
+  timestamp parsed as local time, so on a server east of UTC the lock was always
+  already "in the past" and did nothing (unlimited guessing) — it now converts
+  correctly. Suspended/deleted accounts are refused before bcrypt instead of
+  minting a token that immediately stops working. A valid invite now opens a
+  `closed` door (closed governs strangers, not admin-issued invitees).
+
 ## [2.7.9] — 2026-07-15
 
 ### Fixed

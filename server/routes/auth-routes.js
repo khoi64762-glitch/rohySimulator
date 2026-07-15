@@ -19,6 +19,7 @@ import {
     csrfCookieOptions,
     generateCsrfToken,
 } from '../middleware/csrf.js';
+import { sqliteTsToIso } from '../sqliteTime.js';
 
 // Account lockout: after MAX_FAILED_LOGINS consecutive failed attempts the
 // account is locked for LOCKOUT_MINUTES. Restored after the routes.js split
@@ -218,11 +219,16 @@ router.post('/auth/register', registerLimiter, async (req, res) => {
             }
         }
 
-        if (policy.mode === 'closed') {
-            // Closed rejects invites too. Honouring a stale invite here would make
-            // 'closed' quietly equivalent to 'invite', which is not what the admin
-            // who just locked the door asked for. (Outstanding invites are only
-            // SUSPENDED — flip back to invite mode and they work again.)
+        if (policy.mode === 'closed' && !invite) {
+            // Closed governs STRANGERS. A valid invite is a named exception issued
+            // by an admin — the same admin who closed the door — so it still opens
+            // it, which is what an invite is for and what the client (AuthGate) and
+            // the release notes have promised since 2.7.6. Before this, an invitee
+            // on a closed instance was walked through the whole form and then told
+            // to "ask an administrator" — by the administrator who had invited them.
+            //
+            // To suspend outstanding invites, revoke them; that is what revocation
+            // is for. Flipping the mode to `closed` is not a bulk-revoke.
             return res.status(403).json({
                 code: 'registration_closed',
                 error: policy.message || 'Registration is closed. Ask an administrator to create your account.'
@@ -243,6 +249,66 @@ router.post('/auth/register', registerLimiter, async (req, res) => {
             return res.status(400).json({
                 code: 'email_domain_not_allowed',
                 error: `Registration is limited to these email domains: ${policy.domains.join(', ')}.`
+            });
+        }
+
+        // APPROVAL: an applicant is not a user yet. Queue them and stop — no user
+        // row, no token, no cookies, no auto-enrolment, nothing they could use to
+        // reach the platform. Until this branch existed, `approval` fell through to
+        // the plain-student INSERT below and admitted everyone instantly with a
+        // token: an admin who chose "an admin approves" was silently running `open`.
+        //
+        // An invite skips the queue. The admin who minted it already approved this
+        // person, by name, in advance; sending them to a queue would be asking the
+        // same administrator the same question twice. Same reasoning that lets an
+        // invite through a closed door.
+        if (policy.mode === 'approval' && !invite) {
+            const taken = await new Promise((resolve, reject) => {
+                dbAdapter.get(
+                    'SELECT id FROM users WHERE username = ? OR email = ?',
+                    [username, email],
+                    (err, row) => (err ? reject(err) : resolve(Boolean(row)))
+                );
+            });
+            if (taken) {
+                return res.status(409).json({ error: 'Username or email already exists' });
+            }
+
+            // Hashed here, never stored in the clear even for a moment. On approval
+            // the hash moves into the users row untouched, so the applicant signs in
+            // with the password they chose and no admin ever handles it.
+            const requestHash = await bcrypt.hash(password, 10);
+            try {
+                await dbAdapter.run(
+                    `INSERT INTO registration_requests (tenant_id, username, name, email, password_hash, ip_address)
+                     VALUES (?, ?, ?, ?, ?, ?)`,
+                    [tenantId(req), username, name || null, email, requestHash, req.ip || null]
+                );
+            } catch (err) {
+                // The partial unique indexes cover LIVE requests only, so this is a
+                // duplicate application, not a duplicate account.
+                if (String(err.message).includes('UNIQUE')) {
+                    return res.status(409).json({
+                        code: 'approval_already_requested',
+                        error: 'A request for this username or email is already waiting for approval.'
+                    });
+                }
+                throw err;
+            }
+
+            logAudit({
+                userId: null,
+                action: 'register_request',
+                resourceType: 'registration_request',
+                newValue: { username, email },
+                ipAddress: req.ip,
+                userAgent: req.headers['user-agent'],
+                tenantId: tenantId(req),
+            });
+
+            return res.status(202).json({
+                code: 'approval_pending',
+                message: 'Your request has been sent to an administrator. You will be able to sign in once it is approved.'
             });
         }
     }
@@ -392,11 +458,36 @@ router.post('/auth/login', authLimiter, (req, res) => {
             return res.status(401).json({ error: 'Invalid username or password' });
         }
 
+        // An account an admin disabled must not be able to mint a token. Checked
+        // before bcrypt (same posture as the lockout branch below): a suspended
+        // account is a closed door, not a slow one. authenticateToken already
+        // 403s every SUBSEQUENT request, so skipping this only ever produced a
+        // token that immediately stopped working — while writing a *successful*
+        // login to login_logs and re-running auto-enrolment for the very account
+        // that had just been switched off.
+        if (user.deleted_at || user.status !== 'active') {
+            dbAdapter.run(
+                `INSERT INTO login_logs (user_id, username, action, ip_address, user_agent, tenant_id) VALUES (?, ?, ?, ?, ?, ?)`,
+                [user.id, username, 'failed_login', ipAddress, userAgent, user.tenant_id || 1]
+            );
+            return res.status(403).json({
+                code: 'account_disabled',
+                error: 'This account is not active. Contact an administrator.'
+            });
+        }
+
         // Honour active lockout window. Users with a future `locked_until`
         // get rejected without bcrypt compare so timing-side-channel and
         // CPU-burn aren't escalation paths.
+        //
+        // sqliteTsToIso is load-bearing, not decoration: SQLite writes
+        // `YYYY-MM-DD HH:MM:SS` in UTC with no `Z`, and V8 parses that shape as
+        // LOCAL time. On a server east of UTC (this deploys to Helsinki) the raw
+        // string parsed to a moment already in the past, `lockedUntilMs > now()`
+        // was never true, and the lockout silently did nothing — unlimited
+        // password guessing. Docker's UTC default hid it. See sqliteTime.js.
         if (user.locked_until) {
-            const lockedUntilMs = new Date(user.locked_until).getTime();
+            const lockedUntilMs = new Date(sqliteTsToIso(user.locked_until)).getTime();
             if (Number.isFinite(lockedUntilMs) && lockedUntilMs > Date.now()) {
                 const minsLeft = Math.ceil((lockedUntilMs - Date.now()) / 60000);
                 return res.status(423).json({

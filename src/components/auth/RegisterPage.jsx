@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
-import { UserPlus, User, Mail, Lock, AlertCircle, CheckCircle, KeyRound } from 'lucide-react';
+import { UserPlus, User, Mail, Lock, AlertCircle, CheckCircle, KeyRound, MailCheck } from 'lucide-react';
 import { PASSWORD_RULES, passwordMeetsRules } from '../../utils/passwordRules';
 
 export default function RegisterPage({ onSwitchToLogin, onRegistered, policy, invite, inviteToken, startWithCode = false }) {
@@ -19,6 +19,8 @@ export default function RegisterPage({ onSwitchToLogin, onRegistered, policy, in
     const [codeLocked, setCodeLocked] = useState(Boolean(invite?.valid));
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+    // approval mode: the request is queued and there is no account yet.
+    const [submitted, setSubmitted] = useState(false);
     const { register } = useAuth();
 
     // An invite's own email rule beats the platform's list — an admin inviting an
@@ -86,9 +88,17 @@ export default function RegisterPage({ onSwitchToLogin, onRegistered, policy, in
         setLoading(true);
 
         try {
-            await register(formData.username, formData.email, formData.password, {
+            const data = await register(formData.username, formData.email, formData.password, {
                 invite: inviteCode || undefined,
             });
+            // approval mode answers 202 with no user and no token: the account does
+            // not exist yet. Say so and stop — calling onRegistered() here would
+            // hand back to an app that has nobody logged in, which reads as the
+            // signup having silently failed.
+            if (data?.code === 'approval_pending') {
+                setSubmitted(true);
+                return;
+            }
             onRegistered?.();
         } catch (err) {
             setError(err.message || t('registration_failed'));
@@ -96,6 +106,27 @@ export default function RegisterPage({ onSwitchToLogin, onRegistered, policy, in
             setLoading(false);
         }
     };
+
+    // The request is in the queue. There is nothing more for them to do here, so
+    // don't leave a form on screen inviting them to do it again.
+    if (submitted) {
+        return (
+            <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-8 shadow-2xl text-center">
+                <div className="w-12 h-12 rounded-full bg-blue-500/15 border border-blue-500/30 flex items-center justify-center mx-auto mb-4">
+                    <MailCheck className="w-6 h-6 text-blue-300" />
+                </div>
+                <h2 className="text-2xl font-bold text-white mb-2">{t('approval_pending_title')}</h2>
+                <p className="text-neutral-400 text-sm mb-6">{t('approval_pending_body')}</p>
+                <button
+                    type="button"
+                    onClick={onSwitchToLogin}
+                    className="text-blue-400 hover:text-blue-300 font-medium text-sm transition-colors"
+                >
+                    {t('back_to_signin')}
+                </button>
+            </div>
+        );
+    }
 
     // Pure card — the split-panel shell around it is AuthLayout, owned by AuthGate.
     return (

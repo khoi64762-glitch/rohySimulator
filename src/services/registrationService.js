@@ -32,6 +32,21 @@ export const createInvite = (payload) => apiPost('/registration-invites', payloa
 export const revokeInvite = (id) => apiDelete(`/registration-invites/${id}`);
 export const listInviteUses = (id) => apiGet(`/registration-invites/${id}/uses`);
 
+// --- Approval queue ---------------------------------------------------------
+//
+// Only populated when the platform is in `approval` mode. A pending applicant is
+// NOT a user row (see migration 0038) — approving is what mints the account, so
+// nothing here overlaps with the People roster.
+
+export const listRegistrationRequests = (status = 'pending') =>
+    apiGet(`/registration-requests?status=${encodeURIComponent(status)}`);
+
+export const approveRegistrationRequest = (id, role = 'student') =>
+    apiPost(`/registration-requests/${id}/approve`, { role });
+
+export const rejectRegistrationRequest = (id, note = '') =>
+    apiPost(`/registration-requests/${id}/reject`, { note });
+
 /**
  * The shareable link for an invite.
  *

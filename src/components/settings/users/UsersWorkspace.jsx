@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import {
     Users, UserPlus, UserMinus, Upload, Search, ShieldCheck, ChevronDown, ChevronRight,
     Pencil, Trash2, X, ArrowUpDown, Layers, Ban, RotateCcw, GraduationCap,
-    KeyRound, Copy, Check, UserCheck,
+    KeyRound, Copy, Check, UserCheck, Inbox,
 } from 'lucide-react';
 import { useToast } from '../../../contexts/ToastContext';
 import { useAuth } from '../../../contexts/AuthContext';
@@ -18,6 +18,7 @@ import UserDetailDrawer from './UserDetailDrawer';
 import UserImportWizard from './UserImportWizard';
 import BulkOperationsModal from './BulkOperationsModal';
 import InvitesPanel from './InvitesPanel';
+import ApprovalQueuePanel from './ApprovalQueuePanel';
 
 const ROLE_RANK = { guest: 0, student: 1, user: 1, reviewer: 2, educator: 3, admin: 4 };
 const rank = (r) => ROLE_RANK[r] ?? 0;
@@ -27,6 +28,7 @@ function WorkspaceViewSwitch({ view, setView, t }) {
     const views = [
         { id: 'people', label: t('view_people'), icon: Users },
         { id: 'invites', label: t('view_invites'), icon: KeyRound },
+        { id: 'requests', label: t('view_requests'), icon: Inbox },
     ];
     return (
         <div className="inline-flex rounded-lg border border-neutral-200 bg-neutral-50 p-0.5">
@@ -288,6 +290,18 @@ export default function UsersWorkspace() {
             <div className="space-y-4">
                 <WorkspaceViewSwitch view={view} setView={setView} t={t} />
                 <InvitesPanel cohorts={cohorts} policyMode={policyMode} />
+            </div>
+        );
+    }
+
+    // The approval queue sits beside Invites for the same reason Invites sits
+    // here: deciding who gets in is roster work, and the admin is already looking
+    // at the people the decision adds to.
+    if (view === 'requests') {
+        return (
+            <div className="space-y-4">
+                <WorkspaceViewSwitch view={view} setView={setView} t={t} />
+                <ApprovalQueuePanel policyMode={policyMode} />
             </div>
         );
     }

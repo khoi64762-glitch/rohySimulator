@@ -23,6 +23,7 @@ import {
     dbAll,
     dbGet,
     dbRun,
+    ensureAutoEnrollMemberships,
     isValidRole,
     roleForStorage,
     tenantId,
@@ -230,6 +231,151 @@ router.get('/registration-invites/:id/uses', authenticateToken, requireAdmin, as
             [invite.id]
         );
         res.json({ uses });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ---------------------------------------------------------------------------
+// The approval queue (registration_mode = 'approval').
+//
+// A pending applicant deliberately does NOT exist in `users` — see migration
+// 0038 for why. Approving mints the user row from the request; rejecting closes
+// the request and leaves no account behind. Both are terminal: the partial
+// unique indexes only cover live rows, so a rejected applicant may apply again.
+// ---------------------------------------------------------------------------
+
+// GET /api/registration-requests?status=pending — the queue.
+// The password hash is never selected; nobody, admin included, needs to see it.
+router.get('/registration-requests', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const status = ['pending', 'approved', 'rejected'].includes(req.query.status)
+            ? req.query.status
+            : 'pending';
+        const requests = await dbAll(
+            `SELECT r.id, r.username, r.name, r.email, r.status, r.requested_at,
+                    r.decided_at, r.decision_note, r.user_id,
+                    d.username AS decided_by_username
+               FROM registration_requests r
+               LEFT JOIN users d ON d.id = r.decided_by
+              WHERE r.tenant_id = ? AND r.status = ?
+              ORDER BY r.requested_at DESC`,
+            [tenantId(req), status]
+        );
+        res.json({ requests, status });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/registration-requests/:id/approve — mint the account.
+//
+// The role is the admin's to choose here (default student) and is rank-ceilinged
+// against the approver, exactly like POST /users/create. The applicant never got
+// to ask for a role: their request body's `role` was discarded at request time.
+router.post('/registration-requests/:id/approve', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const request = await dbGet(
+            `SELECT * FROM registration_requests WHERE id = ? AND tenant_id = ?`,
+            [req.params.id, tenantId(req)]
+        );
+        if (!request) return res.status(404).json({ error: 'Request not found' });
+        if (request.status !== 'pending') {
+            return res.status(409).json({
+                code: 'already_decided',
+                error: `This request was already ${request.status}.`
+            });
+        }
+
+        const role = roleForStorage(req.body?.role || 'student');
+        if (!isValidRole(role)) return res.status(400).json({ error: 'Invalid role' });
+        if (getRoleRank(role) > getRoleRank(req.user.role)) {
+            return res.status(403).json({ error: 'Cannot approve a role higher than your own' });
+        }
+
+        // The hash moves across untouched — the applicant signs in with the password
+        // they chose when they applied, and no admin ever sees or sets it.
+        let userId;
+        try {
+            const result = await dbRun(
+                `INSERT INTO users (username, name, email, password_hash, role, tenant_id)
+                 VALUES (?, ?, ?, ?, ?, ?)`,
+                [request.username, request.name, request.email, request.password_hash, role, request.tenant_id]
+            );
+            userId = result.lastID;
+        } catch (err) {
+            // Someone took the username while the request sat in the queue (an admin
+            // created it by hand, or an invite let them in). The request stays pending
+            // so the admin can see why it failed rather than losing it to a 500.
+            if (String(err.message).includes('UNIQUE')) {
+                return res.status(409).json({
+                    code: 'username_taken',
+                    error: 'That username or email now belongs to an existing account. Reject this request.'
+                });
+            }
+            throw err;
+        }
+
+        await dbRun(
+            `UPDATE registration_requests
+                SET status = 'approved', decided_at = CURRENT_TIMESTAMP, decided_by = ?, user_id = ?
+              WHERE id = ?`,
+            [req.user.id, userId, request.id]
+        );
+
+        // Same courtesy every other entry path gets: land them in the auto-enrol
+        // classes so an approved student opens the app inside their course.
+        await ensureAutoEnrollMemberships(userId, request.tenant_id);
+
+        auditSuccess(req, {
+            action: 'registration_request_approved',
+            resourceType: 'registration_request',
+            resourceId: String(request.id),
+            newValue: { username: request.username, role, user_id: userId },
+        });
+
+        res.status(201).json({
+            approved: true,
+            user: { id: userId, username: request.username, email: request.email, role }
+        });
+    } catch (err) {
+        inviteLog.error('approve registration request failed', { error: err.message });
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/registration-requests/:id/reject — no account is created, and the
+// hashed password dies with the row's usefulness. The row itself stays as the
+// record that someone asked and was told no.
+router.post('/registration-requests/:id/reject', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const request = await dbGet(
+            `SELECT * FROM registration_requests WHERE id = ? AND tenant_id = ?`,
+            [req.params.id, tenantId(req)]
+        );
+        if (!request) return res.status(404).json({ error: 'Request not found' });
+        if (request.status !== 'pending') {
+            return res.status(409).json({
+                code: 'already_decided',
+                error: `This request was already ${request.status}.`
+            });
+        }
+
+        await dbRun(
+            `UPDATE registration_requests
+                SET status = 'rejected', decided_at = CURRENT_TIMESTAMP, decided_by = ?, decision_note = ?
+              WHERE id = ?`,
+            [req.user.id, req.body?.note || null, request.id]
+        );
+
+        auditSuccess(req, {
+            action: 'registration_request_rejected',
+            resourceType: 'registration_request',
+            resourceId: String(request.id),
+            oldValue: { username: request.username },
+        });
+
+        res.json({ rejected: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
