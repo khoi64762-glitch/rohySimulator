@@ -318,54 +318,18 @@ router.get('/sessions/:id/vitals', authenticateToken, async (req, res) => {
     );
 });
 
-// --- INTERACTIONS ---
-
-// POST /api/interactions - Authenticated users only
-
-router.post('/sessions/:sessionId/vitals', authenticateToken, async (req, res) => {
-    const { sessionId } = req.params;
-    const { vital_sign, value, unit, is_alarm_triggered, alarm_type, source } = req.body;
-
-    if (!vital_sign || value === undefined) {
-        return res.status(400).json({ error: 'vital_sign and value are required' });
-    }
-
-    if (!await verifySessionOwnership(sessionId, req.user, res, { requireSession: true })) return;
-
-    dbAdapter.run(
-        `INSERT INTO vital_sign_history (session_id, vital_sign, value, unit, is_alarm_triggered, alarm_type, source, tenant_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [sessionId, vital_sign, value, unit || null, is_alarm_triggered ? 1 : 0, alarm_type || null, source || 'system', tenantId(req)],
-        function(err) {
-            if (err) return res.status(500).json({ error: err.message });
-            res.json({ id: this.lastID, message: 'Vital sign recorded' });
-        }
-    );
-});
-
-// GET /api/sessions/:sessionId/vitals - Get vital sign history for a session
-router.get('/sessions/:sessionId/vitals', authenticateToken, async (req, res) => {
-    const { sessionId } = req.params;
-    const { vital_sign, limit = 1000 } = req.query;
-
-    if (!await verifySessionOwnership(sessionId, req.user, res, { requireSession: true })) return;
-
-    let sql = `SELECT * FROM vital_sign_history WHERE session_id = ? AND tenant_id = ?`;
-    const params = [sessionId, tenantId(req)];
-
-    if (vital_sign) {
-        sql += ` AND vital_sign = ?`;
-        params.push(vital_sign);
-    }
-
-    sql += ` ORDER BY recorded_at DESC LIMIT ?`;
-    params.push(parseInt(limit));
-
-    dbAdapter.all(sql, params, (err, vitals) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ vitals });
-    });
-});
+// A second POST/GET `/sessions/:sessionId/vitals` pair used to live here, writing
+// and reading `vital_sign_history` with a `{vital_sign, value}` body. Express
+// dispatches the FIRST matching registration, so both were unreachable — the
+// session_vitals handlers above always answered. Worse than dead: a body shaped
+// for these handlers fell into the one above, where every field failed
+// Number.isFinite and an all-NULL row was silently written, and the
+// `vital_sign && value` 400-validation never ran.
+//
+// `vital_sign_history` therefore has no writer and never had one via the API. The
+// table remains (it is listed in the retention/purge sweeps) but nothing fills it.
+// If per-vital history is wanted, give it a path of its own — do not re-register
+// this one and expect it to answer.
 
 // --- CLINICAL NOTES ---
 

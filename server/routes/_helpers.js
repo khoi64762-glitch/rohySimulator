@@ -166,6 +166,25 @@ export function emailDomainAllowed(email, domains) {
 }
 
 /**
+ * The closing half of a date window: "this bound has not passed yet".
+ *
+ * A teacher who types 2026-03-31 into an "available until" box means the case is
+ * open THROUGH the 31st. SQLite reads a bare date as midnight, so a plain
+ * `datetime(bound) >= datetime('now')` closed the case at 00:00 on the 31st and
+ * silently ate the whole final day — including the deadline day of a class.
+ * A date-only bound therefore expires at the END of that day; a bound with a time
+ * component is respected to the second, because someone who wrote one meant it.
+ *
+ * `learningEventAggregates.isDateOnly` makes the identical distinction for the
+ * analytics filters. `column` is a trusted internal literal, never request input.
+ */
+function liveUntil(column) {
+    return `(${column} IS NULL OR
+             datetime(${column}, CASE WHEN length(${column}) = 10 THEN '+1 day' ELSE '+0 seconds' END)
+               > datetime('now'))`;
+}
+
+/**
  * SQL `EXISTS (...)` fragment: true when the given cases-row alias is assigned,
  * in-window, to a live active in-window membership of the bound user. Contains
  * exactly ONE bind placeholder (`?` for the student's user id). All time
@@ -187,11 +206,11 @@ export function cohortCaseVisibleExists(caseAlias = 'c') {
            AND cm.deleted_at IS NULL
            AND cm.status = 'active'
            AND (co.starts_at IS NULL OR datetime(co.starts_at) <= datetime('now'))
-           AND (co.ends_at IS NULL OR datetime(co.ends_at) >= datetime('now'))
+           AND ${liveUntil('co.ends_at')}
            AND (cc.available_from IS NULL OR datetime(cc.available_from) <= datetime('now'))
-           AND (cc.available_until IS NULL OR datetime(cc.available_until) >= datetime('now'))
+           AND ${liveUntil('cc.available_until')}
            AND (cm.enrolled_from IS NULL OR datetime(cm.enrolled_from) <= datetime('now'))
-           AND (cm.enrolled_until IS NULL OR datetime(cm.enrolled_until) >= datetime('now'))
+           AND ${liveUntil('cm.enrolled_until')}
     )`;
 }
 
@@ -207,6 +226,15 @@ export function cohortCaseVisibleExists(caseAlias = 'c') {
 export async function ensureAutoEnrollMemberships(userId, tenant_id) {
     if (!userId) return;
     try {
+        // The NOT EXISTS deliberately looks at EVERY membership row, live or
+        // soft-deleted. It used to filter `m.deleted_at IS NULL`, which meant a
+        // removed membership did not block a fresh insert — and because this runs
+        // on every LOGIN, a student a teacher had just unenrolled from an
+        // auto-enrol course was silently put back the next time they signed in.
+        // Back on the roster, back in the analytics, back in the case list. An
+        // unenrolment is a decision; a soft-deleted row is the record of it, and
+        // auto-enrolment must not overrule it. (Re-adding them by hand still works
+        // — upsertMember revives the row.)
         await dbRun(
             `INSERT INTO cohort_members (cohort_id, user_id)
              SELECT c.id, ?
@@ -216,7 +244,7 @@ export async function ensureAutoEnrollMemberships(userId, tenant_id) {
                 AND c.deleted_at IS NULL
                 AND NOT EXISTS (
                     SELECT 1 FROM cohort_members m
-                     WHERE m.cohort_id = c.id AND m.user_id = ? AND m.deleted_at IS NULL)`,
+                     WHERE m.cohort_id = c.id AND m.user_id = ?)`,
             [userId, tenant_id, userId]
         );
     } catch (err) {
@@ -853,9 +881,15 @@ export function verifySessionOwnership(sessionId, user, res, { requireSession = 
             }
             return resolve(true);
         }
-        if (hasRoleAtLeast(user, ROLE_RANKS.educator)) {
-            return resolve(true);
-        }
+        // Educators and above may reach any session — but only in their OWN
+        // tenant, and only one that exists. The old short-circuit returned true
+        // here without touching the DB, which meant an educator in tenant B
+        // passed the gate for a session id belonging to tenant A. Most callers
+        // re-scope their own queries by tenant and so degraded to an empty
+        // result, but the hand-rolled order routes did not — making this the
+        // hinge of a cross-tenant mutation. Rank widens WHOSE sessions you may
+        // touch; it never widens WHICH TENANT.
+        const staff = hasRoleAtLeast(user, ROLE_RANKS.educator);
         dbAdapter.get('SELECT user_id, tenant_id FROM sessions WHERE id = ? AND tenant_id = ?', [sessionId, user?.tenant_id || 1], (err, row) => {
             if (err) {
                 res.status(500).json({ error: err.message });
@@ -865,7 +899,7 @@ export function verifySessionOwnership(sessionId, user, res, { requireSession = 
                 res.status(404).json({ error: 'Session not found' });
                 return resolve(false);
             }
-            if (row.user_id !== user?.id) {
+            if (!staff && row.user_id !== user?.id) {
                 res.status(403).json({ error: 'Access denied: session not owned by user' });
                 return resolve(false);
             }

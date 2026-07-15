@@ -9,6 +9,24 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.7.9] — 2026-07-15
+
+### Fixed
+
+- **Session-running IDOR and tenant escapes (audit).** `GET
+  /sessions/:id/lab-results` now requires session ownership — it previously
+  carried `authenticateToken` and nothing else, so any logged-in student could
+  walk session ids and read another learner's results (the graded answer key).
+  Lab orders are bound to the session's own case (`AND case_id = ?`), so a client
+  can no longer order another case's — or tenant's — investigations. Exam findings
+  and treatment orders now persist the caller's `tenant_id` (they defaulted to
+  tenant 1, silently moving a tenant-2 learner's data out of their own tenant and
+  out of reach of the erasure purge), and take `case_id` from the session rather
+  than the request body. `verifySessionOwnership` scopes staff access to their own
+  tenant. Administering an order is now a compare-and-swap (409 on a double-fire)
+  and the client-supplied turnaround override is clamped, so `Infinity` can no
+  longer permanently brick an investigation.
+
 ## [2.7.8] — 2026-07-15
 
 ### Fixed

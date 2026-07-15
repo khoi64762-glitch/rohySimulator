@@ -28,6 +28,7 @@ import {
     mergeScenarioSource,
     parseAuditJson,
     redactRow,
+    resolveSessionTrinity,
     tenantId,
     verifySessionOwnership
 } from './_helpers.js';
@@ -842,13 +843,25 @@ router.post('/scenarios/seed', authenticateToken, requireAdmin, (req, res) => {
 // duplicates.
 router.post('/sessions/:sessionId/exam-findings', authenticateToken, async (req, res) => {
     const { sessionId } = req.params;
-    const { body_region, exam_type, finding, is_abnormal, audio_url, audio_played, case_id } = req.body;
+    const { body_region, exam_type, finding, is_abnormal, audio_url, audio_played } = req.body;
 
     if (!body_region || !exam_type || !finding) {
         return res.status(400).json({ error: 'body_region, exam_type, and finding are required' });
     }
 
     if (!await verifySessionOwnership(sessionId, req.user, res, { requireSession: true })) return;
+
+    // `case_id` used to be read from the request body, so a learner examining case
+    // 7 could file the finding against case 99 and skew that case's analytics. The
+    // session already knows which case it is — ask it. `tenant_id` was omitted from
+    // the INSERT entirely, defaulting every finding to tenant 1: a tenant-2
+    // learner's findings landed in tenant 1, where the right-to-erasure purge
+    // (WHERE tenant_id = ? AND user_id = ?) would never match them, and the finding
+    // would survive the deletion of the person who produced it.
+    const trinity = await resolveSessionTrinity(sessionId, tenantId(req));
+    if (!trinity.found) {
+        return res.status(404).json({ error: 'Session not found' });
+    }
 
     const existsSql = `SELECT id, finding, is_abnormal FROM physical_exam_findings
                        WHERE session_id = ? AND body_region = ? AND exam_type = ?
@@ -865,13 +878,14 @@ router.post('/sessions/:sessionId/exam-findings', authenticateToken, async (req,
         }
 
         const insertSql = `INSERT INTO physical_exam_findings
-                     (session_id, case_id, user_id, body_region, exam_type, finding, is_abnormal, audio_url, audio_played)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+                     (session_id, case_id, user_id, tenant_id, body_region, exam_type, finding, is_abnormal, audio_url, audio_played)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
         dbAdapter.run(insertSql, [
             sessionId,
-            case_id || null,
+            trinity.case_id,
             req.user.id,
+            tenantId(req),
             body_region,
             exam_type,
             finding,
