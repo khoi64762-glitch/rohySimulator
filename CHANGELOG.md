@@ -9,6 +9,16 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.7.14] — 2026-07-15
+
+### Changed
+
+- Regenerated the `docs/reference/**` reference from source now that the new
+  registration/approval routes and migration 0038 have landed (adds the
+  registration API page and refreshes the data/schema and config references), and
+  synced the i18n catalogues with the approval-queue UI strings. Keeps the
+  `docs:check` and `i18n:check` gates green.
+
 ## [2.7.13] — 2026-07-15
 
 ### Added

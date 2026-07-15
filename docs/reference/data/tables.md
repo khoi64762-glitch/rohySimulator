@@ -2,7 +2,7 @@
 
 > **Generated file — do not edit by hand.** Regenerate with `npm run docs:gen:data`. One section per table; columns in declaration order.
 
-**88 tables.**
+**91 tables.**
 
 ## `active_sessions`
 
@@ -1448,6 +1448,64 @@ Stores region special tests records.
 | `positive_finding` | TEXT | — | — |
 | `negative_finding` | TEXT | — | — |
 | `clinical_significance` | TEXT | — | — |
+
+## `registration_invite_uses`
+
+Stores registration invite uses records.
+
+**Introduced by:** migration `0037_registration_invites.sql`
+
+| Column | Type | Constraints | Added by |
+| --- | --- | --- | --- |
+| `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | — |
+| `invite_id` | INTEGER | NOT NULL REFERENCES registration_invites(id) | — |
+| `user_id` | INTEGER | REFERENCES users(id) | — |
+| `used_at` | DATETIME | DEFAULT CURRENT_TIMESTAMP | — |
+| `ip_address` | TEXT | — | — |
+
+## `registration_invites`
+
+Stores registration invites records.
+
+**Introduced by:** migration `0037_registration_invites.sql`
+
+**Cross-cutting:** `tenant-scoped` · `audit (created_at)`
+
+| Column | Type | Constraints | Added by |
+| --- | --- | --- | --- |
+| `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | — |
+| `tenant_id` | INTEGER | NOT NULL DEFAULT 1 | — |
+| `token` | TEXT | NOT NULL | — |
+| `role` | TEXT | NOT NULL DEFAULT 'student' | — |
+| `cohort_id` | INTEGER | REFERENCES cohorts(id) | — |
+| `expires_at` | DATETIME | — | — |
+| `never` | shown | publicly created_by INTEGER NOT NULL REFERENCES users(id) | — |
+| `created_at` | DATETIME | DEFAULT CURRENT_TIMESTAMP | — |
+| `revoked_at` | DATETIME | — | — |
+| `revoked_by` | INTEGER | REFERENCES users(id) | — |
+
+## `registration_requests`
+
+Stores registration requests records.
+
+**Introduced by:** migration `0038_registration_requests.sql`
+
+**Cross-cutting:** `tenant-scoped`
+
+| Column | Type | Constraints | Added by |
+| --- | --- | --- | --- |
+| `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | — |
+| `tenant_id` | INTEGER | NOT NULL DEFAULT 1 | — |
+| `username` | TEXT | NOT NULL | — |
+| `name` | TEXT | — | — |
+| `email` | TEXT | NOT NULL | — |
+| `password_hash` | TEXT | NOT NULL | — |
+| `requested_at` | DATETIME | DEFAULT CURRENT_TIMESTAMP | — |
+| `ip_address` | TEXT | — | — |
+| `decided_at` | DATETIME | — | — |
+| `decided_by` | INTEGER | REFERENCES users(id) | — |
+| `decision_note` | TEXT | — | — |
+| `shown` | to | nobody but admins user_id INTEGER REFERENCES users(id) -- the account created on approval | — |
 
 ## `scenario_events`
 

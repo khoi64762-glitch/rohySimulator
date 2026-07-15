@@ -2,7 +2,7 @@
 
 > **Generated file — do not edit by hand.** Produced by `scripts/docs-gen/gen-data.mjs` from `server/db.js`, `migrations/0001_initial.sql` (the bootstrap schema) and all `migrations/*.sql`. Regenerate with `npm run docs:gen:data`.
 
-**88 tables** in the durable data model.
+**91 tables** in the durable data model.
 
 > Note: `server/db.js` no longer holds inline `CREATE TABLE` DDL — it delegates to the migration runner. The canonical bootstrap schema is `migrations/0001_initial.sql`, treated here as the base schema. SQLite rebuild-scaffold tables (`*_new`/`*_old`) are intentionally excluded.
 
@@ -23,7 +23,7 @@ These columns recur across many tables and carry platform-wide semantics (see `C
 
 Schema evolves only through versioned `migrations/*.sql`. Each migration is classified **additive** (previous-version code still runs) or **destructive** in `migrations/MANIFEST.md`, which `bin/rohy-update` reads to decide whether to auto-apply. Default is additive-only; destructive changes follow a multi-release dance.
 
-Parsed **35 migration files** beyond the base schema (`0001_initial.sql`).
+Parsed **37 migration files** beyond the base schema (`0001_initial.sql`).
 
 | Migration | Class | Note |
 | --- | --- | --- |
@@ -63,6 +63,8 @@ Parsed **35 migration files** beyond the base schema (`0001_initial.sql`).
 | `0034_voice2_provider_follows_voice.sql` | additive | Voice 2.0 settings retirement (data-only, no schema change, re-run-safe). Carries an unambiguous legacy `default_voice_kokoro_*` value into `tts_default_voice_en`, then DELETEs the retired rows: `tts_provider` (the engine is now derived per voice by exact catalogue membership — VOICE2_PLAN.md), the gendered `default_voice_&lt;provider&gt;_&lt;gender&gt;` family, and any recreated `voice_&lt;provider&gt;_&lt;gender&gt;` slot rows (gender-suffix GLOBs on purpose — a bare `voice_%` would hit `voice_mode_enabled`). Case/persona `case_voice` values untouched. The new keys (`tts_default_voice_&lt;lang&gt;`, `tts_provider_enabled_&lt;p&gt;`) are seeded idempotently by boot code, not here. |
 | `0035_case_code.sql` | additive | Visible language-bearing case identifier: new nullable `cases.case_code TEXT` + partial unique index, backfilled as `&lt;LANG&gt;-&lt;zero-padded id&gt;` (numeric part = the untouched integer PK, so unique by construction). Also pins the now-immutable case language: `config.case_language` is normalized to a concrete registry code (absent/empty/unknown → `'en'`; a case never "follows the student's UI language" anymore). Malformed-JSON configs are left untouched and coded `EN-…`. Rows inserted after migrations (fresh-DB seeders) are stamped by the `ensureCaseCodes()` boot sweep. |
 | `0036_user_onboarding_settings.sql` | additive | Per-user onboarding/first-run prefs: one nullable `user_preferences.onboarding_settings JSON` column (`first_run_done`, `voice_mode`, `oyon_consent`). NULL = never onboarded, so every existing user sees the new first-run screen once (deliberate — it surfaces the previously silent emotion-capture consent). Single nullable ADD COLUMN; pre-migration code never selects it. |
+| `0037_registration_invites.sql` | additive | Registration invites: `registration_invites` (one plaintext `token` that serves as BOTH a `/register?invite=…` link and a typeable code — the platform cannot send email, so an invite is a copy-paste artifact like `cohorts.join_code`; carries role, optional auto-enrol `cohort_id`, `max_uses`/`uses`, `expires_at`, optional `email_pattern` that beats the global domain allowlist, and revocation) plus `registration_invite_uses` (the redemption ledger, kept separate so a revoked invite still shows who it admitted). Two new tables; nothing on existing tables changes and behaviour is unchanged until an admin mints an invite. |
+| `0038_registration_requests.sql` | additive | The registration approval queue — the storage `approval` mode never had. `approval` was selectable and advertised by the public probe, but `/auth/register` had no branch for it, so it behaved exactly like `open`: everyone in, unreviewed, with a token. New `registration_requests` table (username/email/hashed password + pending/approved/rejected + who decided and when). Deliberately NOT `users.status='pending'`: that column has a CHECK constraint SQLite cannot ALTER, so adding a state means rebuilding the most FK-referenced table in the schema — and a pending applicant is not a user, so keeping them out of `users` preserves the invariant that a row in `users` is someone who may sign in. Partial unique indexes on live rows only, so a rejected applicant may re-apply but two simultaneous requests for one username cannot both land. One new table; behaviour unchanged until an admin selects `approval`. |
 
 ## Tables by concern
 
@@ -124,7 +126,7 @@ Parsed **35 migration files** beyond the base schema (`0001_initial.sql`).
 
 ### Other
 
-`cohort_surveys`, `lesson_progress`, `lesson_sections`, `lessons`, `survey_answers`, `survey_questions`, `survey_responses`, `surveys`
+`cohort_surveys`, `lesson_progress`, `lesson_sections`, `lessons`, `registration_invite_uses`, `registration_invites`, `registration_requests`, `survey_answers`, `survey_questions`, `survey_responses`, `surveys`
 
 ---
 
