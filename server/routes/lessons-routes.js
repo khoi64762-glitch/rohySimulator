@@ -314,6 +314,24 @@ router.put('/cases/:caseId/course', authenticateToken, requireEducator, async (r
             if (!cohort) return fail(res, 404, 'Course not found');
         }
 
+        // Permission was checked on the course the case moves TO, and on nothing
+        // it moves OUT OF — while the transaction below soft-deletes every other
+        // live link the case has. Cases carry no per-owner gate, so any educator
+        // could pass another educator's case id with `cohortId: null` and silently
+        // rip it out of their course; with enforce_cohort_case_access on, every
+        // student in it lost access on the spot. Moving a case out of a course is
+        // an edit to THAT course, and has to be authorised as one.
+        const liveLinks = await dbAdapter.all(
+            `SELECT DISTINCT cohort_id FROM cohort_cases WHERE case_id = ? AND deleted_at IS NULL`,
+            [caseId]
+        );
+        for (const link of liveLinks) {
+            if (link.cohort_id === cohortId) continue;      // the target, already authorised
+            if (!await resolveManageableCohort(link.cohort_id, req)) {
+                return fail(res, 403, 'This case belongs to a course you do not manage');
+            }
+        }
+
         await dbAdapter.transaction(async () => {
             // Soft-delete every live link EXCEPT the target (all of them when
             // unassigning) …

@@ -9,6 +9,21 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.7.11] — 2026-07-15
+
+### Fixed
+
+- **Course-administration defects (audit).** A co-teacher now sees the courses
+  they co-teach in `GET /cohorts` — the list filtered on `owner_user_id` alone,
+  so a course a co-teacher could PATCH and assign cases to never appeared for
+  them. The cohort-case window PATCH now read-merges: sending only
+  `available_until` no longer wipes `available_from` (which quietly re-opened the
+  case earlier than the teacher set). Join codes are normalised on the way in
+  (case-folded, separators dropped), so `RKM7-PQ2H` and `rkm7pq2h` are the same
+  code. Moving a case out of a course you don't manage is refused (403) — the
+  permission was checked on the course the case moved *to* and on nothing it
+  moved out of, so any educator could strip another teacher's case from theirs.
+
 ## [2.7.10] — 2026-07-15
 
 ### Added
