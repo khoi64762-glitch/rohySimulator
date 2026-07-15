@@ -27,7 +27,6 @@ import {
     deriveVoiceProvider,
     providerHasVoice,
     getProviderStatus,
-    getAllProviderStatus,
     listVoicesForProvider,
     readVoiceSidecar,
 } from '../services/ttsProviders.js';

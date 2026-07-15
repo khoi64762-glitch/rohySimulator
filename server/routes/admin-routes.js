@@ -1895,6 +1895,7 @@ router.get('/platform-settings/affect', authenticateToken, async (req, res) => {
         const raw = await getPlatformSetting('affect_routing');
         res.json(normalizeAffectSettings(raw));
     } catch (err) {
+        (req.log || routesLlmLog).error('affect settings load failed', { error: err.message });
         res.status(500).json({ error: 'Failed to load affect settings' });
     }
 });
@@ -1943,6 +1944,7 @@ router.put('/platform-settings/affect', authenticateToken, requireAdmin, async (
         await setAuditedPlatformSetting(req, 'affect_routing', JSON.stringify(merged), 'update_affect_settings');
         res.json(merged);
     } catch (err) {
+        (req.log || routesLlmLog).error('affect settings update failed', { error: err.message });
         res.status(500).json({ error: 'Failed to update affect settings' });
     }
 });

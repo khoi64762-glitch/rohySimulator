@@ -9,6 +9,14 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.7.12] — 2026-07-15
+
+### Fixed
+
+- The affect-settings load/update handlers now log the error before returning
+  500 — the failure was previously swallowed, leaving a 500 with no trace. Also
+  dropped an unused `getAllProviderStatus` import from the proxy routes.
+
 ## [2.7.11] — 2026-07-15
 
 ### Fixed
