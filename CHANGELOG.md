@@ -9,6 +9,21 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.7.8] — 2026-07-15
+
+### Fixed
+
+- **ESLint is back to zero errors.** Cleared 12 pre-existing errors that were
+  blocking a clean lint gate: unused imports/props in `App.jsx`,
+  `InvestigationWorklist.jsx`, `LanguageContext.jsx`, a server test, and the
+  vendored `lessons/**` editors; one unnecessary regex escape in the lessons
+  `sanitize.js` URI allow-list (semantically identical); and a real bug in the
+  lessons `SurveyManager` — the injected `onViewResponses` handler was destructured
+  by the parent but never threaded to `SurveysTable`, so the "Responses" row action
+  referenced an undefined variable (a `ReferenceError` on click, masked only because
+  it fell through to the LAILA URL). The handler is now passed down. Warnings are
+  untouched; behaviour is otherwise unchanged.
+
 ## [2.7.7] — 2026-07-14
 
 ### Added

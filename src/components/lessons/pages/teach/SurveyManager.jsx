@@ -361,6 +361,7 @@ export const SurveyManager = ({ classroomId, onViewResponses } = {}) => {
       <SurveysTable
         surveys={surveys}
         courseId={courseId}
+        onViewResponses={onViewResponses}
         onOpenEdit={openEditModal}
         onTogglePublish={handleTogglePublish}
         onAskDelete={s => {
@@ -787,6 +788,7 @@ export const SurveyManager = ({ classroomId, onViewResponses } = {}) => {
 const SurveysTable = ({
   surveys,
   courseId,
+  onViewResponses,
   onOpenEdit,
   onTogglePublish,
   onAskDelete,

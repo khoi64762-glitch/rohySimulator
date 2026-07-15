@@ -26,7 +26,7 @@ import { McqNode } from './McqNodeExtension';
  * section seeded with a single media node (image/video/MCQ) renders/authors
  * correctly. Autosaves to `updateSection(sectionId, { content })`.
  */
-export const SectionBodyEditor = ({ sectionId, initialContent, courseId, registerFlush }) => {
+export const SectionBodyEditor = ({ sectionId, initialContent, registerFlush }) => {
   const { t } = useTranslation('teaching');
   const { isDark } = useTheme();
   const lastSavedRef = useRef(initialContent);

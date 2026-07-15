@@ -21,7 +21,7 @@ export const sanitizeHtml = (dirty) => {
       'href', 'src', 'alt', 'title', 'class', 'id',
       'target', 'rel', 'width', 'height',
     ],
-    ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
+    ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i,
     ALLOW_DATA_ATTR: false,
     ADD_ATTR: ['target'],
     FORBID_TAGS: ['script', 'style', 'iframe', 'form', 'input', 'object', 'embed'],

@@ -33,7 +33,7 @@ import activityLogger from '../../services/activityLogger';
  */
 // TODO(mount): onDone (was router.push after save/create/delete) and onBack
 // are injected by the mounting layer to perform real navigation.
-export const LectureEditor = ({ classroomId, lectureId, onDone = () => {}, onBack = () => {} }) => {
+export const LectureEditor = ({ classroomId, lectureId, onDone = () => {} }) => {
   const { t } = useTranslation(['teaching', 'common', 'navigation', 'courses']);
   const courseId = classroomId;
   const isNew = !lectureId;

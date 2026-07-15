@@ -10,7 +10,6 @@
 // catalogue router. A collision here fails the BUILD, not the runtime.
 
 import { describe, it, expect } from 'vitest';
-import path from 'node:path';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 

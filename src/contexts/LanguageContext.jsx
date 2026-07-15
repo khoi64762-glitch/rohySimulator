@@ -13,7 +13,7 @@
 // The context carries a usable English default so components render
 // unchanged outside the provider (unit tests, storybook-style harnesses).
 
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useAuth } from './AuthContext';
 import { apiFetch, apiPut } from '../services/apiClient';
 import { LANGUAGES, DEFAULT_LANGUAGE, isKnownLanguage } from '../i18n/languages';

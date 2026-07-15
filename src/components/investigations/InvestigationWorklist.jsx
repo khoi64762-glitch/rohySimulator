@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { CheckCircle, ChevronRight, Clock, Eye, Inbox } from 'lucide-react';
-import { formatDate, formatTime, formatDateTime } from '../../utils/formatters';
+import { formatDate } from '../../utils/formatters';
 
 // Right-rail worklist used by InvestigationsScreen. Splits orders into
 // Pending / Ready / Viewed cards so historical results stay reachable.
