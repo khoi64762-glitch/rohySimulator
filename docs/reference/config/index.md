@@ -24,7 +24,7 @@ The following variables carry credentials or signing material. Never commit them
 | Variable | Required | Default | Purpose | Source |
 | --- | --- | --- | --- | --- |
 | `HTTPS_PORT` | No | — | HTTPS listen port (used when TLS cert/key are set). | `server/server.js:54` |
-| `NODE_ENV` | No | `development` | Runtime mode; `production` tightens defaults and enables prod-only validation. | `server/logger.js:40`<br>`server/logger.js:41`<br>`server/middleware/csrf.js:50`<br>_+10 more_ |
+| `NODE_ENV` | No | `development` | Runtime mode; `production` tightens defaults and enables prod-only validation. | `server/logger.js:40`<br>`server/logger.js:41`<br>`server/middleware/csrf.js:50`<br>_+11 more_ |
 | `PORT` | No | — | HTTP listen port. | `server/server.js:46` |
 
 ## Auth/security
@@ -59,7 +59,7 @@ The following variables carry credentials or signing material. Never commit them
 | `ROHY_LOG_LEVEL` | No | `info` | Server log verbosity (Rohy-prefixed alias). | `server/logger.js:27`<br>`server/observability.js:17` |
 | `ROHY_LOG_SKIP_PATHS` | No | — | Comma-separated request paths excluded from access logging. | `server/observability.js:46` |
 | `ROHY_ROUTE_TIMEOUT_MS` | No | — | Per-route request timeout (ms). | `server/middleware/routeTimeout.js:38` |
-| `ROHY_SHUTDOWN_GRACE_MS` | No | — | Graceful-shutdown drain window (ms). | `server/server.js:360` |
+| `ROHY_SHUTDOWN_GRACE_MS` | No | — | Graceful-shutdown drain window (ms). | `server/server.js:367` |
 | `ROHY_SLOW_QUERY_MS` | No | — | Threshold (ms) above which a DB query is logged as slow. | `server/observability.js:22`<br>`server/observability.js:29` |
 | `VERBOSE` | No | — | Extra console diagnostics when truthy. | `scripts/rocketbox-convert/convert.mjs:135` |
 
