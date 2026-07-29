@@ -55,6 +55,8 @@ below for traceability; they were not published as separate GitHub releases.
   logging, and a broken lesson survey response action.
 - Corrected account lockout timestamp handling east of UTC, refused suspended
   accounts before token creation, and aligned client/server password rules.
+- Corrected hard deletion of auto-enrolled users by removing their course
+  membership inside the same cleanup transaction.
 - Corrected LLM error-message namespace extraction so the i18n gate no longer
   creates empty duplicate keys in the shared catalogue.
 - Added regression coverage for registration pathways, course administration,

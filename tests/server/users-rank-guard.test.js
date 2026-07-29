@@ -126,8 +126,41 @@ describe('user-management target-rank guards', () => {
         });
         expect(edit.status).toBe(200);
 
+        const db = await openDb(server.dbPath);
+        let membershipId;
+        try {
+            const cohort = await pRun(
+                db,
+                `INSERT INTO cohorts (name, owner_user_id, tenant_id)
+                 VALUES ('Delete cleanup cohort', ?, 1)`,
+                [ids.adminA]
+            );
+            const membership = await pRun(
+                db,
+                'INSERT INTO cohort_members (cohort_id, user_id) VALUES (?, ?)',
+                [cohort.lastID, ids.student]
+            );
+            membershipId = membership.lastID;
+        } finally {
+            await closeDb(db);
+        }
+
         const del = await adminA(`/api/users/${ids.student}`, { method: 'DELETE' });
         expect(del.status).toBe(200);
+
+        const verifyDb = await openDb(server.dbPath);
+        try {
+            const membership = await new Promise((resolve, reject) => {
+                verifyDb.get(
+                    'SELECT id FROM cohort_members WHERE id = ?',
+                    [membershipId],
+                    (err, row) => (err ? reject(err) : resolve(row))
+                );
+            });
+            expect(membership).toBeUndefined();
+        } finally {
+            await closeDb(verifyDb);
+        }
     });
 
     it('keeps the pre-existing guards intact (status + bulk-action on a peer)', async () => {
