@@ -229,6 +229,13 @@ function startHttpsServer(port) {
 // disabled it. Skipped only on an explicit `tts_provider_enabled_kokoro=0`
 // (a deliberately kokoro-free deployment shouldn't pay the load).
 function maybeWarmupKokoro() {
+    // Test servers run in parallel and exercise TTS through explicit fake
+    // providers. Letting every worker warm/download the real ~330 MB model
+    // into one shared transformers cache can corrupt the in-flight ONNX file
+    // and makes unrelated route tests network-dependent. On-demand synthesis
+    // remains available to dedicated service tests; only boot warmup is skipped.
+    if (process.env.NODE_ENV === 'test') return;
+
     dbAdapter.get(
         "SELECT setting_value FROM platform_settings WHERE setting_key = 'tts_provider_enabled_kokoro'",
         (err, row) => {
