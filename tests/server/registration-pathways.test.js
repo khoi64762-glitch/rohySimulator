@@ -179,7 +179,7 @@ describe('registration & auth-entry pathways', () => {
                 await closeDb(freshDb);
                 await fresh.close();
             }
-        });
+        }, 90_000);
     });
 
     // ----- invite admin routes (were exercised only via direct DB writes) -

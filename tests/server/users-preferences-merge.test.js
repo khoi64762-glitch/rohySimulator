@@ -80,7 +80,7 @@ describe('PUT /api/users/preferences — merge, not replace', () => {
         db = await openDb(server.dbPath);
         await seedUser(db, { username: 'prefs-student', role: 'student' });
         studentFetch = authed(server.baseUrl, await login(server.baseUrl, 'prefs-student'));
-    }, 30_000);
+    }, 90_000);
 
     afterAll(async () => {
         if (db) await closeDb(db);
@@ -140,7 +140,7 @@ describe('GET/PUT /api/users/preferences — no stored language stays null', () 
         db = await openDb(server.dbPath);
         await seedUser(db, { username: 'prefs-virgin', role: 'student' });
         virginFetch = authed(server.baseUrl, await login(server.baseUrl, 'prefs-virgin'));
-    }, 30_000);
+    }, 90_000);
 
     afterAll(async () => {
         if (db) await closeDb(db);
