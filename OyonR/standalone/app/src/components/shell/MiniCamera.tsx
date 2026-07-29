@@ -1,5 +1,6 @@
-import { useEffect, useRef } from 'react';
-import { Pause, Play, Square, X, EyeOff, Loader2 } from 'lucide-react';
+import { useCallback, useEffect, useRef } from 'react';
+import { Camera, Pause, Play, Square, X, Loader2 } from 'lucide-react';
+import { useNavigate } from '@tanstack/react-router';
 import { useRuntime } from '@/lib/RuntimeProvider';
 import { FaceOverlay } from '@/components/capture/FaceOverlay';
 import { CalibrateButton } from '@/components/capture/CalibrateButton';
@@ -31,6 +32,19 @@ export interface MiniCameraProps {
 
 export function MiniCamera({ onHide, onShow, collapsedPill }: MiniCameraProps) {
   const runtime = useRuntime();
+  const navigate = useNavigate();
+
+  /*
+   * Starting the camera goes to Live. The dock is reachable from every route,
+   * so you could previously start a capture while sitting on Settings or a
+   * retrospective Analytics view and see nothing happen — the signal was
+   * flowing, but every readout for it was on another screen. Starting capture
+   * is a statement of intent to watch it.
+   */
+  const startAndShowLive = useCallback(() => {
+    void runtime.start();
+    void navigate({ to: '/live' });
+  }, [runtime, navigate]);
   const localRef = useRef<HTMLVideoElement | null>(null);
 
   // Bridge: keep runtime.videoRef pointing at the only on-screen video so
@@ -64,11 +78,11 @@ export function MiniCamera({ onHide, onShow, collapsedPill }: MiniCameraProps) {
       <button
         type="button"
         onClick={onShow}
-        className="fixed bottom-4 right-4 z-dock flex items-center gap-1.5 rounded-full border border-line bg-surface-1 px-3 py-1.5 text-xs text-ink-1 shadow-popover hover:bg-surface-2"
+        className="fixed bottom-4 left-4 z-modal flex items-center gap-2 rounded-full border border-status-info/40 bg-surface-1 px-4 py-2 text-sm font-medium text-status-info shadow-popover hover:bg-surface-2"
         aria-label="Show camera dock"
       >
-        <EyeOff className="size-3.5" aria-hidden="true" />
-        Show preview
+        <Camera className="size-4" aria-hidden="true" />
+        Open camera preview
       </button>
     );
   }
@@ -182,7 +196,7 @@ export function MiniCamera({ onHide, onShow, collapsedPill }: MiniCameraProps) {
           {idle || errored ? (
             <button
               type="button"
-              onClick={runtime.start}
+              onClick={startAndShowLive}
               disabled={initializing}
               className="inline-flex items-center gap-1 rounded bg-accent px-2 py-1 text-[11px] font-medium text-white hover:opacity-90 disabled:opacity-50"
               aria-label="Start"

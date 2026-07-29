@@ -13,6 +13,12 @@ const PEER_DEPENDENCY_HINT =
   "Ensure `webgazer` is installed and bundled with this app. " +
   'WebGazer is GPL-3.0-or-later licensed; see NOTICE.md for the license disclosure.';
 
+// WebGazer checks `hostname !== "localhost"` instead of the browser's secure-
+// context result, so it opens this modal on valid loopback development hosts
+// such as 127.0.0.1. Real camera/start failures already flow through begin()
+// and the adapter status; this obsolete alert adds no actionable signal.
+const WEBGAZER_HTTPS_ALERT = 'WebGazer works only over https.';
+
 export class WebGazerAdapter {
   constructor(options = {}) {
     if (typeof options.onGaze !== 'function') {
@@ -89,7 +95,7 @@ export class WebGazerAdapter {
     if (stream) this._callChain('setStaticVideo', stream);
     this._status = 'starting';
     try {
-      await Promise.resolve(this._webgazer.begin?.());
+      await Promise.resolve(this._beginWithoutHttpsAlert());
       this._lastError = null;
       this._started = true;
       this._status = 'inference';
@@ -217,6 +223,35 @@ export class WebGazerAdapter {
     const fn = this._webgazer?.[method];
     if (typeof fn !== 'function') return null;
     return fn.apply(this._webgazer, args);
+  }
+
+  /**
+   * Suppress only WebGazer's hard-coded protocol modal while begin() enters.
+   * The dependency calls alert synchronously at the top of begin(), so the
+   * global override exists for that call only. Every other alert is forwarded
+   * and the original function is restored even when begin() throws.
+   */
+  _beginWithoutHttpsAlert() {
+    const host = typeof globalThis !== 'undefined' ? globalThis : null;
+    const originalAlert = host?.alert;
+    let overridden = false;
+    if (host && typeof originalAlert === 'function') {
+      try {
+        host.alert = (...args) => {
+          if (String(args[0] ?? '').startsWith(WEBGAZER_HTTPS_ALERT)) return;
+          return originalAlert.apply(host, args);
+        };
+        overridden = host.alert !== originalAlert;
+      } catch { /* an immutable host alert is unusual; begin still proceeds */ }
+    }
+
+    try {
+      return this._callChain('begin');
+    } finally {
+      if (host && overridden) {
+        try { host.alert = originalAlert; } catch { /* best effort */ }
+      }
+    }
   }
 
   _handlePrediction(prediction, elapsedTime) {

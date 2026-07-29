@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { createRoute } from '@tanstack/react-router';
+import { Keyboard, Mic } from 'lucide-react';
 import { rootRoute } from './root';
 import { PageHeader } from '@/components/shell/PageHeader';
 import { Section } from '@/components/ui/Section';
@@ -7,12 +8,51 @@ import { Metric, type MetricTone } from '@/components/ui/Metric';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { StatusPill } from '@/components/ui/StatusPill';
+import { Button } from '@/components/ui/Button';
+import { TypingTestModal } from '@/components/typing/TypingTestModal';
+import { VoiceTestModal } from '@/components/voice/VoiceTestModal';
+import { useVoiceEnabled } from '@/components/voice/useVoiceTest';
 import { useRuntime } from '@/lib/RuntimeProvider';
 import { AffectPad } from '@/components/charts/AffectPad';
 import { EmotionTimeline } from '@/components/charts/EmotionTimeline';
 import { LiveGazeHeatmap } from '@/components/charts/LiveGazeHeatmap';
+import {
+  LiveHeartRateTile,
+  LiveHeadPoseTile,
+  LivePostureTile,
+} from '@/components/live/LiveSignals';
+import { cn } from '@/lib/cn';
+import { symmetricColumns } from '@/lib/gridColumns';
+import { vitalTone } from '@/lib/vitalsTone';
 import { emotionColor } from '@/lib/emotionColors';
 import { deriveFrameQuality } from '@/lib/frameQuality';
+import { respirationPhase } from '@/lib/respirationState.js';
+
+/*
+ * Every card in the two 3-up grids shares one height, so Signals and Structure
+ * read as one uniform grid rather than two rows of different depths. `h-full`
+ * makes the card fill its (stretched) grid cell and the min-height sets the
+ * common floor; CARD_BODY lets the content area absorb the slack.
+ *
+ * The floor must sit AT the tallest natural content, not below it: a shorter
+ * floor lets the taller row grow past it, which is the ragged layout this
+ * replaces. It must also stay TIGHT, because every tile pays for it — an
+ * over-tall floor turns each card into a mostly-empty box. So the tiles fill
+ * their height (centre or distribute) rather than pooling at the top, and the
+ * floor is only as tall as the affect pad actually needs.
+ */
+const CARD = 'flex h-full min-h-[19rem] flex-col';
+const CARD_BODY = 'flex-1 min-h-0';
+
+/* The top pair — "Now" and the attention heatmap — is taller than the 3-up
+ * tiles because both carry a primary visual, but the two share one height with
+ * each other so they read as a matched pair. */
+/* Number of tiles in the Window-summary band. Kept next to the grid so the
+ * column count and the tile count cannot drift apart. */
+const SUMMARY_TILES = 9;
+
+const PAIR = 'flex h-full min-h-[24rem] flex-col';
+const PAIR_BODY = 'flex-1 min-h-0';
 
 /*
  * Live — the page-shape every analytic follows:
@@ -30,6 +70,10 @@ function LivePage() {
     lastWindow,
     lastPrediction,
     lastEye,
+    lastFacial,
+    lastPosture,
+    lastHeartRate,
+    lastRespiration,
     lastGaze,
     recentWindows,
     windowCount,
@@ -40,12 +84,24 @@ function LivePage() {
     settings,
     start,
     gazeDiag,
+    sessionId,
   } = useRuntime();
   const cameraRunning = status === 'running';
+  // Typing test modal — a diagnostic tool for the typing pipeline; mounting
+  // the modal starts an episode, unmounting tears it down (see the component).
+  const [typingTestOpen, setTypingTestOpen] = useState(false);
+  // Voice test modal — the voice pipeline's diagnostic tool. Opening the
+  // dialog touches NO microphone: recording sits behind the library's
+  // activation gate (voice_enabled + host + per-turn user action), enforced
+  // and explained inside the modal. The button badge shows the gate state so
+  // it is obvious BEFORE opening why recording will be unavailable.
+  const [voiceTestOpen, setVoiceTestOpen] = useState(false);
+  const voiceEnabled = useVoiceEnabled();
 
-  // Opt-in, in-tab-only attention heatmap. Off by default; nothing is
-  // accumulated until the user explicitly turns it on (see disclosure).
-  const [heatmapOptIn, setHeatmapOptIn] = useState(false);
+  // The attention heatmap is always on. It used to be behind an opt-in toggle,
+  // which the project data policy explicitly forbids ("No signal gates. No
+  // opt-in flags, no default-off events") — consent is handled outside the app,
+  // and this is display-only anyway: nothing here is stored or transmitted.
 
   // Derive metric values once, with shared null-reason logic.
   const noWindow = !lastWindow;
@@ -59,6 +115,95 @@ function LivePage() {
           : undefined;
 
   const engagement = lastWindow?.engagement ?? null;
+  // Window-level sensing blocks. Typed loosely because the hand-written
+  // EmotionWindow .d.ts predates the v3 pipelines (see types/index.d.ts).
+  const windowHeartRate = (lastWindow as { heart_rate?: {
+    bpm_tracked?: number | null;
+    bpm_robust?: number | null;
+    bpm_mean?: number | null;
+    confidence_mean?: number | null;
+    analysis_window_seconds?: number | null;
+  } } | null)
+    ?.heart_rate ?? null;
+  const windowFacial = (lastWindow as { facial?: { facing_screen_ratio?: number | null } } | null)
+    ?.facial ?? null;
+  const windowRespiration = (lastWindow as { respiration?: {
+    brpm_mean?: number | null;
+    confidence_mean?: number | null;
+    analysis_window_seconds?: number | null;
+  } } | null)
+    ?.respiration ?? null;
+  // Plausibility bands, read off the live settings object (falling back to the
+  // documented defaults) so display colour and estimator behaviour agree.
+  const rs = settings as unknown as Record<string, unknown>;
+  const numOr = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
+  const hrBand = {
+    min: numOr(rs.heart_rate_plausible_min_bpm, 60),
+    max: numOr(rs.heart_rate_plausible_max_bpm, 100),
+  };
+  const brBand = {
+    min: numOr(rs.respiration_plausible_min_brpm, 9),
+    max: numOr(rs.respiration_plausible_max_brpm, 24),
+  };
+  // The large live values use the same confidence-weighted window summaries
+  // that are stored and analyzed. Per-sample status still controls colour and
+  // whether the value is marked current/held; a weak update never erases the
+  // last weighted physiological estimate.
+  const weightedHeartBpm = windowHeartRate?.bpm_tracked
+    ?? windowHeartRate?.bpm_robust
+    ?? windowHeartRate?.bpm_mean
+    ?? null;
+  const displayedHeartRate = lastHeartRate && weightedHeartBpm != null
+    ? {
+        ...lastHeartRate,
+        bpm: weightedHeartBpm,
+        confidence: windowHeartRate?.confidence_mean ?? lastHeartRate.confidence,
+        windowSeconds: windowHeartRate?.analysis_window_seconds ?? lastHeartRate.windowSeconds,
+      }
+    : lastHeartRate;
+  const displayedRespiration = lastRespiration && windowRespiration?.brpm_mean != null
+    ? {
+        ...lastRespiration,
+        brpm: windowRespiration.brpm_mean,
+        confidence: windowRespiration.confidence_mean ?? lastRespiration.confidence,
+        windowSeconds: windowRespiration.analysis_window_seconds ?? lastRespiration.windowSeconds,
+      }
+    : lastRespiration;
+  const heartEnabled = Boolean(settings.heart_rate_enabled);
+  const breathingEnabled = Boolean(settings.respiration_enabled);
+  const enabledVitalCount = Number(heartEnabled) + Number(breathingEnabled);
+  const visibleVitalCount = Number(heartEnabled && lastHeartRate?.bpm != null)
+    + Number(breathingEnabled && lastRespiration?.brpm != null);
+  const liveVitalCount = Number(heartEnabled
+      && lastHeartRate?.bpm != null
+      && lastHeartRate.current !== false
+      && lastHeartRate.qualityAccepted !== false)
+    + Number(breathingEnabled
+      && lastRespiration?.brpm != null
+      && lastRespiration.current !== false
+      && lastRespiration.qualityAccepted !== false);
+  const breathingPhase = respirationPhase(lastRespiration);
+  const vitalState: { label: string; tone: MetricTone; reason?: string } = enabledVitalCount === 0
+    ? { label: 'off', tone: 'null', reason: 'disabled in Settings' }
+    : !cameraRunning
+      ? { label: 'idle', tone: 'null', reason: 'start capture' }
+      : liveVitalCount === enabledVitalCount
+        ? { label: 'live', tone: 'ok' }
+        : visibleVitalCount > 0
+          ? {
+              label: liveVitalCount > 0 ? 'partial' : 'holding',
+              tone: 'warn',
+              reason: liveVitalCount > 0 ? 'one rate has low quality' : 'showing last or low-quality readings',
+            }
+          : lastHeartRate?.ready === true || breathingPhase === 'unconfirmed'
+            ? {
+                label: 'check signal',
+                tone: 'warn',
+                reason: lastHeartRate?.statusReason ?? lastRespiration?.statusReason ?? 'rate rejected',
+              }
+            : breathingEnabled && breathingPhase === 'confirming'
+              ? { label: 'confirming', tone: 'info', reason: 'checking rate stability' }
+            : { label: 'acquiring', tone: 'info', reason: 'buffers filling' };
   const dominantPct = lastWindow
     ? Math.max(...Object.values(lastWindow.probabilities ?? {}))
     : null;
@@ -67,19 +212,48 @@ function LivePage() {
   return (
     <>
       <PageHeader
-        eyebrow="Workflow · Step 3"
         title="Live"
         description="Watch the signal as it streams. Engagement KPIs, current prediction, and a spatial gaze tile."
         actions={
-          <StatusPill tone={statusTone(status)} size="md">
-            {status} · {windowCount} window{windowCount === 1 ? '' : 's'}
-          </StatusPill>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => setTypingTestOpen(true)}>
+              <Keyboard className="size-3.5" aria-hidden="true" />
+              Test typing
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setVoiceTestOpen(true)}
+              title={
+                voiceEnabled
+                  ? 'Open the voice pipeline diagnostic (recording starts only from the dialog)'
+                  : 'voice_enabled is off — the dialog explains the gate and holds the explicit enable control; no microphone is touched until enabled AND started'
+              }
+            >
+              <Mic className="size-3.5" aria-hidden="true" />
+              Test voice{voiceEnabled ? '' : ' (disabled)'}
+            </Button>
+            <StatusPill tone={statusTone(status)} size="md">
+              {status} · {windowCount} window{windowCount === 1 ? '' : 's'}
+            </StatusPill>
+          </div>
         }
       />
 
+      {typingTestOpen ? (
+        <TypingTestModal sessionId={sessionId} onClose={() => setTypingTestOpen(false)} />
+      ) : null}
+
+      {voiceTestOpen ? (
+        <VoiceTestModal sessionId={sessionId} onClose={() => setVoiceTestOpen(false)} />
+      ) : null}
+
       <div className="flex flex-col gap-6">
+        {/* The two live-stream views, paired: WHAT the affect is right now and
+            WHERE attention has pooled. Equal columns, one shared height. */}
+        <div className="grid gap-4 lg:grid-cols-2">
         {/* Per-sample live readout — updates ~1Hz, far faster than 10s windows. */}
-        <Card>
+        <Card className={PAIR}>
           <CardHeader>
             <CardTitle>Now (per-sample, ~1Hz)</CardTitle>
             <StatusPill tone={lastPrediction ? 'ok' : 'null'} reason={lastPrediction ? undefined : 'waiting for first sample'}>
@@ -88,7 +262,7 @@ function LivePage() {
                 : 'no sample'}
             </StatusPill>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className={`${PAIR_BODY} space-y-3`}>
             {lastPrediction ? (
               <>
                 <div className="flex items-center gap-3">
@@ -127,8 +301,7 @@ function LivePage() {
               <div className="rounded border border-line bg-surface-0 p-2 text-xs text-ink-2">
                 <span className="font-medium text-ink-1">Gaze (live):</span>{' '}
                 x={lastGaze.x.toFixed(3)}, y={lastGaze.y.toFixed(3)} · quality{' '}
-                {lastGaze.quality.toFixed(2)} · {gazeSampleCount} samples · state{' '}
-                <code className="font-mono">{lastGaze.state ?? '—'}</code>
+                {lastGaze.quality.toFixed(2)} · {gazeSampleCount} samples
               </div>
             ) : (
               <div className="rounded border border-dashed border-line bg-surface-1 p-2 text-xs text-ink-3">
@@ -155,12 +328,124 @@ function LivePage() {
           </CardContent>
         </Card>
 
+        <Card className={PAIR}>
+          <CardHeader>
+            <CardTitle>Live attention heatmap</CardTitle>
+            <StatusPill tone={cameraRunning || mockGaze ? 'ok' : 'null'} reason={cameraRunning || mockGaze ? undefined : 'no gaze stream'}>
+              {cameraRunning || mockGaze ? 'accumulating' : 'idle'}
+            </StatusPill>
+          </CardHeader>
+          <CardContent className={`${PAIR_BODY} flex flex-col gap-2`}>
+            <LiveGazeHeatmap className="min-h-0 flex-1" />
+            <div className="flex flex-wrap items-center gap-2 text-[11px] text-ink-3">
+              {gazeDiag?.error ? (
+                <span className="text-status-bad">
+                  ⚠ gaze adapter failed: {gazeDiag.error} — use “Demo gaze stream” meanwhile
+                </span>
+              ) : cameraRunning ? (
+                <span className="text-status-ok">● live webcam gaze — no calibration needed for the heatmap</span>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void start();
+                    }}
+                    className="rounded border border-line bg-surface-1 px-2 py-1 font-medium text-ink-1 hover:bg-surface-2"
+                  >
+                    ▶ Start camera
+                  </button>
+                  <span>or use “Demo gaze stream” in the Live gaze card</span>
+                </>
+              )}
+              <span className="ml-auto">in-tab only · not stored, not sent</span>
+            </div>
+          </CardContent>
+        </Card>
+        </div>
+
+        <Section
+          id="live-signals"
+          title="Signals (per-sample)"
+          description="The v3 learner-facing signals as they stream: rPPG heart rate and breathing (one ROI colour signal, two bands), head pose + action units, and body posture. Sensor-quality checks, including lighting, live on Test."
+        >
+          <div className="grid gap-4 md:grid-cols-3">
+            <Card className={CARD}>
+              <CardHeader>
+                <CardTitle>Heart rate &amp; breathing</CardTitle>
+                <StatusPill
+                  tone={vitalState.tone}
+                  reason={vitalState.reason}
+                >
+                  {vitalState.label}
+                </StatusPill>
+              </CardHeader>
+              <CardContent className={CARD_BODY}>
+                <LiveHeartRateTile
+                  enabled={Boolean(settings.heart_rate_enabled)}
+                  active={cameraRunning}
+                  sample={displayedHeartRate}
+                  respirationEnabled={Boolean(settings.respiration_enabled)}
+                  respiration={displayedRespiration}
+                  // Bands come from the RUNTIME settings, so the colour matches
+                  // the prior the tracker actually applies rather than a
+                  // hardcoded copy that could silently drift from it.
+                  plausibleMinBpm={hrBand.min}
+                  plausibleMaxBpm={hrBand.max}
+                  plausibleMinBrpm={brBand.min}
+                  plausibleMaxBrpm={brBand.max}
+                />
+              </CardContent>
+            </Card>
+            <Card className={CARD}>
+              <CardHeader>
+                <CardTitle>Head pose &amp; action units</CardTitle>
+                <StatusPill
+                  tone={lastFacial?.valid ? 'ok' : 'null'}
+                  reason={settings.facial_signals_enabled ? undefined : 'disabled in Settings'}
+                >
+                  {settings.facial_signals_enabled
+                    ? lastFacial?.valid ? 'live' : 'no face'
+                    : 'off'}
+                </StatusPill>
+              </CardHeader>
+              <CardContent className={CARD_BODY}>
+                <LiveHeadPoseTile
+                  enabled={Boolean(settings.facial_signals_enabled)}
+                  sample={lastFacial}
+                />
+              </CardContent>
+            </Card>
+            <Card className={CARD}>
+              <CardHeader>
+                <CardTitle>Body posture</CardTitle>
+                <StatusPill
+                  tone={lastPosture?.valid ? 'ok' : 'null'}
+                  reason={settings.posture_tracking_enabled ? undefined : 'disabled in Settings'}
+                >
+                  {settings.posture_tracking_enabled
+                    ? lastPosture?.valid ? 'live' : 'no torso'
+                    : 'off'}
+                </StatusPill>
+              </CardHeader>
+              <CardContent className={CARD_BODY}>
+                <LivePostureTile
+                  enabled={Boolean(settings.posture_tracking_enabled)}
+                  sample={lastPosture}
+                />
+              </CardContent>
+            </Card>
+          </div>
+        </Section>
+
         <Section
           id="live-summary"
           title="Window summary (every 10s)"
           description="At-a-glance signal health for the most recent aggregate window."
         >
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+          {/* 10 tiles -> 5 columns x 2 full rows. Derived, not hardcoded: a
+              fixed column count goes ragged the moment a tile is added. */}
+          <div className={cn('grid grid-cols-2 gap-3 md:grid-cols-3', symmetricColumns(SUMMARY_TILES))}>
             <Metric
               label="Dominant"
               value={lastWindow?.dominant_emotion ?? null}
@@ -210,6 +495,46 @@ function LivePage() {
               }
               reason={reason}
             />
+            {/* Window-level BPM is the number to trust: cross-window tracked,
+                plausibility-gated. The per-sample tile above is the raw feed. */}
+            <Metric
+              label="BPM (tracked)"
+              value={windowHeartRate?.bpm_tracked ?? null}
+              format={(v) => v.toFixed(0)}
+              hint={
+                windowHeartRate?.bpm_tracked == null && windowHeartRate != null
+                  ? 'settling'
+                  : 'cross-window'
+              }
+              tone={vitalTone({
+                value: windowHeartRate?.bpm_tracked,
+                confidence: 1, // the tracked value is already quality-gated upstream
+                min: hrBand.min,
+                max: hrBand.max,
+              }).tone}
+              reason={settings.heart_rate_enabled ? reason : 'heart rate disabled'}
+            />
+            <Metric
+              label="Facing screen"
+              value={windowFacial?.facing_screen_ratio ?? null}
+              unit="%"
+              format={(v) => `${(v * 100).toFixed(0)}`}
+              tone={windowFacial?.facing_screen_ratio == null ? 'null' : 'info'}
+              reason={settings.facial_signals_enabled ? reason : 'facial signals disabled'}
+            />
+            <Metric
+              label="Breaths / min"
+              value={windowRespiration?.brpm_mean ?? null}
+              format={(v) => v.toFixed(1)}
+              hint={windowRespiration?.brpm_mean == null ? 'acquiring (~25s)' : 'low band of rPPG'}
+              tone={vitalTone({
+                value: windowRespiration?.brpm_mean,
+                confidence: 1,
+                min: brBand.min,
+                max: brBand.max,
+              }).tone}
+              reason={settings.respiration_enabled ? reason : 'respiration disabled'}
+            />
             <Metric
               label="Windows"
               value={windowCount}
@@ -220,51 +545,38 @@ function LivePage() {
         </Section>
 
         <Section
-          id="live-trend"
-          title="Trend"
-          description="Last 60 windows, newest on the right. Bar color = dominant emotion; bar height = confidence."
-        >
-          <Card>
-            <CardHeader>
-              <CardTitle>Emotion timeline</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <EmotionTimeline recentWindows={recentWindows} />
-            </CardContent>
-          </Card>
-        </Section>
-
-        <Section
           id="live-structure"
           title="Structure"
           description="Affect pad shows the valence / arousal trajectory. Probability bars and gaze tile sit beside it."
         >
           <div className="grid gap-4 lg:grid-cols-3">
-            <Card>
+            <Card className={CARD}>
               <CardHeader>
                 <CardTitle>Affect pad</CardTitle>
               </CardHeader>
-              <CardContent className="flex justify-center">
-                <AffectPad recentWindows={recentWindows} />
+              <CardContent className={`${CARD_BODY} flex items-center justify-center`}>
+                <AffectPad recentWindows={recentWindows} size={210} />
               </CardContent>
             </Card>
-            <Card>
+            <Card className={CARD}>
               <CardHeader>
                 <CardTitle>Latest distribution</CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className={CARD_BODY}>
                 {lastWindow ? (
-                  <ProbBars probabilities={lastWindow.probabilities ?? {}} />
+                  <ProbBars probabilities={lastWindow.probabilities ?? {}} fill />
                 ) : (
-                  <EmptyState title="No window yet" description="Probability distribution renders once the first window emits." />
+                  <div className="flex h-full items-center justify-center">
+                    <EmptyState title="No window yet" description="Probability distribution renders once the first window emits." />
+                  </div>
                 )}
               </CardContent>
             </Card>
-            <Card>
+            <Card className={CARD}>
               <CardHeader>
                 <CardTitle>Live gaze</CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className={CARD_BODY}>
                 <LiveGazeTile
                   lastGaze={lastGaze}
                   gazeSampleCount={gazeSampleCount}
@@ -277,67 +589,20 @@ function LivePage() {
           </div>
         </Section>
 
+        {/* Last on the page: the timeline is the session-scale retrospective,
+            so it reads as a footer under the live tiles rather than
+            interrupting them. Full width — a strip has no useful neighbour. */}
         <Section
-          id="live-heatmap"
-          title="Live attention heatmap"
-          description="Where gaze has pooled recently, accumulated live from the webcam (once the camera is running) or the demo stream."
+          id="live-trend"
+          title="Trend"
+          description="Last 60 windows on a time axis, newest on the right. Bar color = dominant emotion; bar height = confidence. Dropped windows leave gaps."
         >
           <Card>
-            <CardContent className="flex flex-col gap-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setHeatmapOptIn((v) => !v)}
-                  className="rounded border border-line bg-surface-1 px-2 py-1 text-[11px] font-medium text-ink-1 hover:bg-surface-2"
-                >
-                  {heatmapOptIn ? '■ Stop & clear heatmap' : '▶ Enable live heatmap'}
-                </button>
-                {heatmapOptIn ? (
-                  cameraRunning ? (
-                    gazeDiag?.error ? (
-                      <span className="text-[11px] text-status-bad">
-                        ⚠ gaze adapter failed: {gazeDiag.error} — use “Demo gaze
-                        stream” meanwhile
-                      </span>
-                    ) : gazeDiag && gazeDiag.status !== 'inference' ? (
-                      <span className="text-[11px] text-status-warn">
-                        camera running, gaze adapter status “{gazeDiag.status ?? 'unknown'}”
-                        — not streaming yet
-                      </span>
-                    ) : (
-                      <span className="text-[11px] text-status-ok">
-                        ● live webcam gaze — no calibration needed for the heatmap
-                      </span>
-                    )
-                  ) : (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void start();
-                        }}
-                        className="rounded border border-line bg-surface-1 px-2 py-1 text-[11px] font-medium text-ink-1 hover:bg-surface-2"
-                      >
-                        ▶ Start camera
-                      </button>
-                      <span className="text-[11px] text-ink-3">
-                        no gaze stream yet — start the camera (status: {status}),
-                        or use “Demo gaze stream” in the Live gaze card
-                      </span>
-                    </>
-                  )
-                ) : (
-                  <span className="text-[11px] text-ink-3">
-                    raw gaze accumulates in this tab only; cleared on stop /
-                    navigation — not stored, not sent
-                  </span>
-                )}
-              </div>
-              {heatmapOptIn ? (
-                <div className="flex justify-center">
-                  <LiveGazeHeatmap active width={480} height={270} />
-                </div>
-              ) : null}
+            <CardHeader>
+              <CardTitle>Emotion timeline</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <EmotionTimeline recentWindows={recentWindows} />
             </CardContent>
           </Card>
         </Section>
@@ -359,13 +624,16 @@ function statusTone(status: string): MetricTone {
   return 'null';
 }
 
-function ProbBars({ probabilities }: { probabilities: Record<string, number> }) {
+function ProbBars({ probabilities, fill }: { probabilities: Record<string, number>; fill?: boolean }) {
   const entries = Object.entries(probabilities)
     .filter(([, v]) => typeof v === 'number' && Number.isFinite(v))
     .sort((a, b) => b[1] - a[1]);
   if (!entries.length) return null;
   return (
-    <ul className="flex flex-col gap-1.5" role="list">
+    <ul
+      className={cn('flex flex-col gap-1.5', fill && 'h-full justify-around gap-0')}
+      role="list"
+    >
       {entries.map(([label, value]) => (
         <li key={label} className="flex items-center gap-2 text-xs">
           <span className="w-20 truncate capitalize text-ink-2">{label}</span>
@@ -419,45 +687,44 @@ function LiveGazeTile({
 }: LiveGazeTileProps) {
   if (!enabled) {
     return (
-      <div className="text-sm text-ink-2 space-y-2">
+      <div className="flex h-full flex-col justify-center gap-2 text-sm text-ink-2">
         <div className="text-xs uppercase tracking-wider text-ink-3">Gaze tracking off</div>
         <div>Enable it in Settings → Inference — or preview the dot with a synthetic stream:</div>
         <MockGazeToggle mockGaze={mockGaze} onToggleMock={onToggleMock} />
       </div>
     );
   }
-  // Live gaze sample: render normalized [-0.5, 0.5] coords onto a small
-  // viewport rectangle so the user sees the dot in real time.
-  const W = 240;
-  const H = 135;
-  const dotX = lastGaze ? (0.5 + lastGaze.x) * W : null;
-  const dotY = lastGaze ? (0.5 + lastGaze.y) * H : null;
+  // Live gaze sample: normalized [-0.5, 0.5] coords onto the viewport preview.
+  //
+  // The preview fills the card width and the readouts sit BELOW it. The old
+  // side-by-side layout hardcoded a 240px preview, which in a 3-up card left
+  // ~58px for the value column — every reading truncated to a single character
+  // ("QUALITY 1", "STATE o…"). Percentage positioning also makes the dot
+  // correct at any card width, which fixed pixel maths never was.
   return (
-    <div className="flex flex-col gap-2">
-    <div className="flex gap-3 items-start">
+    <div className="flex h-full flex-col gap-2">
       <div
-        className="relative rounded border border-line bg-surface-3 overflow-hidden"
-        style={{ width: W, height: H }}
+        className="relative min-h-[110px] flex-1 overflow-hidden rounded border border-line bg-surface-3"
         aria-label="Live gaze position"
       >
         <div className="absolute inset-0">
           <div className="absolute left-1/2 top-0 bottom-0 w-px bg-line/60" />
           <div className="absolute top-1/2 left-0 right-0 h-px bg-line/60" />
         </div>
-        {dotX != null && dotY != null ? (
+        {lastGaze ? (
           <div
-            className="absolute size-3 rounded-full"
+            className="absolute size-3 -translate-x-1/2 -translate-y-1/2 rounded-full"
             style={{
-              left: Math.max(0, Math.min(W - 12, dotX - 6)),
-              top: Math.max(0, Math.min(H - 12, dotY - 6)),
-              background: lastGaze!.quality > 0.5 ? 'var(--status-ok)' : 'var(--status-warn)',
+              left: `${Math.max(0, Math.min(1, 0.5 + lastGaze.x)) * 100}%`,
+              top: `${Math.max(0, Math.min(1, 0.5 + lastGaze.y)) * 100}%`,
+              background: lastGaze.quality > 0.5 ? 'var(--status-ok)' : 'var(--status-warn)',
               boxShadow: '0 0 0 4px rgba(0,0,0,0.05)',
             }}
             aria-hidden="true"
           />
         ) : null}
       </div>
-      <div className="text-xs space-y-1 flex-1 min-w-0">
+      <div className="grid grid-cols-2 gap-x-3 text-xs">
         <Row label="Samples" value={String(gazeSampleCount)} />
         <Row
           label="Quality"
@@ -469,13 +736,10 @@ function LiveGazeTile({
         />
         <Row label="State" value={lastGaze?.state ?? '—'} />
       </div>
-    </div>
       <div className="flex items-center gap-2">
         <MockGazeToggle mockGaze={mockGaze} onToggleMock={onToggleMock} />
         {mockGaze ? (
-          <span className="text-[11px] text-ink-3">
-            synthetic stream — not a real adapter sample
-          </span>
+          <span className="text-[11px] text-ink-3">synthetic</span>
         ) : null}
       </div>
     </div>

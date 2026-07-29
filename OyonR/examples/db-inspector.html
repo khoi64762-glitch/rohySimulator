@@ -1,0 +1,64 @@
+<!doctype html><meta charset=utf-8><title>Oyon store inspector</title>
+<style>body{font:14px/1.5 system-ui;max-width:900px;margin:2rem auto;padding:0 1rem}
+pre{background:#f5f5f8;padding:1rem;border-radius:8px;overflow:auto}
+button{padding:.5rem 1rem;font:inherit;cursor:pointer;border:1px solid #ccc;border-radius:6px;background:#fff}
+b{font-variant-numeric:tabular-nums}</style>
+<h1>Oyon stored-data inspector</h1>
+<p>Counts every row in every Oyon IndexedDB database, and can migrate rows
+stranded in the old <code>oyon</code> database into <code>oyon-app</code> where the app reads.</p>
+<p><button id=scan>Scan</button> <button id=migrate>Migrate oyon → oyon-app</button></p>
+<pre id=out>—</pre>
+<script type="module">
+const out = document.getElementById('out');
+const open = (n, v) => new Promise((res, rej) => {
+  const r = v ? indexedDB.open(n, v) : indexedDB.open(n);
+  r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  r.onblocked = () => rej(new Error('blocked — close other Oyon tabs'));
+});
+const all = (db, s) => new Promise((res) => {
+  if (!db.objectStoreNames.contains(s)) return res([]);
+  const q = db.transaction(s, 'readonly').objectStore(s).getAll();
+  q.onsuccess = () => res(q.result); q.onerror = () => res([]);
+});
+async function scan() {
+  const dbs = await indexedDB.databases();
+  const lines = [];
+  for (const { name, version } of dbs) {
+    let db; try { db = await open(name); } catch (e) { lines.push(`${name}: ${e.message}`); continue; }
+    lines.push(`\n${name}  (v${version})`);
+    for (const s of Array.from(db.objectStoreNames)) {
+      const rows = await all(db, s);
+      if (!rows.length) { lines.push(`  ${s.padEnd(20)} 0`); continue; }
+      const byMod = {};
+      for (const r of rows) { const k = r?.modality ?? '—'; byMod[k] = (byMod[k] || 0) + 1; }
+      const detail = Object.entries(byMod).map(([k, v]) => `${k}:${v}`).join(' ');
+      lines.push(`  ${s.padEnd(20)} ${String(rows.length).padStart(5)}   ${detail}`);
+    }
+    db.close();
+  }
+  out.textContent = lines.join('\n').trim() || 'no Oyon databases found';
+}
+async function migrate() {
+  out.textContent = 'migrating…';
+  let src; try { src = await open('oyon'); } catch { out.textContent = 'no `oyon` database'; return; }
+  const dst = await open('oyon-app');
+  let moved = 0, skipped = 0;
+  for (const s of ['signal_events', 'signal_windows', 'emotion_windows', 'dynamics', 'captures']) {
+    const rows = await all(src, s);
+    if (!rows.length || !dst.objectStoreNames.contains(s)) continue;
+    await new Promise((res) => {
+      const tx = dst.transaction(s, 'readwrite'); const st = tx.objectStore(s);
+      // `put`, not `add`: re-running the migration must be idempotent rather
+      // than throwing on rows already carried over.
+      for (const row of rows) { try { st.put(row); moved += 1; } catch { skipped += 1; } }
+      tx.oncomplete = res; tx.onerror = res;
+    });
+  }
+  src.close(); dst.close();
+  out.textContent = `migrated ${moved} row(s), ${skipped} skipped\n\n`;
+  await scan();
+}
+document.getElementById('scan').onclick = scan;
+document.getElementById('migrate').onclick = migrate;
+scan();
+</script>

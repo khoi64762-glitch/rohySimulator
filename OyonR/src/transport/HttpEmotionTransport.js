@@ -1,4 +1,5 @@
 import { validateEmotionBatch } from '../validation/validateEmotionPayload.js';
+import { OYON_WINDOW_BATCH_SCHEMA_VERSION } from '../version.js';
 
 export class HttpEmotionTransport {
   constructor(options = {}) {
@@ -18,7 +19,10 @@ export class HttpEmotionTransport {
     if (!context.session_id) throw new Error('session_id is required to send emotion events.');
 
     if (this.options.validate !== false) {
-      const validation = validateEmotionBatch({ events }, this.options.validationOptions);
+      const validation = validateEmotionBatch({
+        schema_version: OYON_WINDOW_BATCH_SCHEMA_VERSION,
+        events,
+      }, this.options.validationOptions);
       if (!validation.ok) {
         throw new Error(`Invalid emotion telemetry: ${validation.errors.join('; ')}`);
       }
@@ -31,7 +35,10 @@ export class HttpEmotionTransport {
     const response = await this.options.fetchImpl(`${this.options.baseUrl}${this.options.endpointForSession(context.session_id)}`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ events }),
+      body: JSON.stringify({
+        schema_version: OYON_WINDOW_BATCH_SCHEMA_VERSION,
+        events,
+      }),
     });
 
     if (!response.ok) {

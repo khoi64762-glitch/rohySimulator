@@ -1,9 +1,18 @@
 const DEFAULT_DB_NAME = 'oyon';
-const DEFAULT_DB_VERSION = 1;
+// v2 adds `signal_windows` for episode-shaped modality windows (typing, voice)
+// that do not share the camera's fixed cadence.
+// v3 adds `signal_events` — the complete per-event log. Aggregate windows
+// cannot support sequence analysis (TNA, process mining, lag-sequential), which
+// needs one ordered, state-labelled row per event; the window is a convenience
+// over this log, not a replacement for it.
+// `createStore` is idempotent, so each upgrade is additive.
+const DEFAULT_DB_VERSION = 3;
 
 const STORES = [
   'captures',
   'emotion_windows',
+  'signal_windows',
+  'signal_events',
   'runtime_events',
   'metrics',
   'settings_profiles',
@@ -81,6 +90,8 @@ export function oyonRecordId(prefix = 'oyon') {
 function createStores(db) {
   createStore(db, 'captures', 'capture_id', ['tenant_id', 'user_id', 'session_id', 'started_at']);
   createStore(db, 'emotion_windows', 'window_id', ['capture_id', 'session_id', 'window_start']);
+  createStore(db, 'signal_windows', 'window_id', ['capture_id', 'session_id', 'modality', 'window_start']);
+  createStore(db, 'signal_events', 'event_id', ['capture_id', 'session_id', 'modality', 'timestamp', 'sequence_index']);
   createStore(db, 'runtime_events', 'event_id', ['capture_id', 'event_name', 'timestamp']);
   createStore(db, 'metrics', 'metric_id', ['capture_id', 'metric_name', 'timestamp']);
   createStore(db, 'settings_profiles', 'profile_id', ['updated_at']);

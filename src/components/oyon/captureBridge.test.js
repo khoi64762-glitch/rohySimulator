@@ -1,4 +1,4 @@
-// Contract tests for the pure Oyon-v2 glue (captureBridge.js): the element
+// Contract tests for the pure Oyon-v3 glue (captureBridge.js): the element
 // `settings` attribute payload and the POST /addons/oyon/emotion-records
 // body. These are the two payloads that cross host boundaries — pin them.
 
@@ -58,6 +58,7 @@ describe('persistBody — oyon:window payload → emotion-records POST body', ()
 
     it('stamps the ROHY session and case onto every event', () => {
         const body = persistBody([win], { sessionId: 'rohy-42', caseId: 'case-7' });
+        expect(body.schema_version).toBe('oyon-window-batch-v4');
         expect(body.session_id).toBe('rohy-42');
         expect(body.events).toHaveLength(1);
         expect(body.events[0].session_id).toBe('rohy-42'); // element's own id overwritten

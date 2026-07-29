@@ -229,6 +229,10 @@ export default function OyonCaptureWidget({ sessionId, caseId, room, onOpenAnaly
             if (!host || host.querySelector('oyon-app')) return;
             const el = document.createElement('oyon-app');
             el.setAttribute('chrome', 'capture');
+            // Preserve Rohy's live-affect feed at the camera source cadence.
+            // Oyon v3 also supports throttled/off; source is the v2-compatible
+            // behavior this host intentionally depends on.
+            el.setAttribute('sample-events', 'source');
             // Training-free geometric gaze — Rohy only consumes zone/AOI
             // aggregates, so the click-calibrated WebGazer default (which
             // emits NOTHING until trained) would read as "gaze is broken".

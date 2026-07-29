@@ -7,13 +7,23 @@ import {
   analyzeIndexRoute,
   analyzeAffectRoute,
   analyzeEngagementRoute,
+  analyzeAttentionExperimentalRoute,
   analyzeGazeRoute,
+  analyzeSensingRoute,
+  analyzeHeartRateRoute,
+  analyzeMonitorRoute,
+  analyzeLogsRoute,
+  analyzePatternsRoute,
   analyzeSequenceRoute,
+  analyzeTypingRoute,
+  analyzeVoiceRoute,
   analyzeComparisonRoute,
 } from './routes/analyze';
 import { sessionsRoute } from './routes/sessions';
 import { settingsRoute } from './routes/settings';
 import { helpRoute } from './routes/help';
+import { aboutRoute } from './routes/about';
+import { diagnosticsRoute } from './routes/diagnostics';
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
@@ -22,13 +32,23 @@ const routeTree = rootRoute.addChildren([
     analyzeIndexRoute,
     analyzeAffectRoute,
     analyzeEngagementRoute,
+    analyzeAttentionExperimentalRoute,
     analyzeGazeRoute,
+    analyzeSensingRoute,
+    analyzeHeartRateRoute,
+    analyzeMonitorRoute,
+    analyzeLogsRoute,
+    analyzePatternsRoute,
     analyzeSequenceRoute,
+    analyzeTypingRoute,
+    analyzeVoiceRoute,
     analyzeComparisonRoute,
   ]),
   sessionsRoute,
   settingsRoute,
+  diagnosticsRoute,
   helpRoute,
+  aboutRoute,
 ]);
 
 /*

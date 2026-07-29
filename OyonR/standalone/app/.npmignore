@@ -1,0 +1,5 @@
+# Override this directory's .gitignore during npm packing. The package root's
+# files allowlist permits only dist-element, so no app source is published.
+*
+!dist-element/
+!dist-element/**

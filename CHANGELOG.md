@@ -9,6 +9,22 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.0] — 2026-07-29
+
+### Changed
+
+- Upgraded the isolated 2.9 release line from vendored Oyon 2.2.0 to the
+  immutable Oyon 3.3.2 release, retaining Rohy's existing capture, consent,
+  same-origin asset, session identity, and database integration contracts.
+- Added Oyon v3's sensing, typing, voice, interaction, discourse, and analytics
+  modules and its versioned `tnaj` bundle without enabling new capture
+  modalities by default.
+- Pinned Oyon updates to version 3.3.2 and narrowed runtime-asset preservation
+  so future syncs refresh versioned source vendors without deleting downloaded
+  MediaPipe, ONNX Runtime, or model assets.
+- Rohy now sends the explicit `oyon-window-batch-v4` envelope and requests
+  source-rate live sample events from the v3 web component.
+
 ## [2.8.0] — 2026-07-29
 
 This is the first published release of the development line previously

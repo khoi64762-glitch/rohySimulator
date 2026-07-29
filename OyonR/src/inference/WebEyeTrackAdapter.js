@@ -45,15 +45,11 @@
  *
  * Lifecycle:
  *   const adapter = new WebEyeTrackAdapter({ videoElementId: 'video', onGaze });
- *   await adapter.init();    // lazy-imports webeyetrack; throws if missing
+ *   await adapter.init();    // lazy-imports the reviewed WebEyeTrack snapshot
  *   await adapter.start();   // starts the webcam frame loop
  *   ...
  *   adapter.dispose();       // idempotent; stops webcam, drops callback
  */
-
-const PEER_DEPENDENCY_HINT =
-  "Ensure `webeyetrack` is installed and bundled with this app. " +
-  "See docs/SCREEN_POINT_GAZE.md for the full setup.";
 
 export class WebEyeTrackAdapter {
   constructor(options = {}) {
@@ -77,8 +73,9 @@ export class WebEyeTrackAdapter {
   }
 
   /**
-   * Lazy-imports `webeyetrack` and instantiates the worker proxy.
-   * Throws a clear error if the runtime dependency is missing.
+   * Lazy-imports the reviewed webeyetrack@0.0.2 bundle and instantiates the
+   * worker proxy. The bundle is vendored byte-for-byte so its unused, vulnerable
+   * package dependency declarations are not installed in production.
    */
   async init() {
     if (this._initialized) return;
@@ -86,9 +83,9 @@ export class WebEyeTrackAdapter {
 
     let mod;
     try {
-      mod = await import('webeyetrack');
+      mod = await import('../../vendor/webeyetrack.js');
     } catch (err) {
-      const e = new Error(`WebEyeTrackAdapter: failed to load 'webeyetrack'. ${PEER_DEPENDENCY_HINT}`);
+      const e = new Error('WebEyeTrackAdapter: failed to load the bundled webeyetrack runtime.');
       e.cause = err;
       throw e;
     }

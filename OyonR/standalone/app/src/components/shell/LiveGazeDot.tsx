@@ -1,10 +1,11 @@
 import { useEffect, useRef } from 'react';
+import { useRouterState } from '@tanstack/react-router';
 import { useRuntime } from '@/lib/RuntimeProvider';
 
 /*
- * LiveGazeDot — floating crosshair that follows the active gaze sample
- * across the full viewport. Sits at z-overlay (above the z-dock mini
- * camera) so a researcher can SEE that eye tracking is working in real time.
+ * LiveGazeDot — floating crosshair that follows the active gaze sample on the
+ * Live screen. Analytics, Settings and Sensor diagnostics use dense controls/cards;
+ * drawing a viewport-wide target over those pages obscures headings and data.
  *
  * Renders the latest sample as a small target. Below quality 0.3 the
  * target dims to indicate "below the adapter's quality gate".
@@ -12,6 +13,7 @@ import { useRuntime } from '@/lib/RuntimeProvider';
 
 export function LiveGazeDot() {
   const sample = useRuntime().lastGaze;
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
   const ref = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -29,6 +31,10 @@ export function LiveGazeDot() {
     el.style.transform = `translate(${px}px, ${py}px) translate(-50%, -50%)`;
     el.style.opacity = sample.quality >= 0.3 ? '1' : '0.4';
   }, [sample]);
+
+  // The calibration overlay owns its own target. This feedback marker belongs
+  // only to /live, where it cannot cover retrospective or diagnostic values.
+  if (pathname !== '/live') return null;
 
   // Mount the element even when there's no sample so the transform can
   // animate the first appearance.

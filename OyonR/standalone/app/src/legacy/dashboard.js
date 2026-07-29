@@ -460,7 +460,7 @@ export function drawDistribution(canvas, windows) {
   });
 }
 
-export function drawNetwork(container, result) {
+export function drawNetwork(container, result, options = {}) {
   container.replaceChildren();
   if (!result || !result.model) {
     const empty = document.createElement('div');
@@ -489,6 +489,8 @@ export function drawNetwork(container, result) {
     edgeColor: '#1f2937',
     arrowColor: '#0f172a',
     edgeLabelFontSize: 11,
+    // Caller may pass nodeRadii to size nodes by a centrality measure.
+    ...options,
   });
   return { nodes: labels.length, edges: edgeCount };
 }
@@ -649,7 +651,7 @@ export function renderDistributionPlotPanel(container, result) {
   renderDistributionPlot(container, result.sequences, result.model.labels);
 }
 
-export function renderSequenceSummary(wrap, result) {
+export function renderSequenceSummary(wrap, result, options = {}) {
   if (!result || !result.sequences) {
     wrap.replaceChildren();
     return;
@@ -705,7 +707,7 @@ export function renderSequenceSummary(wrap, result) {
     summaryTile('Shannon H (bits)', entropy.toFixed(2)),
     summaryTile('H normalised', normalisedEntropy.toFixed(2)),
   );
-  wrap.append(stats);
+  if (options.includeOverview !== false) wrap.append(stats);
 
   if (spellRows.length) {
     const heading = document.createElement('div');

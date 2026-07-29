@@ -91,7 +91,6 @@ function SessionsPage() {
     return (
       <>
         <PageHeader
-          eyebrow="Workflow · Step 5"
           title="Sessions"
           description="Browse, select, and export prior sessions."
         />
@@ -133,7 +132,6 @@ function SessionsPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Workflow · Step 5"
         title="Sessions"
         description="Each row is one session_id worth of aggregate windows. Tick two or more to compare them side-by-side; click Export to produce a reproducibility bundle."
         actions={

@@ -113,7 +113,34 @@ function makeWebGazerStub() {
   assert.equal(failingAdapter.lastError().message, 'camera refused');
 }
 
-// E — Factory chooses engines; unknown values normalize to the project
+// E — WebGazer's obsolete protocol modal is suppressed, but no other host
+// alert is swallowed and the global function is restored after begin().
+{
+  const hadAlert = Object.hasOwn(globalThis, 'alert');
+  const originalAlert = globalThis.alert;
+  const forwarded = [];
+  const hostAlert = (message) => forwarded.push(String(message));
+  globalThis.alert = hostAlert;
+  try {
+    const webgazer = makeWebGazerStub();
+    webgazer.begin = async function begin() {
+      this.calls.push(['begin']);
+      globalThis.alert('WebGazer works only over https. If you are doing local development, you need to run a local server.');
+      globalThis.alert('another WebGazer message');
+      return this;
+    };
+    const adapter = new WebGazerAdapter({ webgazer, onGaze: () => {} });
+    await adapter.init();
+    await adapter.start();
+    assert.deepEqual(forwarded, ['another WebGazer message']);
+    assert.equal(globalThis.alert, hostAlert, 'host alert must be restored after begin');
+  } finally {
+    if (hadAlert) globalThis.alert = originalAlert;
+    else delete globalThis.alert;
+  }
+}
+
+// F — Factory chooses engines; unknown values normalize to the project
 // default (the MediaPipe landmark engine — see gaze-engine-switch.test.js).
 {
   assert.equal(normalizeGazeEngine('webgazer'), 'webgazer');

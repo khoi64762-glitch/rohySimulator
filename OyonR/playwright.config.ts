@@ -1,5 +1,9 @@
 import { defineConfig } from '@playwright/test';
 
+const rootPort = process.env.OYON_E2E_ROOT_PORT ?? '5173';
+const appPort = process.env.OYON_E2E_APP_PORT ?? '5174';
+const reuseExistingServer = process.env.OYON_E2E_FRESH !== '1';
+
 /*
  * E2E suite — real-browser regression coverage for the two delivery modes:
  *
@@ -34,16 +38,16 @@ export default defineConfig({
     {
       // Repo-root server: serves examples/embed-host.html and the built
       // element at /standalone/app/dist-element/.
-      command: 'npm run start',
-      url: 'http://127.0.0.1:5173/examples/embed-host.html',
-      reuseExistingServer: true,
+      command: `npm run start -- --port ${rootPort} --strictPort`,
+      url: `http://127.0.0.1:${rootPort}/examples/embed-host.html`,
+      reuseExistingServer,
       timeout: 60_000,
     },
     {
       // The React app shell.
-      command: 'npm --prefix standalone/app run dev -- --strictPort',
-      url: 'http://127.0.0.1:5174/',
-      reuseExistingServer: true,
+      command: `npm --prefix standalone/app run dev -- --port ${appPort} --strictPort`,
+      url: `http://127.0.0.1:${appPort}/`,
+      reuseExistingServer,
       timeout: 60_000,
     },
   ],

@@ -11,6 +11,19 @@ import { createOyonSettings, settingsSnapshot, normalizeAois } from '../settings
 import { extractEyeFeatures } from '../inference/EyeFeatureExtractor.js';
 import { EyeSmoother } from '../smoothing/EyeSmoother.js';
 import { EngagementAggregator } from '../aggregation/EngagementAggregator.js';
+import { extractFacialSignals, headPoseFromMatrix } from '../inference/FacialSignalExtractor.js';
+import { FacialSignalAggregator } from '../aggregation/FacialSignalAggregator.js';
+import { MediaPipePoseTracker } from '../inference/MediaPipePoseTracker.js';
+import { extractPostureFeatures } from '../inference/PostureFeatureExtractor.js';
+import { PostureAggregator } from '../aggregation/PostureAggregator.js';
+import { poseLandmarkerUrlForModel } from '../config/cdnDefaults.js';
+import { HeartRateEstimator, sampleFaceRoiRgb } from '../analytics/HeartRateEstimator.js';
+import { HeartRateRoiSampler } from '../analytics/HeartRateRoiSampler.js';
+import { HeartRateAggregator } from '../aggregation/HeartRateAggregator.js';
+import { RespirationEstimator } from '../analytics/RespirationEstimator.js';
+import { RespirationAggregator } from '../aggregation/RespirationAggregator.js';
+import { IlluminationEstimator } from '../analytics/IlluminationEstimator.js';
+import { IlluminationAggregator } from '../aggregation/IlluminationAggregator.js';
 import { createGazeAdapter, GAZE_ENGINE_MODEL_VERSIONS } from '../inference/GazeAdapterFactory.js';
 import { GazeSmoother } from '../smoothing/GazeSmoother.js';
 import { GazeAggregator } from '../aggregation/GazeAggregator.js';
@@ -33,7 +46,10 @@ export class EmotionRuntime {
     this.settings = requestedSettings;
 
     this.events = new EventEmitter();
-    this.camera = options.camera || new CameraController(options.cameraOptions);
+    this.camera = options.camera || new CameraController({
+      diagnosticsEnabled: this.settings.capture_quality_enabled,
+      ...options.cameraOptions,
+    });
     this.faceTracker = options.faceTracker || new MediaPipeFaceTracker(options.mediaPipe);
     this.classifier = options.classifier || new OnnxEmotionClassifier(options.onnx);
     this.aggregator = options.aggregator || new EmotionAggregator({
@@ -79,6 +95,156 @@ export class EmotionRuntime {
       this.engagementAggregator = null;
     }
 
+    // Facial-signals pipeline (head pose + action units). Free-rides on the
+    // face result the emotion pipeline already produces — no extra model or
+    // inference. Opt-in via settings.facial_signals_enabled.
+    if (this.settings.facial_signals_enabled) {
+      this.facialEnabled = true;
+      this.facialExtractor = options.facialExtractor || {
+        extract: (face) => extractFacialSignals(face, this.settings),
+      };
+      this.facialAggregator = options.facialAggregator || new FacialSignalAggregator({
+        windowMs: this.settings.aggregate_window_ms,
+        sampleIntervalMs: this.settings.sample_interval_ms,
+      });
+    } else {
+      this.facialEnabled = false;
+      this.facialExtractor = null;
+      this.facialAggregator = null;
+    }
+
+    // Body-posture pipeline (MediaPipe PoseLandmarker). Opt-in via
+    // settings.posture_tracking_enabled. Runs its own detectForVideo on the
+    // shared camera frame — a second model load, but the SAME tasks-vision
+    // wasm fileset as the face tracker.
+    if (this.settings.posture_tracking_enabled) {
+      this.postureEnabled = true;
+      this._stashedPostureWindow = null;
+      this._lastPostureSample = null;
+      this.poseTracker = options.poseTracker || new MediaPipePoseTracker({
+        ...(options.pose || {}),
+        modelAssetPath: (options.pose && options.pose.modelAssetPath)
+          || poseLandmarkerUrlForModel(this.settings.posture_model),
+      });
+      this.postureExtractor = options.postureExtractor || {
+        extract: (pose) => extractPostureFeatures(pose, this.settings),
+      };
+      this.postureAggregator = options.postureAggregator || new PostureAggregator({
+        windowMs: this.settings.aggregate_window_ms,
+        sampleIntervalMs: this.settings.sample_interval_ms,
+      });
+    } else {
+      this.postureEnabled = false;
+      this.poseTracker = null;
+      this.postureExtractor = null;
+      this.postureAggregator = null;
+      this._stashedPostureWindow = null;
+      this._lastPostureSample = null;
+    }
+
+    // Remote heart-rate (rPPG) pipeline. Opt-in via settings.heart_rate_enabled.
+    // A lightweight video-frame loop samples the latest face ROI independently
+    // of the expensive face/emotion loop. The slow loop only refreshes the bbox
+    // and reads the estimator's throttled rolling result.
+    // Respiration reads the LOW band (0.1-0.5 Hz) of the same ROI colour
+    // stream, so it needs the ROI sampler running — but not the heart-rate
+    // pipeline itself. Either signal alone is enough to justify the sampler.
+    this.respirationEnabled = Boolean(this.settings.respiration_enabled);
+    if (this.respirationEnabled) {
+      this._stashedRespirationWindow = null;
+      this.respirationEstimator = options.respirationEstimator || new RespirationEstimator({
+        bufferSeconds: this.settings.respiration_buffer_seconds,
+        minWindowSeconds: this.settings.respiration_min_window_seconds,
+        minConfidence: this.settings.respiration_min_confidence,
+        plausibleMinBrpm: this.settings.respiration_plausible_min_brpm,
+        plausibleMaxBrpm: this.settings.respiration_plausible_max_brpm,
+        rgbCorroboration: this.settings.respiration_rgb_corroboration,
+        requireRgbCorroboration: this.settings.respiration_require_rgb_corroboration,
+        minimumSampleRateHz: this.settings.respiration_min_sample_rate_hz,
+        maxSampleGapMs: this.settings.respiration_max_sample_gap_ms,
+      });
+      this.respirationAggregator = options.respirationAggregator || new RespirationAggregator({
+        windowMs: this.settings.aggregate_window_ms,
+        sampleIntervalMs: this.settings.sample_interval_ms,
+      });
+    } else {
+      this.respirationEstimator = null;
+      this.respirationAggregator = null;
+      this._stashedRespirationWindow = null;
+    }
+
+    if (this.settings.heart_rate_enabled || this.respirationEnabled) {
+      this.heartRateEnabled = Boolean(this.settings.heart_rate_enabled);
+      this._stashedHeartRateWindow = null;
+      this.roiSampler = options.roiSampler
+        || ((video, face) => sampleFaceRoiRgb(video, face, this.settings.heart_rate_roi));
+      this.heartRateEstimator = !this.heartRateEnabled ? null : options.heartRateEstimator || new HeartRateEstimator({
+        bufferSeconds: this.settings.heart_rate_buffer_seconds,
+        minWindowSeconds: this.settings.heart_rate_min_window_seconds,
+        method: this.settings.heart_rate_method,
+        minConfidence: this.settings.heart_rate_min_confidence,
+      });
+      this._hrLastPose = null; // for the head-motion sampling gate
+      this.heartRateAggregator = !this.heartRateEnabled ? null : options.heartRateAggregator || new HeartRateAggregator({
+        windowMs: this.settings.aggregate_window_ms,
+        sampleIntervalMs: this.settings.sample_interval_ms,
+        maxSlewBpmPerS: this.settings.heart_rate_max_slew_bpm_per_s,
+        trackerWindows: this.settings.heart_rate_tracker_windows,
+        minEstimatesForAnchor: this.settings.heart_rate_tracker_min_estimates,
+        resetBpm: this.settings.heart_rate_tracker_reset_bpm,
+        resetWindows: this.settings.heart_rate_tracker_reset_windows,
+        plausibleMinBpm: this.settings.heart_rate_plausible_min_bpm,
+        plausibleMaxBpm: this.settings.heart_rate_plausible_max_bpm,
+        implausibleCorroboration: this.settings.heart_rate_implausible_corroboration,
+        robust: {
+          enabled: this.settings.heart_rate_anomaly_filter,
+          fold: this.settings.heart_rate_harmonic_fold,
+          foldTol: this.settings.heart_rate_fold_tolerance,
+          madH: this.settings.heart_rate_mad_h,
+          madFloor: this.settings.heart_rate_mad_floor_bpm,
+          weighted: this.settings.heart_rate_confidence_weighted,
+          minWeight: this.settings.heart_rate_min_weight,
+        },
+      });
+      this.heartRateSampler = new HeartRateRoiSampler({
+        getVideo: () => this.camera.video,
+        sampleRoi: this.roiSampler,
+        estimator: this.heartRateEstimator,
+        estimators: this.respirationEstimator ? [this.respirationEstimator] : [],
+        targetFps: this.settings.heart_rate_target_fps,
+        maxFaceAgeMs: Math.max(2000, this.settings.sample_interval_ms * 2.5),
+        onError: (err) => this.logger.warn('oyon.heart_rate.roi_sample_failed', {
+          message: err?.message || String(err),
+        }),
+      });
+    } else {
+      this.heartRateEnabled = false;
+      this.roiSampler = null;
+      this.heartRateEstimator = null;
+      this.heartRateAggregator = null;
+      this.heartRateSampler = null;
+      this._stashedHeartRateWindow = null;
+    }
+
+    // Ambient illumination. Not a signal about the learner — the covariate
+    // that says how far to trust every other signal, since rPPG, emotion
+    // confidence and gaze quality all degrade in poor or unstable light.
+    // Costs one 32x18 canvas read per sample tick.
+    if (this.settings.illumination_enabled) {
+      this.illuminationEnabled = true;
+      this._stashedIlluminationWindow = null;
+      this.illuminationEstimator = options.illuminationEstimator || new IlluminationEstimator();
+      this.illuminationAggregator = options.illuminationAggregator || new IlluminationAggregator({
+        windowMs: this.settings.aggregate_window_ms,
+        sampleIntervalMs: this.settings.sample_interval_ms,
+      });
+    } else {
+      this.illuminationEnabled = false;
+      this.illuminationEstimator = null;
+      this.illuminationAggregator = null;
+      this._stashedIlluminationWindow = null;
+    }
+
     // Screen-point gaze pipeline (opt-in via settings.gaze_tracking_enabled).
     // Adapter callback is event-driven (samples flow in whenever the worker
     // emits a result); we feed each into smoother → aggregator inside the
@@ -97,10 +263,19 @@ export class EmotionRuntime {
       });
       this.gazeAggregator = options.gazeAggregator || new GazeAggregator({
         windowMs: this.settings.aggregate_window_ms,
-        sampleIntervalMs: this.settings.sample_interval_ms,
+        // Calibrated browser engines are event-driven and normally emit near
+        // video cadence. The slow emotion interval is only the correct fallback
+        // for the face-derived MediaPipe engine.
+        sampleIntervalMs: this.settings.gaze_engine === 'mediapipe'
+          ? this.settings.sample_interval_ms
+          : 33,
         zoneGrid: this.settings.gaze_zone_grid,
         aois: this.settings.gaze_aois,
         dropOffScreen: this.settings.gaze_drop_off_screen,
+        fixationMinDurationMs: this.settings.gaze_fixation_min_duration_ms,
+        fixationDispersionThreshold: this.settings.gaze_fixation_dispersion_threshold,
+        minFixationSampleRateHz: this.settings.gaze_fixation_min_sample_rate_hz,
+        maxSampleGapMs: this.settings.gaze_max_sample_gap_ms,
         modelVersion: GAZE_ENGINE_MODEL_VERSIONS[this.settings.gaze_engine]
           || this.settings.gaze_engine,
       });
@@ -150,6 +325,16 @@ export class EmotionRuntime {
     this.logger.info('oyon.runtime.initializing', { settings_hash: settingsSnapshot(this.settings).settings_hash });
     await this.faceTracker.init();
     await this.classifier.init();
+    if (this.postureEnabled && this.poseTracker && typeof this.poseTracker.init === 'function') {
+      try {
+        await this.poseTracker.init();
+      } catch (err) {
+        this.logger.warn('oyon.posture.tracker_init_failed', { message: err?.message || String(err) });
+        if (typeof console !== 'undefined' && typeof console.error === 'function') {
+          console.error('[oyon/posture] pose tracker init failed:', err);
+        }
+      }
+    }
     if (this.gazeEnabled && this.gazeAdapter && typeof this.gazeAdapter.init === 'function') {
       try {
         await this.gazeAdapter.init();
@@ -174,6 +359,12 @@ export class EmotionRuntime {
     this.paused = false;
     this.events.emit('status', { state: 'starting-camera' });
     await this.camera.start();
+    // Gate on the SAMPLER, not on heartRateEnabled: respiration shares this
+    // sampler and may be the only consumer. Keying the start on heart rate
+    // meant a respiration-only session constructed the sampler and never
+    // started it, so the estimator was fed nothing and reported "acquiring"
+    // forever.
+    if (this.heartRateSampler) this.heartRateSampler.start();
     if (this.gazeEnabled && this.gazeAdapter && typeof this.gazeAdapter.start === 'function') {
       try {
         await this.gazeAdapter.start();
@@ -189,6 +380,7 @@ export class EmotionRuntime {
   pause() {
     if (!this.running) return;
     this.paused = true;
+    if (this.heartRateSampler) this.heartRateSampler.stop();
     this.logger.info('oyon.capture.paused');
     this.events.emit('status', { state: 'paused' });
   }
@@ -196,6 +388,7 @@ export class EmotionRuntime {
   resume() {
     if (!this.running) return;
     this.paused = false;
+    if (this.heartRateSampler) this.heartRateSampler.start();
     this.logger.info('oyon.capture.resumed');
     this.events.emit('status', { state: 'running' });
     this.scheduleNextSample(0);
@@ -204,6 +397,7 @@ export class EmotionRuntime {
   async stop() {
     this.running = false;
     this.paused = false;
+    if (this.heartRateSampler) this.heartRateSampler.stop();
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
@@ -212,6 +406,30 @@ export class EmotionRuntime {
     let finalEngagement = null;
     if (this.eyeEnabled) {
       finalEngagement = this.engagementAggregator.flush();
+    }
+    let finalFacial = null;
+    if (this.facialEnabled) {
+      finalFacial = this.facialAggregator.flush();
+    }
+    let finalPosture = null;
+    if (this.postureEnabled) {
+      finalPosture = this._stashedPostureWindow || this.postureAggregator.flush();
+      this._stashedPostureWindow = null;
+    }
+    let finalHeartRate = null;
+    if (this.heartRateEnabled) {
+      finalHeartRate = this._stashedHeartRateWindow || this.heartRateAggregator.flush();
+      this._stashedHeartRateWindow = null;
+    }
+    let finalRespiration = null;
+    if (this.respirationEnabled) {
+      finalRespiration = this._stashedRespirationWindow || this.respirationAggregator.flush();
+      this._stashedRespirationWindow = null;
+    }
+    let finalIllumination = null;
+    if (this.illuminationEnabled) {
+      finalIllumination = this._stashedIlluminationWindow || this.illuminationAggregator.flush();
+      this._stashedIlluminationWindow = null;
     }
     let finalGaze = null;
     if (this.gazeEnabled && this._gazeAvailable()) {
@@ -224,9 +442,25 @@ export class EmotionRuntime {
       if (this.eyeEnabled && this.settings.engagement_window_share && finalEngagement) {
         finalWindow.engagement = finalEngagement;
       }
+      if (this.facialEnabled && this.settings.facial_signals_window_share && finalFacial) {
+        finalWindow.facial = finalFacial;
+      }
+      if (this.postureEnabled && this.settings.posture_window_share && finalPosture) {
+        finalWindow.posture = finalPosture;
+      }
+      if (this.heartRateEnabled && this.settings.heart_rate_window_share && finalHeartRate) {
+        finalWindow.heart_rate = finalHeartRate;
+      }
+      if (this.respirationEnabled && this.settings.respiration_window_share && finalRespiration) {
+        finalWindow.respiration = finalRespiration;
+      }
+      if (this.illuminationEnabled && this.settings.illumination_window_share && finalIllumination) {
+        finalWindow.illumination = finalIllumination;
+      }
       if (this.gazeEnabled && this.settings.gaze_window_share && finalGaze) {
         finalWindow.gaze = finalGaze;
       }
+      this._attachCaptureQualityBlock(finalWindow);
       await this.sendWindows([finalWindow]);
     } else {
       // No emotion window. Synthesize research-only events for any signal
@@ -234,6 +468,15 @@ export class EmotionRuntime {
       const events = [];
       if (this.eyeEnabled && finalEngagement && !this.settings.engagement_window_share) {
         events.push({ engagement_only: true, ...finalEngagement });
+      }
+      if (this.facialEnabled && finalFacial && !this.settings.facial_signals_window_share) {
+        events.push({ facial_only: true, facial: finalFacial, window_start: finalFacial.window_start, window_end: finalFacial.window_end });
+      }
+      if (this.postureEnabled && finalPosture && !this.settings.posture_window_share) {
+        events.push({ posture_only: true, posture: finalPosture, window_start: finalPosture.window_start, window_end: finalPosture.window_end });
+      }
+      if (this.heartRateEnabled && finalHeartRate && !this.settings.heart_rate_window_share) {
+        events.push({ heart_rate_only: true, heart_rate: finalHeartRate, window_start: finalHeartRate.window_start, window_end: finalHeartRate.window_end });
       }
       if (this.gazeEnabled && finalGaze && !this.settings.gaze_window_share) {
         events.push({ gaze_only: true, gaze: finalGaze, window_start: finalGaze.window_start, window_end: finalGaze.window_end });
@@ -275,6 +518,14 @@ export class EmotionRuntime {
     }
 
     const face = await this.faceTracker.analyze(video, now);
+    if (this.heartRateSampler) {
+      // Head-motion gate: while the head is rotating fast, pause ROI sampling
+      // (feed a null face) so motion-corrupted frames never enter the rPPG
+      // buffer — motion is the dominant rPPG artifact. Resumes automatically
+      // once the head settles.
+      const paused = this._hrHeadMotionPaused(face);
+      this.heartRateSampler.updateFace(paused ? null : face, now);
+    }
 
     // Face-derived gaze: adapters that expose handleFace (the MediaPipe
     // landmark engine, or a host-injected equivalent) are fed every face
@@ -287,6 +538,26 @@ export class EmotionRuntime {
       } catch (err) {
         this.logger.warn('oyon.gaze.handle_face_failed', { message: err?.message || String(err) });
       }
+    }
+
+    // Body-posture pipeline. Independent of face presence — runs its own
+    // detectForVideo on the same frame and feeds the posture aggregator. Its
+    // auto-flushed window is stashed for attachment at the emotion-window
+    // boundary; the per-frame sample (with the derived scalars) rides the
+    // `sample` event on both the face-present and no-face paths.
+    let postureSample = null;
+    if (this.postureEnabled && this.poseTracker) {
+      try {
+        const pose = await this.poseTracker.analyze(video, now);
+        postureSample = this.postureExtractor.extract(pose);
+      } catch (err) {
+        this.logger.warn('oyon.posture.analyze_failed', { message: err?.message || String(err) });
+      }
+      if (postureSample) {
+        const completed = this.postureAggregator.consumeFrame(postureSample, now);
+        if (completed) this._stashedPostureWindow = completed;
+      }
+      this._lastPostureSample = postureSample;
     }
 
     if (!face.facePresent) {
@@ -324,9 +595,72 @@ export class EmotionRuntime {
       }
     }
 
+    // Facial-signals pipeline (head pose + action units). Same shared face
+    // result; the full per-frame signal (all blendshapes) rides the local
+    // `sample` event, the window carries aggregates.
+    let facialWindow = null;
+    let facialSample = null;
+    if (this.facialEnabled) {
+      facialSample = this.facialExtractor.extract(face);
+      if (facialSample) {
+        facialWindow = this.facialAggregator.consumeFrame(facialSample, now);
+      }
+    }
+
+    // Heart-rate (rPPG) result consumption stays on the slow/window cadence.
+    // ROI acquisition is handled independently by HeartRateRoiSampler using
+    // the cached bbox updated above.
+    let heartRateSample = null;
+    let heartRateStatus = null;
+    if (this.heartRateEnabled) {
+      heartRateSample = this.heartRateEstimator.estimate();
+      const status = typeof this.heartRateEstimator.status === 'function'
+        ? this.heartRateEstimator.status()
+        : null;
+      if (status) {
+        heartRateStatus = {
+          ready: status.ready,
+          progress: status.progress,
+          buffered_seconds: status.span_seconds,
+          sample_rate_hz: status.sample_rate_hz,
+          reason: status.ready && !heartRateSample ? 'no_stable_rate' : status.reason,
+        };
+      }
+      const completed = this.heartRateAggregator.consumeFrame(heartRateSample, now);
+      if (completed) this._stashedHeartRateWindow = completed;
+    }
+
+    // Respiration shares the ROI stream; its own estimator throttles to ~5s
+    // because a resting breathing rate cannot move faster than that.
+    let respirationSample = null;
+    let respirationStatus = null;
+    if (this.respirationEnabled) {
+      respirationSample = this.respirationEstimator.estimate(now);
+      // Status rides alongside the estimate ALWAYS, because a null estimate has
+      // two completely different meanings — "the buffer is still filling" and
+      // "there is signal but no rate could be confirmed" — and a UI that cannot
+      // tell them apart shows "acquiring…" forever once the second one starts
+      // happening. Which it does, by design, whenever the subject moves or the
+      // light is poor.
+      respirationStatus = typeof this.respirationEstimator.status === 'function'
+        ? this.respirationEstimator.status(now)
+        : null;
+      const completed = this.respirationAggregator.consumeFrame(respirationSample, now);
+      if (completed) this._stashedRespirationWindow = completed;
+    }
+
+    // Illumination reads the raw frame, so it works with or without a face —
+    // "too dark to detect a face" is itself the finding.
+    let illuminationSample = null;
+    if (this.illuminationEnabled) {
+      illuminationSample = this.illuminationEstimator.estimate(this.camera.video);
+      const completed = this.illuminationAggregator.consumeFrame(illuminationSample, now);
+      if (completed) this._stashedIlluminationWindow = completed;
+    }
+
     const durationMs = performanceNow() - startedAt;
     this.metrics.record('oyon.sample.duration', durationMs, { unit: 'ms' });
-    this.events.emit('sample', { face, prediction, eye: eyeSample, durationMs });
+    this.events.emit('sample', { face, prediction, eye: eyeSample, facial: facialSample, posture: postureSample, heart_rate: heartRateSample, heart_rate_status: heartRateStatus, respiration: respirationSample, respiration_status: respirationStatus, illumination: illuminationSample, durationMs });
 
     if (windowResult) {
       if (this.eyeEnabled && this.settings.engagement_window_share) {
@@ -337,30 +671,64 @@ export class EmotionRuntime {
         const aligned = engagementWindow || this.engagementAggregator.flush(now);
         windowResult.engagement = aligned;
       }
+      if (this.facialEnabled && this.settings.facial_signals_window_share) {
+        const alignedFacial = facialWindow || this.facialAggregator.flush(now);
+        windowResult.facial = alignedFacial;
+      }
+      this._attachPostureBlock(windowResult, now);
+      this._attachHeartRateBlock(windowResult, now);
+      this._attachRespirationBlock(windowResult, now);
+      this._attachIlluminationBlock(windowResult, now);
       // Mirror the engagement boundary: pick up the most recent gaze
       // window (auto-flushed inside consumeFrame, or force-flushed now)
       // so both blocks describe the same window.
       this._attachGazeBlock(windowResult, now);
+      this._attachCaptureQualityBlock(windowResult);
       await this.sendWindows([windowResult]);
     } else if (this.eyeEnabled && engagementWindow && !this.settings.engagement_window_share) {
       // Non-shared mode: research-only batch with engagement-only payload.
       await this.sendWindows([{ engagement_only: true, ...engagementWindow }]);
+    } else if (this.facialEnabled && facialWindow && !this.settings.facial_signals_window_share) {
+      await this.sendWindows([{ facial_only: true, facial: facialWindow, window_start: facialWindow.window_start, window_end: facialWindow.window_end }]);
+    } else if (this.postureEnabled && this._stashedPostureWindow && !this.settings.posture_window_share) {
+      const pw = this._stashedPostureWindow;
+      this._stashedPostureWindow = null;
+      await this.sendWindows([{ posture_only: true, posture: pw, window_start: pw.window_start, window_end: pw.window_end }]);
+    } else if (this.heartRateEnabled && this._stashedHeartRateWindow && !this.settings.heart_rate_window_share) {
+      const hw = this._stashedHeartRateWindow;
+      this._stashedHeartRateWindow = null;
+      await this.sendWindows([{ heart_rate_only: true, heart_rate: hw, window_start: hw.window_start, window_end: hw.window_end }]);
     }
   }
 
   addMissingSample(timestamp, reason) {
+    if (this.heartRateSampler) this.heartRateSampler.updateFace(null, timestamp);
     const windowResult = this.aggregator.addSample({
       timestamp,
       facePresent: false,
       quality: { reason },
     });
-    this.events.emit('sample', { face: { facePresent: false, reason }, prediction: null });
+    // No face ⇒ no ROI to sample, but keep the heart-rate window aligned by
+    // consuming an invalid frame (drops valid_frame_ratio honestly).
+    if (this.heartRateEnabled) {
+      const completed = this.heartRateAggregator.consumeFrame(null, timestamp);
+      if (completed) this._stashedHeartRateWindow = completed;
+    }
+    this.events.emit('sample', { face: { facePresent: false, reason }, prediction: null, posture: this.postureEnabled ? (this._lastPostureSample ?? null) : undefined });
     if (windowResult) {
       if (this.eyeEnabled && this.settings.engagement_window_share) {
         const aligned = this.engagementAggregator.flush(timestamp);
         windowResult.engagement = aligned;
       }
+      if (this.facialEnabled && this.settings.facial_signals_window_share) {
+        windowResult.facial = this.facialAggregator.flush(timestamp);
+      }
+      this._attachPostureBlock(windowResult, timestamp);
+      this._attachHeartRateBlock(windowResult, timestamp);
+      this._attachRespirationBlock(windowResult, timestamp);
+      this._attachIlluminationBlock(windowResult, timestamp);
       this._attachGazeBlock(windowResult, timestamp);
+      this._attachCaptureQualityBlock(windowResult);
       this.sendWindows([windowResult]).catch(error => this.events.emit('error', error));
     }
   }
@@ -438,6 +806,79 @@ export class EmotionRuntime {
     this.settings.gaze_aois = normalized; // keep settingsSnapshot() honest
     if (this.gazeAggregator) this.gazeAggregator.options.aois = normalized;
     return normalized;
+  }
+
+  /**
+   * @internal Attach the posture block for this window boundary. Uses the
+   * window auto-flushed inside consumeFrame (stashed) when present, otherwise
+   * force-flushes any buffered frames so the posture window aligns with the
+   * emotion window.
+   */
+  _attachPostureBlock(windowResult, ts) {
+    if (!this.postureEnabled || !this.settings.posture_window_share) return;
+    let block = this._stashedPostureWindow;
+    this._stashedPostureWindow = null;
+    if (!block) block = this.postureAggregator.flush(ts);
+    if (block) windowResult.posture = block;
+  }
+
+  /**
+   * @internal Attach the heart-rate block for this window boundary
+   * (stash-or-flush), mirroring the posture/gaze pattern.
+   */
+  _attachHeartRateBlock(windowResult, ts) {
+    if (!this.heartRateEnabled || !this.settings.heart_rate_window_share) return;
+    let block = this._stashedHeartRateWindow;
+    this._stashedHeartRateWindow = null;
+    if (!block) block = this.heartRateAggregator.flush(ts);
+    if (block) windowResult.heart_rate = block;
+  }
+
+  _attachRespirationBlock(windowResult, ts) {
+    if (!this.respirationEnabled || !this.settings.respiration_window_share) return;
+    let block = this._stashedRespirationWindow;
+    this._stashedRespirationWindow = null;
+    if (!block) block = this.respirationAggregator.flush(ts);
+    if (block) windowResult.respiration = block;
+  }
+
+  _attachIlluminationBlock(windowResult, ts) {
+    if (!this.illuminationEnabled || !this.settings.illumination_window_share) return;
+    let block = this._stashedIlluminationWindow;
+    this._stashedIlluminationWindow = null;
+    if (!block) block = this.illuminationAggregator.flush(ts);
+    if (block) windowResult.illumination = block;
+  }
+
+  _attachCaptureQualityBlock(windowResult) {
+    if (!this.settings.capture_quality_enabled || !this.settings.capture_quality_window_share) return;
+    if (typeof this.camera?.getDiagnostics !== 'function') return;
+    const diagnostics = this.camera.getDiagnostics({ resetWindow: true });
+    if (diagnostics) windowResult.capture_quality = diagnostics;
+  }
+
+  /**
+   * @internal True when the head rotated more than
+   * settings.heart_rate_max_head_movement_deg since the previous face, so ROI
+   * sampling should pause. Head pose comes straight from the face transform
+   * (no dependency on the facial-signals pipeline). 0 threshold disables it.
+   */
+  _hrHeadMotionPaused(face) {
+    const threshold = this.settings.heart_rate_max_head_movement_deg;
+    if (!(threshold > 0)) return false;
+    if (!face || face.facePresent !== true || !face.transformationMatrix) {
+      this._hrLastPose = null;
+      return false;
+    }
+    const pose = headPoseFromMatrix(face.transformationMatrix);
+    if (!pose) { this._hrLastPose = null; return false; }
+    const prev = this._hrLastPose;
+    this._hrLastPose = pose;
+    if (!prev) return false;
+    const dp = pose.pitch_deg - prev.pitch_deg;
+    const dy = pose.yaw_deg - prev.yaw_deg;
+    const dr = pose.roll_deg - prev.roll_deg;
+    return Math.sqrt(dp * dp + dy * dy + dr * dr) > threshold;
   }
 
   /**

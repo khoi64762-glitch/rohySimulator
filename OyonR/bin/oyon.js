@@ -5,19 +5,27 @@
 //   npx oyon install-assets <out-dir>          Copy WASM runtimes from peer deps
 //   npx oyon download-models <out-dir>         Download ONNX + MediaPipe models
 //   npx oyon paths                             Print resolved peer-dep asset paths
+//   npx oyon host-check [public-dir]            Verify package, peers, and optional assets
 //   npx oyon --help
 
-import { mkdirSync, existsSync, cpSync, readdirSync, statSync, createWriteStream } from 'node:fs';
+import { mkdirSync, existsSync, cpSync, readdirSync, readFileSync, statSync, createWriteStream } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { spawnSync } from 'node:child_process';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { buildHostCheckReport } from './host-check.js';
 import {
   MEDIAPIPE_TASKS_WASM_CDN,
   ONNX_RUNTIME_WASM_CDN,
+  SILERO_VAD_MODEL_URL,
+  SILERO_VAD_MODEL_VERSION,
 } from '../src/config/cdnDefaults.js';
+import {
+  OYON_HOST_CONTRACT_VERSION,
+  OYON_VERSION,
+  OYON_WINDOW_BATCH_SCHEMA_VERSION,
+} from '../src/version.js';
 
 const require = createRequire(import.meta.url);
 const SELF_DIR = dirname(fileURLToPath(import.meta.url));
@@ -29,35 +37,64 @@ Commands:
   install-assets <dir>     Copy MediaPipe + ONNX Runtime WASM into <dir>/oyon/vendor/
   download-models <dir>    Download ONNX model weights into <dir>/oyon/models/
   paths                    Print resolved asset locations from peer dependencies
+  host-check [public-dir]  Verify package, host peers, element, and optional assets
   help                     Show this message
 
 Examples:
   npx oyon install-assets ./public
   npx oyon download-models ./public --force
+  npx oyon host-check ./public
+  npx oyon host-check ./public --json
 `;
 
-function resolvePeerAsset(specifier, cwd = process.cwd()) {
+function findPackageDir(entryPath, packageName) {
+  let current = dirname(entryPath);
+  while (true) {
+    const manifestPath = join(current, 'package.json');
+    if (existsSync(manifestPath)) {
+      try {
+        const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+        if (manifest.name === packageName) return current;
+      } catch {
+        // Keep walking: an unrelated or malformed parent manifest is not a match.
+      }
+    }
+    const parent = dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+
+function resolvePeerPackage(packageName, cwd = process.cwd(), allowPackageFallback = true) {
   // Try the host's node_modules first, then fall back to Oyon's own.
-  for (const base of [cwd, PKG_ROOT]) {
+  const bases = allowPackageFallback && cwd !== PKG_ROOT ? [cwd, PKG_ROOT] : [cwd];
+  for (const base of bases) {
     const localRequire = createRequire(join(base, 'package.json'));
     try {
-      return dirname(localRequire.resolve(specifier));
+      return dirname(localRequire.resolve(`${packageName}/package.json`));
     } catch {
-      // fall through
+      // Modern packages may intentionally hide package.json via "exports".
+      // Resolve their public entry and walk back to the matching package root.
+      try {
+        const packageDir = findPackageDir(localRequire.resolve(packageName), packageName);
+        if (packageDir) return packageDir;
+      } catch {
+        // fall through
+      }
     }
   }
   return null;
 }
 
 function mediapipeWasmDir() {
-  const pkgDir = resolvePeerAsset('@mediapipe/tasks-vision/package.json');
+  const pkgDir = resolvePeerPackage('@mediapipe/tasks-vision');
   if (!pkgDir) return null;
   const candidate = join(pkgDir, 'wasm');
   return existsSync(candidate) ? candidate : null;
 }
 
 function ortWasmDir() {
-  const pkgDir = resolvePeerAsset('onnxruntime-web/package.json');
+  const pkgDir = resolvePeerPackage('onnxruntime-web');
   if (!pkgDir) return null;
   const candidate = join(pkgDir, 'dist');
   return existsSync(candidate) ? candidate : null;
@@ -119,6 +156,7 @@ const MODELS = ASSETS_BASE ? [
   { label: 'EmotiEffLib MobileViT MTL',           url: `${ASSETS_BASE}/mobilevit_va_mtl.onnx`, rel: 'emotion/mobilevit_va_mtl.onnx' },
   { label: 'EmotiEffLib MobileFaceNet MTL',       url: `${ASSETS_BASE}/mbf_va_mtl.onnx`,       rel: 'emotion/mbf_va_mtl.onnx' },
   { label: 'HSEmotion EfficientNet-B0 MTL',       url: `${ASSETS_BASE}/enet_b0_8_va_mtl.onnx`, rel: 'emotion/enet_b0_8_va_mtl.onnx' },
+  { label: `Silero VAD (${SILERO_VAD_MODEL_VERSION})`, url: `${ASSETS_BASE}/silero_vad.onnx`,  rel: 'vad/silero_vad.onnx' },
 ] : [
   {
     label: 'MediaPipe Face Landmarker (float16)',
@@ -139,6 +177,13 @@ const MODELS = ASSETS_BASE ? [
     label: 'HSEmotion EfficientNet-B0 MTL',
     url: 'https://raw.githubusercontent.com/sb-ai-lab/EmotiEffLib/main/models/affectnet_emotions/onnx/enet_b0_8_va_mtl.onnx',
     rel: 'emotion/enet_b0_8_va_mtl.onnx',
+  },
+  {
+    // Imported from src/config/cdnDefaults.js so the CLI can never drift
+    // from the URL the runtime's SileroVadAdapter fetches by default.
+    label: `Silero VAD (${SILERO_VAD_MODEL_VERSION})`,
+    url: SILERO_VAD_MODEL_URL,
+    rel: 'vad/silero_vad.onnx',
   },
 ];
 
@@ -194,9 +239,28 @@ function printPaths() {
   console.log(`  ${MEDIAPIPE_TASKS_WASM_CDN}`);
   console.log(`  ${ONNX_RUNTIME_WASM_CDN}`);
   console.log('');
+  console.log(`Default model URLs (voice pipeline, ${SILERO_VAD_MODEL_VERSION}):`);
+  console.log(`  ${SILERO_VAD_MODEL_URL}`);
+  console.log('');
   console.log('Self-hosted alternative (requires the Oyon repo to be public):');
   console.log('  https://github.com/mohsaqr/Oyon/releases/download/assets-v1/');
   console.log('  Set OYON_ASSETS_BASE=<url> to make the CLI download from there.');
+}
+
+function printHostCheck(report, json) {
+  if (json) {
+    console.log(JSON.stringify(report, null, 2));
+    return;
+  }
+  console.log(
+    `Oyon ${report.version} · host contract ${report.hostContractVersion} · ` +
+      `batch ${report.batchSchemaVersion}`,
+  );
+  for (const entry of report.checks) {
+    const mark = entry.status === 'pass' ? '✓' : entry.status === 'warn' ? '!' : '✗';
+    console.log(`  ${mark} ${entry.id}: ${entry.detail}`);
+  }
+  console.log(report.ok ? '\nHost check passed.' : '\nHost check failed.');
 }
 
 async function main() {
@@ -208,6 +272,28 @@ async function main() {
 
   if (cmd === 'paths') {
     printPaths();
+    return;
+  }
+
+  if (cmd === 'host-check') {
+    const publicArg = rest.find((arg) => !arg.startsWith('--')) ?? null;
+    const report = buildHostCheckReport({
+      packageRoot: PKG_ROOT,
+      publicRoot: publicArg ? resolve(process.cwd(), publicArg) : null,
+      peerRoots: {
+        '@mediapipe/tasks-vision': resolvePeerPackage(
+          '@mediapipe/tasks-vision',
+          process.cwd(),
+          false,
+        ),
+        'onnxruntime-web': resolvePeerPackage('onnxruntime-web', process.cwd(), false),
+      },
+      expectedVersion: OYON_VERSION,
+      hostContractVersion: OYON_HOST_CONTRACT_VERSION,
+      batchSchemaVersion: OYON_WINDOW_BATCH_SCHEMA_VERSION,
+    });
+    printHostCheck(report, rest.includes('--json'));
+    if (!report.ok) process.exit(1);
     return;
   }
 

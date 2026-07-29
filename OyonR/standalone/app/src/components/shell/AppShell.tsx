@@ -1,22 +1,24 @@
-import { useState, useEffect } from 'react';
-import { Outlet, useRouterState } from '@tanstack/react-router';
-import { TopBar } from './TopBar';
+import { useState } from 'react';
+import { Outlet } from '@tanstack/react-router';
 import { TopMenu } from './TopMenu';
-import { FilterBar } from './FilterBar';
+import { SubNav } from './SubNav';
 import { EmbedHeader } from './EmbedHeader';
 import { MiniCamera } from './MiniCamera';
 import { LiveGazeDot } from './LiveGazeDot';
 import { RuntimeProvider } from '@/lib/RuntimeProvider';
 import { useBridge } from '@/lib/hostBridge';
 import { CapturePill } from '@/components/capture/CapturePill';
+import { CameraDockProvider } from '@/lib/CameraDockContext';
 
 /*
  * AppShell layout:
  *
  *   ┌────────────────────────────────────────────────┐
- *   │ TopBar (session context strip)                 │
+ *   │ TopMenu — nav + Scope/Session popovers          │
  *   ├────────────────────────────────────────────────┤
- *   │ TopMenu (workflow nav)                         │
+ *   │ SubNav  — the current section's destinations,   │
+ *   │           horizontal. Only inside Analytics and │
+ *   │           Settings; absent elsewhere.           │
  *   ├──────────────┬─────────────────────────────────┤
  *   │ Camera dock  │  Main content                   │
  *   │ (left col)   │                                 │
@@ -24,45 +26,10 @@ import { CapturePill } from '@/components/capture/CapturePill';
  *   └──────────────┴─────────────────────────────────┘
  */
 
-const DOCK_VISIBLE_KEY = 'oyon-mini-camera-visible';
-
-function useDockVisible(): [boolean, (next: boolean) => void] {
-  const [visible, setVisible] = useState(() => {
-    if (typeof localStorage === 'undefined') return true;
-    return localStorage.getItem(DOCK_VISIBLE_KEY) !== 'false';
-  });
-  useEffect(() => {
-    function onChange(e: StorageEvent) {
-      if (e.key === DOCK_VISIBLE_KEY) {
-        setVisible(e.newValue !== 'false');
-      }
-    }
-    function onLocal(e: Event) {
-      const detail = (e as CustomEvent<{ visible: boolean }>).detail;
-      if (detail) setVisible(detail.visible);
-    }
-    window.addEventListener('storage', onChange);
-    window.addEventListener('oyon:dock-visible', onLocal as EventListener);
-    return () => {
-      window.removeEventListener('storage', onChange);
-      window.removeEventListener('oyon:dock-visible', onLocal as EventListener);
-    };
-  }, []);
-  function update(next: boolean) {
-    setVisible(next);
-    localStorage.setItem(DOCK_VISIBLE_KEY, next ? 'true' : 'false');
-    window.dispatchEvent(new CustomEvent('oyon:dock-visible', { detail: { visible: next } }));
-  }
-  return [visible, update];
-}
-
 export function AppShell() {
-  const [dockVisible, setDockVisible] = useDockVisible();
-  // FilterBar scopes the stored-window dashboards only; /live is the
-  // realtime view (current capture by definition) and /settings, /help
-  // don't render windows.
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const showFilterBar = pathname.startsWith('/analyze') || pathname.startsWith('/sessions');
+  // Closing the preview is session-local. A reload always restores it, and
+  // the top bar plus the collapsed handle can reopen it immediately.
+  const [dockVisible, setDockVisible] = useState(true);
   const chromeMode = useBridge((s) => s.chromeMode);
   const chromeless = chromeMode === 'none';
 
@@ -105,7 +72,7 @@ export function AppShell() {
             <CapturePill />
           </div>
           <EmbedHeader />
-          <main className="flex-1 overflow-auto px-6 py-5" role="main" tabIndex={-1}>
+          <main className="flex-1 overflow-auto px-6 py-4" role="main" tabIndex={-1}>
             <Outlet />
           </main>
         </div>
@@ -124,7 +91,7 @@ export function AppShell() {
       <RuntimeProvider>
         <div className="flex h-full min-h-screen flex-col bg-surface-0 text-ink-0">
           <EmbedHeader />
-          <main className="flex-1 overflow-auto px-6 py-5" role="main" tabIndex={-1}>
+          <main className="flex-1 overflow-auto px-6 py-4" role="main" tabIndex={-1}>
             <Outlet />
           </main>
         </div>
@@ -134,30 +101,31 @@ export function AppShell() {
 
   return (
     <RuntimeProvider>
-      <div className="flex h-full min-h-screen flex-col bg-surface-0 text-ink-0">
-        <TopBar />
-        <TopMenu />
-        {showFilterBar ? <FilterBar /> : null}
-        <div className="flex flex-1 overflow-hidden">
-          {dockVisible ? (
-            <aside
-              className="flex shrink-0 w-72 md:w-80 xl:w-96 border-r border-line bg-surface-1 flex-col overflow-y-auto"
-              aria-label="Camera dock"
+      <CameraDockProvider visible={dockVisible} setVisible={setDockVisible}>
+        <div className="flex h-full min-h-screen flex-col bg-surface-0 text-ink-0">
+          <TopMenu />
+          <SubNav />
+          <div className="flex flex-1 overflow-hidden">
+            {dockVisible ? (
+              <aside
+                className="flex shrink-0 w-72 md:w-80 xl:w-96 border-r border-line bg-surface-1 flex-col overflow-y-auto"
+                aria-label="Camera dock"
+              >
+                <MiniCamera onHide={() => setDockVisible(false)} />
+              </aside>
+            ) : null}
+            <main
+              className="flex-1 overflow-auto px-6 py-4"
+              role="main"
+              tabIndex={-1}
             >
-              <MiniCamera onHide={() => setDockVisible(false)} />
-            </aside>
-          ) : null}
-          <main
-            className="flex-1 overflow-auto px-6 py-5"
-            role="main"
-            tabIndex={-1}
-          >
-            <Outlet />
-          </main>
+              <Outlet />
+            </main>
+          </div>
+          {!dockVisible ? <MiniCamera onShow={() => setDockVisible(true)} collapsedPill /> : null}
+          <LiveGazeDot />
         </div>
-        {!dockVisible ? <MiniCamera onShow={() => setDockVisible(true)} collapsedPill /> : null}
-        <LiveGazeDot />
-      </div>
+      </CameraDockProvider>
     </RuntimeProvider>
   );
 }

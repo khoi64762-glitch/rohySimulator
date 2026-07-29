@@ -12,7 +12,11 @@ import {
   type HostBridgeStore,
 } from '@/lib/hostBridge';
 import elementCss from '@/styles/element.css?inline';
-import type { EmotionWindow } from 'oyon';
+import {
+  OYON_HOST_CONTRACT_VERSION,
+  OYON_VERSION,
+  type EmotionWindow,
+} from 'oyon';
 
 /*
  * <oyon-app> — the full Oyon Research Instrument as an embeddable custom
@@ -22,7 +26,8 @@ import type { EmotionWindow } from 'oyon';
  *
  * Host contract (see docs/EMBEDDING.md):
  *   attributes  user-id, user-label, session-id, api-base-url, asset-base,
- *               page  (identity attrs apply live)
+ *               page, sample-events, sample-event-hz
+ *               (identity and sample-event attrs apply live)
  *   property    getToken: () => string | Promise<string>
  *   methods     start(), stop()
  *   events      oyon:window  { windows, sessionId, userId }
@@ -137,6 +142,15 @@ const OBSERVED = [
   // ignored with a console warning. Like gaze-engine, a live change takes
   // effect on the NEXT start().
   'settings',
+  // Host-facing per-sample event delivery. Omitted / "source" preserves the
+  // v3 full-rate behavior. "throttled" limits DOM event dispatch to
+  // sample-event-hz (default 1); "off" suppresses only the host DOM event,
+  // never Oyon's internal capture/aggregation. The legacy live-samples
+  // attribute remains accepted: false/0/off suppresses, every other value
+  // preserves the v3 source-rate default.
+  'sample-events',
+  'sample-event-hz',
+  'live-samples',
   // chrome selects the delivery shell:
   //   absent       → 'full'    : today's full app, untouched.
   //   "none"       → 'none'    : viewer-only — drops capture chrome
@@ -151,6 +165,35 @@ const OBSERVED = [
   //                  REAL runtime — one element, both capture and analytics.
   'chrome',
 ] as const;
+
+type SampleEventMode = 'source' | 'throttled' | 'off';
+
+function sampleEventMode(
+  value: string | null,
+  legacyValue: string | null,
+): SampleEventMode {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === 'throttled') return 'throttled';
+  if (normalized === 'off' || normalized === 'none' || normalized === 'false' || normalized === '0') {
+    return 'off';
+  }
+  if (normalized === 'source' || normalized === 'full' || normalized === '' || normalized == null) {
+    if (normalized == null && legacyValue != null) {
+      const legacy = legacyValue.trim().toLowerCase();
+      if (legacy === 'off' || legacy === 'false' || legacy === '0') return 'off';
+    }
+    return 'source';
+  }
+  return 'source';
+}
+
+function sampleEventHz(value: string | null): number {
+  if (value == null || value.trim() === '') return 1;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.max(0.1, Math.min(60, parsed))
+    : 1;
+}
 
 /** Parse the `chrome` attribute into the four recognized modes. Anything
  *  unrecognized falls back to 'full' (today's app), so a typo never silently
@@ -202,9 +245,15 @@ function parseSettingsAttribute(value: string | null): Record<string, unknown> |
 }
 
 export class OyonAppElement extends HTMLElement {
+  static readonly version = OYON_VERSION;
+  static readonly hostContractVersion = OYON_HOST_CONTRACT_VERSION;
+
   static get observedAttributes(): string[] {
     return [...OBSERVED];
   }
+
+  readonly version = OYON_VERSION;
+  readonly hostContractVersion = OYON_HOST_CONTRACT_VERSION;
 
   /** Bearer-token provider for the optional sync leg. Set before start(). */
   getToken: (() => string | Promise<string>) | null = null;
@@ -215,6 +264,7 @@ export class OyonAppElement extends HTMLElement {
    *  element. Never shared, so a viewer's setBridge can't clobber a capture
    *  instance's runtime. Null until connectedCallback runs. */
   private bridge: HostBridgeStore | null = null;
+  private lastHostSampleAt = Number.NEGATIVE_INFINITY;
 
   connectedCallback(): void {
     if (this.reactRoot) return; // re-append of the same node — already live
@@ -243,6 +293,9 @@ export class OyonAppElement extends HTMLElement {
     // `chrome` post-mount (unsupported; the runtime ignores it) can't resize the
     // embed. Set once here and never changed.
     this.setAttribute('data-oyon-chrome', chromeMode);
+    this.setAttribute('data-oyon-version', OYON_VERSION);
+    this.setAttribute('data-oyon-contract', OYON_HOST_CONTRACT_VERSION);
+    this.warnInvalidSampleAttributes();
 
     const shadow = this.shadowRoot ?? this.attachShadow({ mode: 'open' });
     adoptStyles(shadow, elementCss);
@@ -268,12 +321,17 @@ export class OyonAppElement extends HTMLElement {
       // simply omits the Authorization header.
       getToken: () => (this.getToken ? this.getToken() : null),
       emitHostEvent: (type, detail) => {
+        if (type === 'oyon:sample' && !this.shouldEmitHostSample()) return;
         // EVERY host event (oyon:window / oyon:status / oyon:sample) bubbles and
         // crosses the shadow boundary (composed), so a host can listen on the
         // element or any ancestor. The full signal is exposed — Oyon is
         // research-grade (CLAUDE.md "Data policy").
         this.dispatchEvent(
-          new CustomEvent(type, { detail, bubbles: true, composed: true }),
+          new CustomEvent(type, {
+            detail: this.withContractMetadata(detail),
+            bubbles: true,
+            composed: true,
+          }),
         );
       },
     });
@@ -396,6 +454,14 @@ export class OyonAppElement extends HTMLElement {
         // attribute change never reconfigures a running capture.
         this.bridge?.getState().setBridge({ settingsOverride: parseSettingsAttribute(value) });
         break;
+      case 'sample-events':
+      case 'sample-event-hz':
+      case 'live-samples':
+        // Host-event delivery controls apply immediately and never alter the
+        // internal inference/aggregation cadence.
+        this.lastHostSampleAt = Number.NEGATIVE_INFINITY;
+        this.warnInvalidSampleAttributes();
+        break;
       case 'page':
         if (value) void this.router?.navigate({ to: value });
         break;
@@ -473,6 +539,64 @@ export class OyonAppElement extends HTMLElement {
     const next = Array.isArray(aois) ? aois : [];
     this.bridge?.getState().setBridge({ gazeAois: next });
     this.bridge?.getState().controls?.setGazeAois?.(next);
+  }
+
+  private shouldEmitHostSample(): boolean {
+    const mode = sampleEventMode(
+      this.getAttribute('sample-events'),
+      this.getAttribute('live-samples'),
+    );
+    if (mode === 'off') return false;
+    if (mode === 'source') return true;
+
+    const now = performance.now();
+    const intervalMs = 1_000 / sampleEventHz(this.getAttribute('sample-event-hz'));
+    if (now - this.lastHostSampleAt < intervalMs) return false;
+    this.lastHostSampleAt = now;
+    return true;
+  }
+
+  private withContractMetadata(detail: unknown): Record<string, unknown> {
+    const value = detail && typeof detail === 'object' && !Array.isArray(detail)
+      ? detail as Record<string, unknown>
+      : { value: detail };
+    return {
+      ...value,
+      oyonVersion: OYON_VERSION,
+      contractVersion: OYON_HOST_CONTRACT_VERSION,
+    };
+  }
+
+  private warnInvalidSampleAttributes(): void {
+    const mode = this.getAttribute('sample-events');
+    if (mode != null) {
+      const normalized = mode.trim().toLowerCase();
+      const recognized = new Set([
+        '',
+        'source',
+        'full',
+        'throttled',
+        'off',
+        'none',
+        'false',
+        '0',
+      ]);
+      if (!recognized.has(normalized)) {
+        console.warn(
+          `[oyon-app] unrecognized sample-events="${mode}" — using "source". ` +
+            'Valid: "source" | "throttled" | "off".',
+        );
+      }
+    }
+    const hz = this.getAttribute('sample-event-hz');
+    if (hz != null && hz.trim() !== '') {
+      const parsed = Number(hz);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        console.warn(
+          `[oyon-app] invalid sample-event-hz="${hz}" — using 1 Hz when throttled.`,
+        );
+      }
+    }
   }
 
   private applyIdentityAttributes(): void {

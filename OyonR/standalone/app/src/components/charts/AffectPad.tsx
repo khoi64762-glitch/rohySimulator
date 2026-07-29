@@ -152,8 +152,12 @@ export function AffectPad({ recentWindows, size = 280 }: AffectPadProps) {
     (w) => valenceOf(w) != null && arousalOf(w) != null,
   );
 
+  // The pad is a FIXED square in both states — the empty-state note overlays
+  // the canvas rather than stacking under it. Stacked, it made the component
+  // ~48px taller only while empty, so any card row sized to it changed height
+  // the moment the first sample arrived.
   return (
-    <div className="flex flex-col items-center gap-2">
+    <div className="relative" style={{ width: size, height: size }}>
       <canvas
         ref={canvasRef}
         style={{ width: size, height: size }}
@@ -161,7 +165,7 @@ export function AffectPad({ recentWindows, size = 280 }: AffectPadProps) {
         aria-label="Valence and arousal scatter plot"
       />
       {!hasData ? (
-        <div className="text-xs text-ink-3">
+        <div className="absolute inset-x-4 top-1/2 -translate-y-1/2 text-center text-xs leading-relaxed text-ink-3">
           No valence/arousal samples yet — the current classifier may not emit
           V/A, or capture hasn't started.
         </div>

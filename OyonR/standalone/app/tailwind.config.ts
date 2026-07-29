@@ -8,7 +8,7 @@ import animate from 'tailwindcss-animate';
  * usable from any future non-React surface that wants the same palette.
  */
 export default {
-  content: ['./index.html', './src/**/*.{ts,tsx}'],
+  content: ['./index.html', './src/**/*.{ts,tsx,js,jsx}'],
   darkMode: ['selector', '[data-theme="dark"]'],
   theme: {
     extend: {

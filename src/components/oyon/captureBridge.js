@@ -1,4 +1,4 @@
-// Pure glue between Rohy and the embedded <oyon-app> element (Oyon v2).
+// Pure glue between Rohy and the embedded <oyon-app> element (Oyon v3).
 //
 // Kept free of React and the DOM so unit tests can pin the exact payloads
 // that cross the two host contracts:
@@ -14,6 +14,8 @@
 // With asset-base set, the element never touches a CDN — every model and
 // WASM file loads same-origin, which is what keeps air-gapped deploys
 // working (the bundles arrive via OyonR/scripts/download-models.sh).
+import { OYON_WINDOW_BATCH_SCHEMA_VERSION } from 'oyon/version';
+
 export const OYON_ASSET_BASE = '/oyon/standalone';
 
 // Map the tenant runtime config (server field names, see DEFAULT_RUNTIME in
@@ -55,6 +57,7 @@ function assignFiniteNumber(target, key, value) {
 export function persistBody(windows, { sessionId, caseId, room } = {}) {
     const events = Array.isArray(windows) ? windows : [];
     return {
+        schema_version: OYON_WINDOW_BATCH_SCHEMA_VERSION,
         session_id: sessionId,
         events: events.map(ev => ({
             ...sanitizeWindowForPersistence(ev),

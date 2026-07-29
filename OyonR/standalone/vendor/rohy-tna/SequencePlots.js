@@ -96,10 +96,20 @@ export function renderDistributionPlot(container, sequences, labels) {
       rect.appendChild(title);
       svg.appendChild(rect);
     }
-    svg.appendChild(el('text', {
-      x: x + barWidth / 2, y: DP_TOP_MARGIN + plotHeight + 14,
-      'text-anchor': 'middle', fill: 'var(--tna-svg-axis, #6b7280)', 'font-size': 10,
-    }, [String(ts.step)]));
+    // Oyon override: one label per bar becomes unreadable on real sessions.
+    // Ground the axis at 1, then label every 10 timepoints.
+    if (ts.step === 1 || ts.step % 10 === 0) {
+      const tickX = x + barWidth / 2;
+      svg.appendChild(el('line', {
+        x1: tickX, y1: DP_TOP_MARGIN + plotHeight,
+        x2: tickX, y2: DP_TOP_MARGIN + plotHeight + 4,
+        stroke: 'var(--tna-svg-axis, #6b7280)', 'stroke-width': 0.75,
+      }));
+      svg.appendChild(el('text', {
+        x: tickX, y: DP_TOP_MARGIN + plotHeight + 14,
+        'text-anchor': 'middle', fill: 'var(--tna-svg-axis, #6b7280)', 'font-size': 10,
+      }, [String(ts.step)]));
+    }
   });
 
   svg.appendChild(el('text', {

@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Oyon — v3 sensing demo (facial · posture · heart-rate)</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font: 14px/1.5 system-ui, sans-serif;
+      background: #0e1116; color: #e6edf3; padding: 16px;
+    }
+    h1 { font-size: 18px; margin: 0 0 4px; }
+    .sub { color: #8b949e; margin: 0 0 16px; font-size: 12px; }
+    .bar { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+    button {
+      font: inherit; padding: 8px 16px; border-radius: 8px; border: 1px solid #30363d;
+      background: #21262d; color: #e6edf3; cursor: pointer;
+    }
+    button.primary { background: #238636; border-color: #2ea043; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    #status { color: #8b949e; font-size: 12px; }
+    .grid { display: grid; grid-template-columns: 200px repeat(3, 1fr); gap: 12px; align-items: start; }
+    .card { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 12px; }
+    .card h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: #8b949e; margin: 0 0 8px; }
+    video { width: 100%; border-radius: 8px; background: #000; transform: scaleX(-1); }
+    .kv { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; font-variant-numeric: tabular-nums; }
+    .kv span:first-child { color: #8b949e; }
+    .big { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .muted { color: #8b949e; }
+    .warn { color: #f0883e; font-size: 11px; margin-top: 6px; }
+    .loghdr { display: flex; justify-content: space-between; align-items: center;
+      margin-top: 12px; margin-bottom: 6px; }
+    .loghdr .lbl { font-size: 12px; color: #8b949e; }
+    #copyAll { font-size: 12px; padding: 4px 10px; }
+    .loglist { background: #0d1117; border: 1px solid #30363d; border-radius: 10px; padding: 8px;
+      height: 70vh; overflow: auto; font-size: 12px; resize: vertical; }
+    .logrow { display: flex; gap: 8px; align-items: flex-start; padding: 3px 4px;
+      border-bottom: 1px solid #1b222b; }
+    .logrow:last-child { border-bottom: 0; }
+    .logrow code { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word;
+      line-height: 1.6; user-select: text; }
+    .copybtn { flex-shrink: 0; font: inherit; font-size: 12px; line-height: 1; padding: 3px 7px;
+      cursor: pointer; background: #21262d; border: 1px solid #30363d; color: #e6edf3;
+      border-radius: 6px; }
+    .copybtn:hover { background: #30363d; }
+    .copybtn.copied { color: #2ea043; border-color: #2ea043; }
+    .barfill { height: 6px; background: #30363d; border-radius: 3px; overflow: hidden; margin-top: 4px; }
+    .barfill > div { height: 100%; background: #2ea043; width: 0; transition: width .2s; }
+    .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px;
+      font-weight: 600; border: 1px solid transparent; }
+    .badge.measuring { background: rgba(46,160,67,.18); color: #3fb950; border-color: #2ea04366; }
+    .badge.acquiring { background: rgba(210,153,34,.18); color: #d29922; border-color: #bb800966; }
+    .badge.paused { background: rgba(88,166,255,.18); color: #58a6ff; border-color: #1f6feb66; }
+    .badge.unsure { background: rgba(139,148,158,.18); color: #8b949e; border-color: #6e768166; }
+    .hrctl { margin-top: 10px; padding-top: 8px; border-top: 1px solid #21262d; display: flex;
+      flex-direction: column; gap: 6px; }
+    .hrctl label { display: grid; grid-template-columns: 74px 1fr 36px; align-items: center; gap: 6px;
+      font-size: 11px; color: #8b949e; }
+    .hrctl input[type=range] { width: 100%; accent-color: #2ea043; }
+    .hrctl .val { text-align: right; color: #e6edf3; font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body>
+  <h1>Oyon v3 sensing demo</h1>
+  <p class="sub">Live: facial signals (head pose + action units) · body posture · rPPG heart rate.
+    Real MediaPipe face + pose trackers; emotion classifier is mocked to isolate the new pipelines.
+    Facial &amp; posture use the heavier runtime cadence; ROI colour is acquired independently at up to 30 fps.
+    <strong>Heart rate is a rolling ~10 s estimate updated ~1×/s</strong> —
+    it can't be sensed instantaneously. Grant camera access, then sit still &amp; well-lit and wait ~10 s
+    for the heart-rate window to fill.</p>
+
+  <div class="bar">
+    <button id="start" class="primary">Start camera</button>
+    <button id="stop" disabled>Stop</button>
+    <label style="font-size:12px; color:#8b949e;"><input type="checkbox" id="postureOn" checked /> body posture</label>
+    <span style="font-size:11px; color:#6e7681;">(posture no longer controls rPPG sampling fps)</span>
+    <span id="status">idle</span>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Camera</h2>
+      <div id="videoHost"></div>
+      <div class="kv"><span>fps (heavy pipeline)</span><span id="fps">—</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Facial signals</h2>
+      <div class="kv"><span>pitch</span><span id="pitch">—</span></div>
+      <div class="kv"><span>yaw</span><span id="yaw">—</span></div>
+      <div class="kv"><span>roll</span><span id="roll">—</span></div>
+      <div class="kv"><span>facing screen</span><span id="facing">—</span></div>
+      <div class="kv"><span>smile</span><span id="smile">—</span></div>
+      <div class="kv"><span>brow furrow</span><span id="furrow">—</span></div>
+      <div class="kv"><span>jaw open</span><span id="jaw">—</span></div>
+      <div class="kv"><span>eye wide</span><span id="wide">—</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Body posture</h2>
+      <div class="kv"><span>shoulder tilt°</span><span id="tilt">—</span></div>
+      <div class="kv"><span>torso lean°</span><span id="lean">—</span></div>
+      <div class="kv"><span>head lateral</span><span id="lateral">—</span></div>
+      <div class="kv"><span>head above</span><span id="above">—</span></div>
+      <div class="kv"><span>proximity</span><span id="prox">—</span></div>
+      <div class="kv"><span>visibility</span><span id="vis">—</span></div>
+      <div class="kv"><span>valid</span><span id="pvalid">—</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Heart rate (rPPG · rolling ~10 s)</h2>
+      <div class="big"><span id="bpm">—</span> <span class="muted" style="font-size:14px">bpm</span></div>
+      <div class="kv"><span>state</span><span id="hrstate" class="badge unsure">—</span></div>
+      <div class="kv"><span>window robust / raw</span><span id="hrrobust">—</span></div>
+      <div class="kv"><span>anomalies (fold/drop)</span><span id="hranom">—</span></div>
+      <div class="kv"><span>slew clamp</span><span id="hrslew">—</span></div>
+      <div class="kv"><span>integration window</span><span id="hrwin">—</span></div>
+      <div class="kv"><span>confidence</span><span id="conf">—</span></div>
+      <div class="kv"><span>SNR</span><span id="snr">—</span></div>
+      <div class="kv"><span>samples in buffer</span><span id="hrn">—</span></div>
+      <div class="kv"><span>effective fps</span><span id="hrfs">—</span></div>
+      <div class="barfill"><div id="conffill"></div></div>
+
+      <div class="hrctl">
+        <label>target fps<input type="range" id="ctlFps" min="5" max="30" step="1" value="20" /><span class="val" id="ctlFpsV">20</span></label>
+        <label>min conf<input type="range" id="ctlConf" min="0" max="1" step="0.05" value="0.5" /><span class="val" id="ctlConfV">0.50</span></label>
+        <label>max motion°<input type="range" id="ctlMot" min="0" max="10" step="0.5" value="3" /><span class="val" id="ctlMotV">3</span></label>
+      </div>
+
+      <p class="warn">Drag the sliders live: raise <b>min conf</b> to drop unsure reads,
+        lower <b>max motion°</b> to pause sooner when you move. Each BPM is a ~10 s
+        estimate updated ~1×/s — research-grade trend, not clinical.</p>
+    </div>
+  </div>
+
+  <div class="loghdr">
+    <span class="lbl">Window logs (newest first)</span>
+    <button id="copyAll" class="copybtn" type="button">⧉ Copy all</button>
+  </div>
+  <div id="windows" class="loglist">window blocks will stream here…</div>
+
+  <script type="module">
+    import {
+      EmotionRuntime,
+      MediaPipeFaceTracker,
+      MediaPipePoseTracker,
+      MockEmotionClassifier,
+    } from '/src/index.js';
+
+    const $ = (id) => document.getElementById(id);
+    const fmt = (v, d = 1) => (typeof v === 'number' && isFinite(v) ? v.toFixed(d) : '—');
+    const pct = (v) => (typeof v === 'number' && isFinite(v) ? (v * 100).toFixed(0) + '%' : '—');
+    const median = (a) => {
+      if (!a.length) return null;
+      const s = a.slice().sort((x, y) => x - y);
+      const m = Math.floor(s.length / 2);
+      return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+    };
+
+    let runtime = null;
+    const recentBpm = []; // rolling median for a stable displayed number
+    const logs = [];      // window-log entries, newest first
+
+    function copyText(text, btn) {
+      const done = () => {
+        if (!btn) return;
+        const orig = btn.textContent;
+        btn.textContent = '✓ Copied';
+        btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1000);
+      };
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+      } else {
+        fallbackCopy(text, done);
+      }
+    }
+    function fallbackCopy(text, done) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); } catch { /* ignore */ }
+      document.body.removeChild(ta);
+      done();
+    }
+    function renderLogs() {
+      const host = $('windows');
+      host.textContent = '';
+      for (const entry of logs.slice(0, 200)) {
+        const line = JSON.stringify(entry);
+        const row = document.createElement('div');
+        row.className = 'logrow';
+        const code = document.createElement('code');
+        code.textContent = line;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'copybtn';
+        btn.textContent = '⧉';
+        btn.title = 'Copy this line';
+        btn.addEventListener('click', () => copyText(line, btn));
+        row.append(code, btn);
+        host.appendChild(row);
+      }
+    }
+    $('copyAll').addEventListener('click', () => {
+      copyText(logs.slice(0, 200).map((l) => JSON.stringify(l)).join('\n'), $('copyAll'));
+    });
+
+    // Live rPPG gate controls — mutate the running runtime so you can watch the
+    // gating react without restarting the camera.
+    function bindCtl(id, valId, decimals, apply) {
+      const el = $(id);
+      const lab = $(valId);
+      const upd = () => {
+        const v = parseFloat(el.value);
+        lab.textContent = v.toFixed(decimals);
+        apply(v);
+      };
+      el.addEventListener('input', upd);
+      upd();
+    }
+    bindCtl('ctlFps', 'ctlFpsV', 0, (v) => { if (runtime?.heartRateSampler) runtime.heartRateSampler.targetFps = v; });
+    bindCtl('ctlConf', 'ctlConfV', 2, (v) => { if (runtime?.heartRateEstimator) runtime.heartRateEstimator.options.minConfidence = v; });
+    bindCtl('ctlMot', 'ctlMotV', 1, (v) => { if (runtime?.settings) runtime.settings.heart_rate_max_head_movement_deg = v; });
+
+    function setHrBadge(kind, text) {
+      const el = $('hrstate');
+      el.className = 'badge ' + kind;
+      el.textContent = text;
+    }
+
+    $('start').onclick = async () => {
+      $('start').disabled = true;
+      recentBpm.length = 0;
+      $('status').textContent = 'loading models…';
+
+      const postureOn = $('postureOn').checked;
+      runtime = new EmotionRuntime({
+        // Real trackers → real head pose / blendshapes / body landmarks / ROI.
+        faceTracker: new MediaPipeFaceTracker(),
+        ...(postureOn ? { poseTracker: new MediaPipePoseTracker() } : {}),
+        // Mock the emotion label so we don't download the ONNX model — the three
+        // new pipelines don't depend on it.
+        classifier: new MockEmotionClassifier(),
+        settings: {
+          // This only controls the heavy face/emotion/posture pipeline. The
+          // runtime's lightweight ROI sampler follows camera frames separately.
+          sample_interval_ms: 250,
+          aggregate_window_ms: 5000,
+          min_valid_frames: 3,
+          facial_signals_enabled: true,
+          posture_tracking_enabled: postureOn,
+          posture_model: 'lite',
+          heart_rate_enabled: true,
+          heart_rate_method: 'pos',
+          heart_rate_buffer_seconds: 12,
+          heart_rate_target_fps: parseFloat($('ctlFps').value),
+          heart_rate_min_confidence: parseFloat($('ctlConf').value),
+          heart_rate_max_head_movement_deg: parseFloat($('ctlMot').value),
+        },
+      });
+
+      runtime.on('status', (s) => { $('status').textContent = s.state; });
+      runtime.on('error', (e) => { $('status').textContent = 'error: ' + (e?.message || e); });
+
+      // Per-frame live readout.
+      let lastTs = 0, fps = 0;
+      runtime.on('sample', (ev) => {
+        const now = performance.now();
+        if (lastTs) fps = 0.8 * fps + 0.2 * (1000 / (now - lastTs));
+        lastTs = now;
+        $('fps').textContent = fmt(fps, 1);
+
+        const f = ev.facial;
+        if (f) {
+          $('pitch').textContent = f.head_pose ? fmt(f.head_pose.pitch_deg) + '°' : '—';
+          $('yaw').textContent = f.head_pose ? fmt(f.head_pose.yaw_deg) + '°' : '—';
+          $('roll').textContent = f.head_pose ? fmt(f.head_pose.roll_deg) + '°' : '—';
+          $('facing').textContent = f.facing_screen == null ? '—' : (f.facing_screen ? 'yes' : 'no');
+          $('smile').textContent = fmt(f.action_units.smile, 2);
+          $('furrow').textContent = fmt(f.action_units.brow_furrow, 2);
+          $('jaw').textContent = fmt(f.action_units.jaw_open, 2);
+          $('wide').textContent = fmt(f.action_units.eye_wide, 2);
+        }
+
+        const p = ev.posture;
+        if (p) {
+          $('tilt').textContent = fmt(p.shoulder_tilt_deg);
+          $('lean').textContent = fmt(p.torso_lean_deg);
+          $('lateral').textContent = fmt(p.head_lateral_norm, 2);
+          $('above').textContent = fmt(p.head_above_norm, 2);
+          $('prox').textContent = fmt(p.shoulder_width_norm, 3);
+          $('vis').textContent = pct(p.upper_visibility);
+          $('pvalid').textContent = p.valid ? 'yes' : 'no';
+        }
+
+        const h = ev.heart_rate;
+        const st = runtime.heartRateEstimator ? runtime.heartRateEstimator.status() : null;
+        if (h) {
+          // Throttled to ~1 Hz in the estimator, so this number is stable and
+          // reflects h.window_seconds of integrated signal, not this instant.
+          // Display a rolling median of recent estimates → robust to any residual
+          // octave flip that slips through.
+          if (recentBpm.length === 0 || recentBpm[recentBpm.length - 1] !== h.bpm) {
+            recentBpm.push(h.bpm);
+            if (recentBpm.length > 7) recentBpm.shift();
+          }
+          // The big number is owned by the window handler (slew-limited tracker),
+          // so a single noisy per-sample estimate can't jerk the headline around.
+          setHrBadge('measuring', 'measuring');
+          $('hrwin').textContent = fmt(h.window_seconds, 0) + ' s';
+          $('conf').textContent = pct(h.confidence);
+          $('snr').textContent = fmt(h.snr, 1);
+          $('hrn').textContent = h.n_samples;
+          $('hrfs').textContent = fmt(h.fs, 1);
+          $('conffill').style.width = pct(h.confidence);
+        } else {
+          // No number this tick — say why honestly: acquiring, paused for
+          // motion (sampling stopped so the buffer drained), or unsure (the
+          // window is full but confidence was below the floor, so it's dropped).
+          $('bpm').textContent = '—';
+          if (st) {
+            if (st.reason === 'low_sample_rate') setHrBadge('paused', 'paused — motion / low fps');
+            else if (st.ready) setHrBadge('unsure', 'unsure — low confidence');
+            else setHrBadge('acquiring', 'acquiring ' + pct(st.progress));
+            $('hrwin').textContent = fmt(st.span_seconds, 1) + ' / 8 s min';
+            $('hrn').textContent = st.n_samples;
+            $('hrfs').textContent = fmt(st.sample_rate_hz, 1);
+            $('conffill').style.width = pct(st.ready ? 1 : st.progress);
+          }
+        }
+      });
+
+      // Per-window aggregate blocks. Include rPPG acquisition diagnostics
+      // (sample rate + count) so the copied log is self-diagnosing.
+      logs.length = 0;
+      runtime.on('window', (events) => {
+        const st = runtime.heartRateEstimator ? runtime.heartRateEstimator.status() : null;
+        for (const e of events) {
+          const hr = e.heart_rate;
+          if (hr) {
+            // Headline = the cross-window slew-limited tracker (stable); the
+            // per-window robust and raw means sit below it for transparency.
+            if (hr.bpm_tracked != null) $('bpm').textContent = hr.bpm_tracked.toFixed(0);
+            $('hrrobust').textContent = hr.bpm_robust != null
+              ? `${hr.bpm_robust.toFixed(0)} / ${fmt(hr.bpm_mean, 0)} bpm`
+              : '—';
+            const a = hr.anomaly;
+            $('hranom').textContent = a ? `${a.folded} / ${a.dropped} of ${a.total}` : '—';
+            $('hrslew').textContent = hr.slew_clamped ? 'clamped (implausible jump)' : 'none';
+          }
+          logs.unshift({
+            t: new Date().toLocaleTimeString(),
+            facial: e.facial && { head: e.facial.head_pose_mean, facing: e.facial.facing_screen_ratio, movement: e.facial.head_movement_deg },
+            posture: e.posture && { lean_mean: e.posture.torso_lean_deg_mean, sway: e.posture.postural_sway_deg, valid: e.posture.valid_frame_ratio },
+            heart_rate: hr && { bpm_tracked: hr.bpm_tracked, slew_clamped: hr.slew_clamped, bpm_robust: hr.bpm_robust, bpm_median: hr.bpm_median, bpm_mean: hr.bpm_mean, conf: hr.confidence_mean, anomaly: hr.anomaly },
+            rppg_fps: st ? Number(st.sample_rate_hz.toFixed(1)) : null,
+            rppg_samples: st ? st.n_samples : null,
+          });
+        }
+        renderLogs();
+      });
+
+      try {
+        await runtime.start();
+        // Show the real camera feed the pipelines are reading.
+        const v = runtime.camera.video;
+        if (v) $('videoHost').appendChild(v);
+        $('stop').disabled = false;
+      } catch (err) {
+        $('status').textContent = 'start failed: ' + (err?.message || err);
+        $('start').disabled = false;
+      }
+    };
+
+    $('stop').onclick = async () => {
+      $('stop').disabled = true;
+      if (runtime) await runtime.stop();
+      $('start').disabled = false;
+      $('status').textContent = 'stopped';
+    };
+  </script>
+</body>
+</html>

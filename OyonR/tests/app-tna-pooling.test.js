@@ -5,6 +5,7 @@
 import assert from 'node:assert/strict';
 import {
   buildSessionSequences,
+  buildEventSequences,
   pooledTransitionCounts,
 } from '../standalone/app/src/lib/tnaPooling.js';
 
@@ -54,5 +55,71 @@ assert.deepEqual(norm, [['very-happy', 'insufficient']]);
 assert.deepEqual(buildSessionSequences([]), []);
 assert.deepEqual(buildSessionSequences([w('only', 'happy', '2026-06-11T10:00:00Z')]), [['happy']]);
 assert.equal(pooledTransitionCounts([['happy']]).size, 0);
+
+// ─── buildEventSequences: signal-event log → per-channel chains ──────────
+// (standalone/app/src/lib/tnaPooling.js buildEventSequences, wired into
+// routes/analyze/sequence.tsx and components/patterns/PatternsPanel.tsx)
+
+const e = (session, capture, modality, state, seq) => ({
+  session_id: session,
+  capture_id: capture,
+  modality,
+  state,
+  sequence_index: seq,
+});
+
+// Two captures inside ONE session. `sequence_index` restarts at 0 for each
+// capture (SignalEventLog.start() resets it), so grouping by session alone
+// would sort capture2's low indices into capture1's chain and fabricate a
+// transition between two unrelated captures. Grouping by session+capture_id
+// must keep them as TWO separate chains, never one joined chain.
+const captureEvents = [
+  e('S', 'cap1', 'typing', 'insert', 0),
+  e('S', 'cap1', 'typing', 'pause', 1),
+  e('S', 'cap1', 'typing', 'submit', 2),
+  e('S', 'cap2', 'typing', 'insert', 0),
+  e('S', 'cap2', 'typing', 'delete', 1),
+];
+const captureSeqs = buildEventSequences(captureEvents, 'typing');
+assert.equal(captureSeqs.length, 2, 'two captures in one session must produce TWO chains');
+assert.deepEqual(captureSeqs.find((s) => s.length === 3), ['insert', 'pause', 'submit']);
+assert.deepEqual(captureSeqs.find((s) => s.length === 2), ['insert', 'delete']);
+// A mega-sequence bug would produce one 5-long chain instead of 3+2.
+assert.ok(captureSeqs.every((s) => s.length < 5), 'captures must not be joined end-to-end');
+
+// ─── buildEventSequences: modality filtering ──────────────────────────────
+const mixedEvents = [
+  e('S2', 'capA', 'typing', 'insert', 0),
+  e('S2', 'capA', 'discourse', 'question', 1),
+  e('S2', 'capA', 'typing', 'delete', 2),
+  e('S2', 'capA', 'discourse', 'statement', 3),
+];
+const typingOnly = buildEventSequences(mixedEvents, 'typing');
+assert.equal(typingOnly.length, 1);
+assert.deepEqual(typingOnly[0], ['insert', 'delete']);
+
+const discourseOnly = buildEventSequences(mixedEvents, 'discourse');
+assert.equal(discourseOnly.length, 1);
+assert.deepEqual(discourseOnly[0], ['question', 'statement']);
+
+// ─── buildEventSequences: interleaved all-channel ordering ────────────────
+// modality === null (the 'all channels' selection) interleaves every
+// modality on one timeline, ordered by sequence_index — never grouped by
+// modality first.
+const allChannels = buildEventSequences(mixedEvents, null);
+assert.equal(allChannels.length, 1);
+assert.deepEqual(
+  allChannels[0],
+  ['insert', 'question', 'delete', 'statement'],
+  'all-channel chain must be ordered by sequence_index, interleaving modalities',
+);
+
+// Out-of-order input still sorts by sequence_index within the group.
+const shuffledMixed = [mixedEvents[3], mixedEvents[0], mixedEvents[2], mixedEvents[1]];
+assert.deepEqual(buildEventSequences(shuffledMixed, null)[0], ['insert', 'question', 'delete', 'statement']);
+
+// ─── empty input ────────────────────────────────────────────────────────────
+assert.deepEqual(buildEventSequences([]), []);
+assert.deepEqual(buildEventSequences([], 'typing'), []);
 
 console.log('app-tna-pooling.test.js — all cases passed');

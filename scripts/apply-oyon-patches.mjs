@@ -16,11 +16,9 @@
  *     - Fail-loud: if upstream restructures and an overlay's destination
  *       directory disappears, we exit non-zero so CI catches it.
  *
- * Vendor bundles (mediapipe, onnxruntime-web) are NOT overlaid here — they
- * survive the sync via rsync's --exclude /standalone/vendor flag in
- * scripts/update-oyonr.sh. They're third-party assets, never modified, and
- * keeping them out of git overlay tree avoids dragging ~64MB of binaries
- * around in this script.
+ * Downloaded models and runtime bundles (mediapipe, onnxruntime-web) are NOT
+ * overlaid here — targeted rsync excludes in scripts/update-oyonr.sh preserve
+ * them. Versioned source vendors still refresh from upstream Oyon.
  */
 
 import fs from 'node:fs';
@@ -38,12 +36,9 @@ if (!fs.existsSync(oyonRoot)) {
   process.exit(1);
 }
 if (!fs.existsSync(overlayRoot)) {
-  // Since the Oyon v2 embed, Rohy carries no source patches: the <oyon-app>
-  // element covers everything the old overlays did (asset paths, gaze engine,
-  // Rohy-mode transport) through host attributes. An absent overlay tree is
-  // the expected steady state, not an error — recreate scripts/oyon-overlay/
-  // only if a new Rohy-specific patch becomes unavoidable.
-  console.log('[overlay] no overlay tree — nothing to apply (Oyon v2 embed needs no source patches)');
+  // Rohy carries no Oyon source patches: the <oyon-app> element covers the
+  // integration through host attributes. An absent overlay tree is expected.
+  console.log('[overlay] no overlay tree — nothing to apply');
   process.exit(0);
 }
 
@@ -82,6 +77,34 @@ function walk(dir, rel = '') {
 }
 
 walk(overlayRoot);
+
+// Oyon 3.3.2 renamed the analytics navigation label to "Dynamics", while its
+// own E2E assertion still expects the older "Affect dynamics" label. Keep the
+// vendored release test aligned with the immutable tagged UI after each sync.
+const standaloneE2e = path.join(oyonRoot, 'tests', 'e2e', 'standalone-app.spec.ts');
+if (fs.existsSync(standaloneE2e)) {
+  const source = fs.readFileSync(standaloneE2e, 'utf8');
+  const stale = "await page.getByRole('link', { name: 'Affect dynamics' }).click();";
+  const current = "await page.getByRole('link', { name: 'Dynamics', exact: true }).click();";
+  if (source.includes(stale)) {
+    fs.writeFileSync(
+      standaloneE2e,
+      source
+        .replace(
+          '// (Tab relabeled "Affect dynamics"; route id stays /analyze/sequence.)',
+          '// The route id remains /analyze/sequence.',
+        )
+        .replace(stale, current),
+    );
+    console.log('[overlay] patched tests/e2e/standalone-app.spec.ts navigation label');
+    copied += 1;
+  } else if (source.includes(current)) {
+    unchanged += 1;
+  } else {
+    console.error('[overlay] Oyon standalone navigation assertion changed upstream');
+    missingParent += 1;
+  }
+}
 
 console.log(`[overlay] ${copied} copied, ${unchanged} unchanged, ${missingParent} missing-parent`);
 if (missingParent > 0) process.exit(2);

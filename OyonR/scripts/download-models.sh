@@ -1,18 +1,8 @@
 #!/usr/bin/env bash
 #
-# Download Oyon's bundled model weights and runtime assets from their
-# upstream sources. Idempotent: skips files that already exist with a
-# non-zero size. Use --force to re-download.
-#
-# Run from the repo root (or from anywhere; the script resolves paths
-# relative to its own location).
-#
-#   bash scripts/download-models.sh
-#   bash scripts/download-models.sh --force
-#
-# The standalone demo bundles the required runtime assets by default. This script
-# matters once we move the heavier assets out of the repo (Git LFS or
-# .gitignore) — see scripts/README.md for the migration recipe.
+# Rohy overlay for Oyon's model downloader. In addition to the upstream
+# models, Rohy must vendor the exact peer-dependency WASM/loader files for its
+# same-origin and air-gapped deployment contract.
 
 set -euo pipefail
 
@@ -37,7 +27,7 @@ download() {
   printf '  ✓ saved to %s\n' "$dest"
 }
 
-# Verified upstream URLs.
+# Verified upstream model URLs.
 download \
   "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task" \
   "$MODELS/mediapipe/face_landmarker.task" \
@@ -58,29 +48,21 @@ download \
   "$MODELS/emotion/enet_b0_8_va_mtl.onnx" \
   "HSEmotion EfficientNet-B0 MTL"
 
-# ---------------------------------------------------------------------------
-# Vendor the browser WASM runtimes from the installed peer deps.
-#
-# onnxruntime-web and @mediapipe/tasks-vision ship their .wasm/.mjs under
-# node_modules; the standalone dashboard hard-imports them from
-# standalone/vendor/<pkg>/ (see standalone/app/src/lib/runtime.ts), and
-# .gitignore keeps the heavy binaries (a single ORT .wasm is ~13 MB) out of
-# the repo. So a fresh clone / Docker build must COPY them here from the
-# installed packages, or the Oyon camera widget 404s at load — exactly the
-# fresh-install gap install-from-scratch.yml exists to catch. Copying from
-# node_modules (rather than a pinned CDN URL) guarantees the loader .mjs and
-# its runtime .wasm are the SAME resolved version — ORT breaks silently on
-# loader/runtime version skew.
-#
-# npm may hoist these to the repo-root node_modules or keep them under
-# OyonR/node_modules, so probe both. Runs after `npm install` (the postinstall
-# hook + the Dockerfile's explicit re-run), so the packages are present.
+# Oyon v3 voice pipeline.
+download \
+  "https://raw.githubusercontent.com/snakers4/silero-vad/v5.1.2/src/silero_vad/data/silero_vad.onnx" \
+  "$MODELS/vad/silero_vad.onnx" \
+  "Silero VAD v5.1.2 (ONNX)"
 
-# Echo the first existing "<node_modules>/<rel>" among the candidate roots.
+# Echo the first existing "<node_modules>/<rel>" among candidate roots. npm
+# may hoist peers to the Rohy root or keep them under OyonR/node_modules.
 resolve_in_node_modules() {
   local rel="$1" nm
   for nm in "$ROOT/../node_modules" "$ROOT/node_modules" "$ROOT/../../node_modules"; do
-    if [[ -e "$nm/$rel" ]]; then printf '%s\n' "$nm/$rel"; return 0; fi
+    if [[ -e "$nm/$rel" ]]; then
+      printf '%s\n' "$nm/$rel"
+      return 0
+    fi
   done
   return 1
 }
@@ -97,12 +79,9 @@ copy_vendor() {
   printf '  ✓ %s\n' "$dest"
 }
 
-# ONNX Runtime Web — the SIMD+threaded wasm backend AND its asyncify variant.
-# onnxruntime-web loads `ort-wasm-simd-threaded.asyncify.{mjs,wasm}` at runtime
-# (not the plain build) for the classifier's inference path — omitting it 404s
-# the model load and the Oyon pill shows "Error" (rohy-dev, 2026-07-10). The
-# jsep/webgpu/jspi variants are still skipped: they are only loaded by the
-# WebGPU/WebNN execution providers, which this app does not enable.
+# ONNX Runtime Web. Loader and WASM must come from the same resolved package;
+# version skew fails silently in the browser. Rohy's release probes require
+# both the standard and asyncify SIMD/threaded variants.
 if ort_dist="$(resolve_in_node_modules onnxruntime-web/dist)"; then
   for f in ort.min.mjs \
            ort-wasm-simd-threaded.mjs ort-wasm-simd-threaded.wasm \
@@ -113,11 +92,8 @@ else
   echo "  ⚠ onnxruntime-web not found in node_modules — run 'npm install' first (skipping ORT vendor)" >&2
 fi
 
-# MediaPipe tasks-vision — the standalone hard-imports the ESM entry
-# (vision_bundle.mjs, at the package root) AND loads the face-landmarker WASM
-# from the wasm/ subdir. Vendor BOTH: the loader to mediapipe/vision_bundle.mjs
-# and the runtime to mediapipe/wasm/ (see standalone/app/src/lib/runtime.ts and
-# the install-from-scratch probe list).
+# MediaPipe tasks-vision. Vendor both its ESM loader and the matching WASM
+# directory for the same-origin/air-gap runtime.
 if mp_root="$(resolve_in_node_modules @mediapipe/tasks-vision)"; then
   copy_vendor "$mp_root/vision_bundle.mjs" "$VENDOR/mediapipe/vision_bundle.mjs" "mediapipe/vision_bundle.mjs"
   printf '→ %s\n' "@mediapipe/tasks-vision wasm"

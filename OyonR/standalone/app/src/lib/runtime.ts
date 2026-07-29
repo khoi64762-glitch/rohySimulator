@@ -169,6 +169,91 @@ export interface EyeSampleSnapshot {
   ts: number;
 }
 
+export interface FacialSampleSnapshot {
+  /** Head rotation in degrees, or null when no usable transformation matrix. */
+  pitchDeg: number | null;
+  yawDeg: number | null;
+  rollDeg: number | null;
+  /** Within facial_frontal_half_angle_deg of straight ahead. */
+  facingScreen: boolean | null;
+  /** Named action-unit proxies derived from blendshapes, 0..1. */
+  actionUnits: Record<string, number>;
+  valid: boolean;
+  ts: number;
+}
+
+export interface PostureSampleSnapshot {
+  shoulderTiltDeg: number | null;
+  torsoLeanDeg: number | null;
+  headLateralNorm: number | null;
+  headAboveNorm: number | null;
+  shoulderWidthNorm: number | null;
+  upperVisibility: number | null;
+  valid: boolean;
+  ts: number;
+}
+
+export interface HeartRateSampleSnapshot {
+  /** Throttled to ~1Hz and gated on a minimum buffer — null while acquiring. */
+  bpm: number | null;
+  snr: number | null;
+  confidence: number | null;
+  /** Seconds of signal this BPM integrates over. HR is never instantaneous. */
+  windowSeconds: number | null;
+  method: string | null;
+  /** True when this event carried a new/current estimate; false means held. */
+  current: boolean;
+  qualityAccepted: boolean | null;
+  measurementTs: number | null;
+  /** False while filling; true + null BPM means the candidate was rejected. */
+  ready: boolean | null;
+  progress: number | null;
+  bufferedSeconds: number | null;
+  statusReason: string | null;
+  sampleRateHz: number | null;
+  ts: number;
+}
+
+export interface RespirationSampleSnapshot {
+  /** Breaths per minute, or null when no rate is currently confirmed. */
+  brpm: number | null;
+  confidence: number | null;
+  /** Seconds of signal this rate integrates over — long by necessity. */
+  windowSeconds: number | null;
+  /** True when this event carried a new/current estimate; false means held. */
+  current: boolean;
+  qualityAccepted: boolean | null;
+  measurementTs: number | null;
+  /** Whether the minimum contiguous signal window has been collected. */
+  buffered: boolean | null;
+  /** Whether the buffer and its sampling cadence are both usable. */
+  ready: boolean | null;
+  progress: number | null;
+  bufferedSeconds: number | null;
+  minWindowSeconds: number | null;
+  statusReason: string | null;
+  estimateState: string | null;
+  confirmationCount: number | null;
+  confirmationRequired: number | null;
+  sampleRateHz: number | null;
+  rgbCorroborationAvailable: boolean | null;
+  rgbCorroborationAgrees: boolean | null;
+  rgbCorroborationRequired: boolean | null;
+  ts: number;
+}
+
+export interface IlluminationSampleSnapshot {
+  /** Rec.709 luma, 0..1. */
+  meanLuma: number | null;
+  /** 0..1 exposure-and-clipping score. */
+  quality: number | null;
+  /** 'good' | 'dim' | 'bright' | 'backlit' | 'unstable' */
+  assessment: string | null;
+  clippedLow: number | null;
+  clippedHigh: number | null;
+  ts: number;
+}
+
 export interface UseStandaloneRuntimeResult {
   status: RuntimeStatus;
   error: unknown;
@@ -181,6 +266,19 @@ export interface UseStandaloneRuntimeResult {
   lastPrediction: PredictionSnapshot | null;
   /** Most recent privacy-safe eye/engagement sample from the face stream. */
   lastEye: EyeSampleSnapshot | null;
+  /** Most recent facial-signal sample (head pose + action units). Null when
+   *  facial_signals_enabled is off or before the first usable face. */
+  lastFacial: FacialSampleSnapshot | null;
+  /** Most recent body-posture sample. Null when posture_tracking_enabled is
+   *  off or before the pose model resolves a torso. */
+  lastPosture: PostureSampleSnapshot | null;
+  /** Most recent rPPG estimate. Null while the buffer is still filling — the
+   *  Live screen shows acquisition progress rather than a fabricated BPM. */
+  lastHeartRate: HeartRateSampleSnapshot | null;
+  /** Most recent breathing-rate estimate (low band of the same ROI stream). */
+  lastRespiration: RespirationSampleSnapshot | null;
+  /** Most recent ambient-lighting reading — the quality covariate. */
+  lastIllumination: IlluminationSampleSnapshot | null;
   /** Most recent gaze sample from the active adapter — drives the floating
    *  gaze dot. Null before the adapter emits its first sample. */
   lastGaze: GazeSnapshot | null;
@@ -348,22 +446,7 @@ function buildRuntime({
   const classifier = new OnnxEmotionClassifier(classifierConfig);
 
   const settings = createOyonSettings({
-    profile_id: 'learning-analytics',
-    model_profile: editable.model_profile,
-    sample_interval_ms: editable.sample_interval_ms,
-    aggregate_window_ms: editable.aggregate_window_ms,
-    min_valid_frames: editable.min_valid_frames,
-    smoothing_alpha: editable.smoothing_alpha,
-    min_hold_ms: editable.min_hold_ms,
-    switch_confidence: editable.switch_confidence,
-    logging_mode: 'windows-and-runtime',
-    enable_dynamics: true,
-    eye_tracking_enabled: editable.eye_tracking_enabled,
-    gaze_tracking_enabled: editable.gaze_tracking_enabled,
-    gaze_engine: editable.gaze_engine,
-    gaze_calibration_required: editable.gaze_calibration_required,
-    gaze_zone_grid: editable.gaze_zone_grid,
-    gaze_min_quality_score: editable.gaze_min_quality_score,
+    ...oyonSettingsInput(editable),
     // Host-supplied AOIs (el.setGazeAois BEFORE start) win over the persisted
     // setting; live updates while running go through controls.setGazeAois.
     gaze_aois: bridgeStore.getState().gazeAois ?? undefined,
@@ -521,6 +604,11 @@ function useViewerStubRuntime(
     lastFace: null,
     lastPrediction: null,
     lastEye: null,
+    lastFacial: null,
+    lastPosture: null,
+    lastHeartRate: null,
+    lastRespiration: null,
+    lastIllumination: null,
     lastGaze: null,
     eyeSampleCount: 0,
     gazeSampleCount: 0,
@@ -549,8 +637,8 @@ export function useStandaloneRuntime(
 ): UseStandaloneRuntimeResult {
   // chrome="none" embed: pure analytics viewer. Read the flag ONCE from THIS
   // instance's per-element bridge store and delegate to the stub, which
-  // constructs NO capture machinery (no classifier, no camera, no gaze adapter
-  // → no WebGazer alert). The flag is set at element mount and never changes
+  // constructs NO capture machinery (no classifier, no camera, no gaze
+  // adapter). The flag is set at element mount and never changes
   // for this instance, so this branch is stable across renders and does not
   // violate rules-of-hooks. Reading the per-instance store (not the shared
   // module store) is what lets a viewer instance get the stub while a sibling
@@ -602,6 +690,11 @@ function useRealRuntime(
   const [lastFace, setLastFace] = useState<FaceSampleSnapshot | null>(null);
   const [lastPrediction, setLastPrediction] = useState<PredictionSnapshot | null>(null);
   const [lastEye, setLastEye] = useState<EyeSampleSnapshot | null>(null);
+  const [lastFacial, setLastFacial] = useState<FacialSampleSnapshot | null>(null);
+  const [lastPosture, setLastPosture] = useState<PostureSampleSnapshot | null>(null);
+  const [lastHeartRate, setLastHeartRate] = useState<HeartRateSampleSnapshot | null>(null);
+  const [lastRespiration, setLastRespiration] = useState<RespirationSampleSnapshot | null>(null);
+  const [lastIllumination, setLastIllumination] = useState<IlluminationSampleSnapshot | null>(null);
   const [lastGaze, setLastGaze] = useState<GazeSnapshot | null>(null);
   const [eyeSampleCount, setEyeSampleCount] = useState(0);
   const [gazeSampleCount, setGazeSampleCount] = useState(0);
@@ -782,13 +875,81 @@ function useRealRuntime(
             gaze_zone?: string | null;
             ts_ms?: number | null;
           } | null;
+          // v3 sensing pipelines. Each is `undefined` when the pipeline is
+          // disabled and `null` when it is on but produced nothing this frame
+          // (no face, no torso, buffer still filling) — the Live screen tells
+          // those two apart so "off" never looks like "broken".
+          facial?: {
+            head_pose?: { pitch_deg?: number; yaw_deg?: number; roll_deg?: number } | null;
+            facing_screen?: boolean | null;
+            action_units?: Record<string, number> | null;
+            valid?: boolean;
+            ts_ms?: number | null;
+          } | null;
+          posture?: {
+            shoulder_tilt_deg?: number | null;
+            torso_lean_deg?: number | null;
+            head_lateral_norm?: number | null;
+            head_above_norm?: number | null;
+            shoulder_width_norm?: number | null;
+            upper_visibility?: number | null;
+            valid?: boolean;
+            ts_ms?: number | null;
+          } | null;
+          respiration?: {
+            brpm?: number | null;
+            confidence?: number | null;
+            window_seconds?: number | null;
+            quality_accepted?: boolean;
+            rgb_corroboration?: {
+              available?: boolean;
+              agrees?: boolean;
+              required?: boolean;
+            };
+          } | null;
+          respiration_status?: {
+            buffered?: boolean;
+            ready?: boolean;
+            progress?: number;
+            buffered_seconds?: number;
+            min_window_seconds?: number;
+            reason?: string;
+            estimate_state?: string;
+            confirmation_count?: number;
+            confirmation_required?: number;
+            sample_rate_hz?: number;
+          } | null;
+          illumination?: {
+            mean_luma?: number | null;
+            quality?: number | null;
+            assessment?: string | null;
+            clipped_low?: number | null;
+            clipped_high?: number | null;
+          } | null;
+          heart_rate?: {
+            bpm?: number | null;
+            snr?: number | null;
+            confidence?: number | null;
+            window_seconds?: number | null;
+            method?: string | null;
+            quality_accepted?: boolean;
+          } | null;
+          heart_rate_status?: {
+            ready?: boolean;
+            progress?: number;
+            buffered_seconds?: number;
+            reason?: string;
+            sample_rate_hz?: number;
+          } | null;
         };
         const now = performance.now();
 
-        // Per-frame host signal: emit the live emotion at FULL source rate.
-        // Oyon is research-grade — the affect stream is NOT gated or throttled
-        // for the host (see CLAUDE.md "Data policy"). Fires on EVERY sample
-        // (~camera rate), unconditionally, with the full per-frame signal
+        // Per-frame host signal: offer the live emotion at FULL source rate.
+        // The runtime never gates or throttles this research signal. In embed
+        // mode the element boundary may explicitly throttle/suppress DOM event
+        // DISPATCH for host UI performance (`sample-events`) without changing
+        // this internal stream. Fires on EVERY sample (~camera rate), with the
+        // full per-frame signal
         // (dominant + confidence + valence + arousal + the whole probability
         // vector). The 100ms block below throttles ONLY React re-renders (perf),
         // never what the host receives. No-op standalone (emitHostEvent only
@@ -857,8 +1018,7 @@ function useRealRuntime(
                   : 0;
             const ts = Date.now();
             // React state for the live UI (throttled to ~10Hz). The host-facing
-            // oyon:sample stream is emitted UNCONDITIONALLY at full rate above —
-            // not from here.
+            // source stream is offered at full rate above — not from here.
             setLastPrediction({
               label,
               probabilities: pred.probabilities,
@@ -885,6 +1045,113 @@ function useRealRuntime(
                 : Date.now(),
             });
             setEyeSampleCount((n) => n + 1);
+          }
+
+          // v3 sensing snapshots — same 10 Hz React throttle as the rest of
+          // this block. `undefined` means the pipeline is off, so leave the
+          // previous state alone rather than clearing it.
+          const facial = evt.facial;
+          if (facial) {
+            const pose = facial.head_pose ?? null;
+            setLastFacial({
+              pitchDeg: finiteOrNull(pose?.pitch_deg),
+              yawDeg: finiteOrNull(pose?.yaw_deg),
+              rollDeg: finiteOrNull(pose?.roll_deg),
+              facingScreen: typeof facial.facing_screen === 'boolean' ? facial.facing_screen : null,
+              actionUnits: facial.action_units && typeof facial.action_units === 'object'
+                ? facial.action_units
+                : {},
+              valid: facial.valid === true,
+              ts: finiteOrNull(facial.ts_ms) ?? Date.now(),
+            });
+          }
+          const posture = evt.posture;
+          if (posture) {
+            setLastPosture({
+              shoulderTiltDeg: finiteOrNull(posture.shoulder_tilt_deg),
+              torsoLeanDeg: finiteOrNull(posture.torso_lean_deg),
+              headLateralNorm: finiteOrNull(posture.head_lateral_norm),
+              headAboveNorm: finiteOrNull(posture.head_above_norm),
+              shoulderWidthNorm: finiteOrNull(posture.shoulder_width_norm),
+              upperVisibility: finiteOrNull(posture.upper_visibility),
+              valid: posture.valid === true,
+              ts: finiteOrNull(posture.ts_ms) ?? Date.now(),
+            });
+          }
+          // Status updates must remain visible without overwriting the last
+          // measurement. A weak frame changes trust/freshness, not anatomy.
+          const resp = evt.respiration;
+          const respStatus = evt.respiration_status;
+          if (resp || respStatus) {
+            const measuredAt = Date.now();
+            const nextBrpm = finiteOrNull(resp?.brpm);
+            const hasCurrent = nextBrpm != null;
+            setLastRespiration((previous) => ({
+              brpm: hasCurrent ? nextBrpm : previous?.brpm ?? null,
+              confidence: hasCurrent ? finiteOrNull(resp?.confidence) : previous?.confidence ?? null,
+              windowSeconds: hasCurrent ? finiteOrNull(resp?.window_seconds) : previous?.windowSeconds ?? null,
+              current: hasCurrent,
+              qualityAccepted: hasCurrent && typeof resp?.quality_accepted === 'boolean'
+                ? resp.quality_accepted
+                : previous?.qualityAccepted ?? null,
+              measurementTs: hasCurrent ? measuredAt : previous?.measurementTs ?? null,
+              buffered: typeof respStatus?.buffered === 'boolean' ? respStatus.buffered : previous?.buffered ?? null,
+              ready: typeof respStatus?.ready === 'boolean' ? respStatus.ready : previous?.ready ?? null,
+              progress: finiteOrNull(respStatus?.progress) ?? previous?.progress ?? null,
+              bufferedSeconds: finiteOrNull(respStatus?.buffered_seconds) ?? previous?.bufferedSeconds ?? null,
+              minWindowSeconds: finiteOrNull(respStatus?.min_window_seconds) ?? previous?.minWindowSeconds ?? null,
+              statusReason: typeof respStatus?.reason === 'string' ? respStatus.reason : previous?.statusReason ?? null,
+              estimateState: typeof respStatus?.estimate_state === 'string' ? respStatus.estimate_state : previous?.estimateState ?? null,
+              confirmationCount: finiteOrNull(respStatus?.confirmation_count) ?? previous?.confirmationCount ?? null,
+              confirmationRequired: finiteOrNull(respStatus?.confirmation_required) ?? previous?.confirmationRequired ?? null,
+              sampleRateHz: finiteOrNull(respStatus?.sample_rate_hz) ?? previous?.sampleRateHz ?? null,
+              rgbCorroborationAvailable: typeof resp?.rgb_corroboration?.available === 'boolean'
+                ? resp.rgb_corroboration.available
+                : previous?.rgbCorroborationAvailable ?? null,
+              rgbCorroborationAgrees: typeof resp?.rgb_corroboration?.agrees === 'boolean'
+                ? resp.rgb_corroboration.agrees
+                : previous?.rgbCorroborationAgrees ?? null,
+              rgbCorroborationRequired: typeof resp?.rgb_corroboration?.required === 'boolean'
+                ? resp.rgb_corroboration.required
+                : previous?.rgbCorroborationRequired ?? null,
+              ts: measuredAt,
+            }));
+          }
+          const lum = evt.illumination;
+          if (lum) {
+            setLastIllumination({
+              meanLuma: finiteOrNull(lum.mean_luma),
+              quality: finiteOrNull(lum.quality),
+              assessment: typeof lum.assessment === 'string' ? lum.assessment : null,
+              clippedLow: finiteOrNull(lum.clipped_low),
+              clippedHigh: finiteOrNull(lum.clipped_high),
+              ts: Date.now(),
+            });
+          }
+          const hr = evt.heart_rate;
+          const hrStatus = evt.heart_rate_status;
+          if (hr || hrStatus) {
+            const measuredAt = Date.now();
+            const nextBpm = finiteOrNull(hr?.bpm);
+            const hasCurrent = nextBpm != null;
+            setLastHeartRate((previous) => ({
+              bpm: hasCurrent ? nextBpm : previous?.bpm ?? null,
+              snr: hasCurrent ? finiteOrNull(hr?.snr) : previous?.snr ?? null,
+              confidence: hasCurrent ? finiteOrNull(hr?.confidence) : previous?.confidence ?? null,
+              windowSeconds: hasCurrent ? finiteOrNull(hr?.window_seconds) : previous?.windowSeconds ?? null,
+              method: hasCurrent && typeof hr?.method === 'string' ? hr.method : previous?.method ?? null,
+              current: hasCurrent,
+              qualityAccepted: hasCurrent && typeof hr?.quality_accepted === 'boolean'
+                ? hr.quality_accepted
+                : previous?.qualityAccepted ?? null,
+              measurementTs: hasCurrent ? measuredAt : previous?.measurementTs ?? null,
+              ready: typeof hrStatus?.ready === 'boolean' ? hrStatus.ready : previous?.ready ?? null,
+              progress: finiteOrNull(hrStatus?.progress) ?? previous?.progress ?? null,
+              bufferedSeconds: finiteOrNull(hrStatus?.buffered_seconds) ?? previous?.bufferedSeconds ?? null,
+              statusReason: typeof hrStatus?.reason === 'string' ? hrStatus.reason : previous?.statusReason ?? null,
+              sampleRateHz: finiteOrNull(hrStatus?.sample_rate_hz) ?? previous?.sampleRateHz ?? null,
+              ts: measuredAt,
+            }));
           }
         }
       } catch (err) {
@@ -1071,9 +1338,15 @@ function useRealRuntime(
     };
   }, []);
 
+  // Before the first start() there is no runtime-owned settings object, so
+  // preview what the NEXT start will apply — the user's own editable settings.
+  // Recomputed on settings_hash so toggling a pipeline updates /live at once.
+  const editableHash = useSettings((s) => s.settings_hash);
   const settings = useMemo<OyonSettings>(
-    () => settingsRef.current ?? createOyonSettings({ model_profile: modelProfile }),
-    [modelProfile, status],
+    () =>
+      settingsRef.current
+      ?? (createOyonSettings(oyonSettingsInput(useSettings.getState())) as OyonSettings),
+    [modelProfile, status, editableHash],
   );
 
   return {
@@ -1083,6 +1356,11 @@ function useRealRuntime(
     lastFace,
     lastPrediction,
     lastEye,
+    lastFacial,
+    lastPosture,
+    lastHeartRate,
+    lastRespiration,
+    lastIllumination,
     lastGaze,
     eyeSampleCount,
     gazeSampleCount,
@@ -1103,6 +1381,74 @@ function useRealRuntime(
     pause,
     resume,
     stop,
+  };
+}
+
+/** Numeric passthrough that collapses undefined/null/NaN to a single null.
+ *  The sensing extractors use null for "not measurable this frame", and the
+ *  UI must render that as "—" rather than 0. */
+function finiteOrNull(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
+/**
+ * The app's editable settings → the input object for createOyonSettings().
+ *
+ * Extracted so the SAME mapping serves both the real runtime construction and
+ * the pre-start preview below. Previously the preview fell back to bare
+ * library defaults, where every v3 sensing pipeline is off — so /live reported
+ * "Heart rate off · enable in Settings" to a user who had already enabled it,
+ * just because capture had not started yet.
+ */
+function oyonSettingsInput(editable: EditableSettings): Record<string, unknown> {
+  return {
+    profile_id: 'learning-analytics',
+    model_profile: editable.model_profile,
+    sample_interval_ms: editable.sample_interval_ms,
+    aggregate_window_ms: editable.aggregate_window_ms,
+    min_valid_frames: editable.min_valid_frames,
+    smoothing_alpha: editable.smoothing_alpha,
+    min_hold_ms: editable.min_hold_ms,
+    switch_confidence: editable.switch_confidence,
+    logging_mode: 'windows-and-runtime',
+    enable_dynamics: true,
+    eye_tracking_enabled: editable.eye_tracking_enabled,
+    facial_signals_enabled: editable.facial_signals_enabled,
+    facial_frontal_half_angle_deg: editable.facial_frontal_half_angle_deg,
+    posture_tracking_enabled: editable.posture_tracking_enabled,
+    posture_model: editable.posture_model,
+    heart_rate_enabled: editable.heart_rate_enabled,
+    heart_rate_method: editable.heart_rate_method,
+    heart_rate_roi: editable.heart_rate_roi,
+    heart_rate_target_fps: editable.heart_rate_target_fps,
+    heart_rate_buffer_seconds: editable.heart_rate_buffer_seconds,
+    heart_rate_min_confidence: editable.heart_rate_min_confidence,
+    heart_rate_max_head_movement_deg: editable.heart_rate_max_head_movement_deg,
+    heart_rate_max_slew_bpm_per_s: editable.heart_rate_max_slew_bpm_per_s,
+    heart_rate_tracker_windows: editable.heart_rate_tracker_windows,
+    heart_rate_plausible_min_bpm: editable.heart_rate_plausible_min_bpm,
+    heart_rate_plausible_max_bpm: editable.heart_rate_plausible_max_bpm,
+    heart_rate_implausible_corroboration: editable.heart_rate_implausible_corroboration,
+    respiration_enabled: editable.respiration_enabled,
+    respiration_require_rgb_corroboration: editable.respiration_require_rgb_corroboration,
+    illumination_enabled: editable.illumination_enabled,
+    gaze_tracking_enabled: editable.gaze_tracking_enabled,
+    gaze_engine: editable.gaze_engine,
+    gaze_calibration_required: editable.gaze_calibration_required,
+    gaze_zone_grid: editable.gaze_zone_grid,
+    gaze_min_quality_score: editable.gaze_min_quality_score,
+    // Voice — must reach createOyonSettings so the recorded settings_hash
+    // covers them (a setting missing here is invisible in provenance; the
+    // exact bug heart_rate_target_fps once had).
+    voice_enabled: editable.voice_enabled,
+    voice_worker_enabled: editable.voice_worker_enabled,
+    voice_frame_ms: editable.voice_frame_ms,
+    voice_vad_threshold: editable.voice_vad_threshold,
+    voice_min_speech_ms: editable.voice_min_speech_ms,
+    voice_min_silence_ms: editable.voice_min_silence_ms,
+    voice_pause_threshold_ms: editable.voice_pause_threshold_ms,
+    voice_request_agc_off: editable.voice_request_agc_off,
+    voice_engine: editable.voice_engine,
   };
 }
 

@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Oyon — typing analytics test harness</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --line: #d8d8e0; --ink: #1a1a20; --dim: #6a6a78; --ok: #0a7a3d; --bad: #b3261e; --warn: #8a5a00; }
+    * { box-sizing: border-box; }
+    body { font: 14px/1.55 system-ui, -apple-system, sans-serif; color: var(--ink);
+           max-width: 1080px; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+    h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+    h2 { font-size: .95rem; text-transform: uppercase; letter-spacing: .06em;
+         color: var(--dim); margin: 1.75rem 0 .6rem; font-weight: 600; }
+    .sub { color: var(--dim); margin: 0 0 1.5rem; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+    @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+    textarea { width: 100%; min-height: 9rem; padding: .75rem; font: 15px/1.5 system-ui, sans-serif;
+               border: 1px solid var(--line); border-radius: 8px; resize: vertical; }
+    textarea:focus { outline: 2px solid #3b5bdb; outline-offset: 1px; }
+    .row { display: flex; gap: .5rem; flex-wrap: wrap; margin: .75rem 0; align-items: center; }
+    button { padding: .45rem .9rem; cursor: pointer; border: 1px solid var(--line);
+             background: #fff; border-radius: 6px; font: inherit; }
+    button.primary { background: #1a1a20; color: #fff; border-color: #1a1a20; }
+    button:disabled { opacity: .4; cursor: not-allowed; }
+    pre { background: #f6f6f9; border: 1px solid var(--line); padding: .75rem; border-radius: 8px;
+          overflow: auto; max-height: 22rem; font: 12px/1.5 ui-monospace, Menlo, monospace; margin: 0; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: .5rem; }
+    .stat { border: 1px solid var(--line); border-radius: 8px; padding: .5rem .6rem; }
+    .stat b { display: block; font-size: 1.15rem; font-variant-numeric: tabular-nums; font-weight: 600; }
+    .stat span { color: var(--dim); font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; }
+    .verdict { padding: .6rem .8rem; border-radius: 8px; font-weight: 600; margin: .5rem 0; }
+    .verdict.ok { background: #e6f4ea; color: var(--ok); }
+    .verdict.bad { background: #fce8e6; color: var(--bad); }
+    table { border-collapse: collapse; width: 100%; font-size: 13px; }
+    th, td { text-align: left; padding: .4rem .5rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--dim); font-weight: 600; font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; }
+    td.case { white-space: nowrap; font-weight: 600; }
+    .badge { display: inline-block; padding: .1rem .4rem; border-radius: 4px; font-size: .7rem;
+             background: #eee; color: var(--dim); font-weight: 600; }
+    .badge.on { background: #e6f4ea; color: var(--ok); }
+    .note { background: #fffbe6; border: 1px solid #f0e0a0; padding: .6rem .8rem;
+            border-radius: 8px; color: var(--warn); font-size: 13px; }
+    .states { display: flex; flex-wrap: wrap; gap: .2rem; max-height: 9rem; overflow-y: auto;
+              border: 1px solid var(--line); border-radius: 8px; padding: .5rem; }
+    .st { padding: .1rem .35rem; border-radius: 4px; font: 11px ui-monospace, Menlo, monospace;
+          background: #eef; color: #334; white-space: nowrap; }
+    .st[data-s="pause"] { background: #fde8c8; color: #8a5a00; font-weight: 700; }
+    .st[data-s="delete"], .st[data-s="undo"] { background: #fde3e1; color: #b3261e; }
+    .st[data-s="paste"], .st[data-s="replace"], .st[data-s="correct"] { background: #e4e0fb; color: #4a35b8; }
+    .st[data-s="submit"], .st[data-s="start"], .st[data-s="abandon"] { background: #d9e7ff; color: #14418a; font-weight: 700; }
+    .st[data-s="select"], .st[data-s="deselect"], .st[data-s="move"] { background: #e6f4ea; color: #0a7a3d; }
+    #tna table { font: 11px ui-monospace, Menlo, monospace; }
+    #tna th { font: 11px ui-monospace, Menlo, monospace; text-transform: none; letter-spacing: 0; }
+    #tna td { text-align: right; padding: .2rem .35rem; }
+    #tna td:first-child, #tna th:first-child { text-align: left; font-weight: 600; }
+    #tna td.z { color: #ccc; }
+    label.chk { display: block; padding: .15rem 0; cursor: pointer; }
+    #log { max-height: 16rem; }
+  </style>
+</head>
+<body>
+
+<h1>Oyon typing analytics — browser test harness</h1>
+<p class="sub">
+  Exercises <code>TypingComposerAdapter</code> → <code>TypingAggregator</code> →
+  <code>validateEmotionEvent</code> against a real DOM. This is the layer the Node
+  tests cannot reach: genuine IME composition, OS dictation, clipboard, autocorrect,
+  and <code>Intl.Segmenter</code> behaviour differ per browser and only show up here.
+</p>
+
+<div class="note" id="env">Loading…</div>
+
+<div class="grid">
+  <section>
+    <h2>Composer</h2>
+    <textarea id="composer" placeholder="Type here. Every input event is fed to the aggregator."></textarea>
+    <div class="row">
+      <button class="primary" id="submit">Submit episode</button>
+      <button id="abandon">Abandon episode</button>
+      <button id="restart">Restart</button>
+      <button id="reload">Reload from IndexedDB</button>
+      <span class="badge" id="state">idle</span>
+    </div>
+
+    <h2>Live episode</h2>
+    <div class="stats" id="stats"></div>
+
+    <h2>Live metrics <span class="badge">recomputed every event</span></h2>
+    <div id="metrics" class="stats"></div>
+
+    <h2>Event log <span class="badge" id="evcount">0</span></h2>
+    <pre id="log">(waiting for input)</pre>
+  </section>
+
+  <section>
+    <h2>State stream <span class="badge" id="statecount">0</span></h2>
+    <div id="states" class="states">(no events yet)</div>
+
+    <h2>Event data</h2>
+    <div id="eventtable" style="max-height:18rem;overflow:auto;border:1px solid var(--line);border-radius:8px">
+      <table id="evt"><thead><tr>
+        <th>#</th><th>wall clock</th><th>timestamp</th><th>mono ms</th>
+        <th>state</th><th>src</th><th>offset</th>
+      </tr></thead><tbody><tr><td colspan="7">(no events yet)</td></tr></tbody></table>
+    </div>
+
+    <h2>Live TNA <span class="badge" id="tnanote">needs ≥2 states</span></h2>
+    <div id="tna">—</div>
+
+    <h2>Finalized window</h2>
+    <div id="verdict" class="verdict">No episode finalized yet.</div>
+    <pre id="window">—</pre>
+  </section>
+</div>
+
+<h2>Validation matrix (audio_text.md §4.7)</h2>
+<p class="sub">Walk each case, then read the finalized window. Tick as you confirm.
+  Cases marked <span class="badge">manual</span> cannot be automated — they need real OS input.</p>
+<table>
+  <thead><tr><th>Case</th><th>How to exercise</th><th>Expect</th><th>Done</th></tr></thead>
+  <tbody id="matrix"></tbody>
+</table>
+
+<script type="module">
+import { TypingAggregator } from '/src/aggregation/TypingAggregator.js';
+import { createTypingComposerAdapter } from '/src/capture/TypingComposerAdapter.js';
+import { validateEmotionEvent } from '/src/validation/validateEmotionPayload.js';
+import { SignalEventLog } from '/src/logging/SignalEventLog.js';
+import { IndexedDbOyonStore } from '/src/storage/IndexedDbOyonStore.js';
+import { createSignalEventPersistence, readSignalEvents } from '/src/storage/SignalEventStore.js';
+import { tna } from '/standalone/vendor/dynajs/index.js';
+
+const el = id => document.getElementById(id);
+const composer = el('composer');
+
+let aggregator, adapter, eventLog, events = 0, lastTimestamp = 0;
+let recorded = [], episodeStart = 0;
+let db = null, persist = null;
+
+// Live transition matrix over the state stream. This is the whole point of the
+// event log: a window of counts cannot produce this, because the ordering is
+// already gone by the time you have counts.
+function renderTna() { renderTnaFrom(eventLog.toSequences({ modality: 'typing' })); }
+
+function renderTnaFrom(seqs) {
+  const chain = seqs[0] || [];
+  if (chain.length < 2) { el('tna').textContent = '—'; return; }
+  el('tnanote').textContent = `${chain.length} states`;
+  let model;
+  try { model = tna(seqs); } catch (err) { el('tna').textContent = `tna() threw: ${err.message}`; return; }
+  const labels = model.labels || [...new Set(chain)];
+  // dynajs returns a flat row-major matrix as { data, rows, cols }, not a
+  // nested array — index is i*cols + j.
+  const w = model.weights;
+  if (!w?.data) { el('tna').innerHTML = `<pre>${JSON.stringify(model, null, 1)}</pre>`; return; }
+  const cols = w.cols;
+  const at = (i, j) => Number(w.data[i * cols + j] ?? 0);
+  const head = `<tr><th>from \\ to</th>${labels.map(l => `<th>${l.replace(/_/g, '_<wbr>')}</th>`).join('')}</tr>`;
+  const rows = labels.map((from, i) => {
+    const cells = labels.map((_, j) => {
+      const v = at(i, j);
+      return `<td class="${v === 0 ? 'z' : ''}">${v === 0 ? '·' : v.toFixed(2)}</td>`;
+    }).join('');
+    return `<tr><td>${from}</td>${cells}</tr>`;
+  }).join('');
+  el('tna').innerHTML = `<div style="overflow-x:auto"><table>${head}${rows}</table></div>
+    <p class="sub" style="margin:.5rem 0 0">Row-stochastic: each row sums to 1. Fed straight from
+    <code>SignalEventLog.toSequences()</code> into dynajs <code>tna()</code> — no adapter code.</p>`;
+}
+
+function renderStates() {
+  const evts = eventLog.all();
+  el('statecount').textContent = evts.length;
+  el('states').innerHTML = evts.length === 0 ? '(no events yet)'
+    : evts.map(e => `<span class="st" data-s="${e.state}" title="#${e.sequence_index} @${Math.round(e.monotonic_ms)}ms${e.detail?.offset != null ? ` offset ${e.detail.offset}` : ''}">${e.state}</span>`).join('');
+  el('states').scrollTop = el('states').scrollHeight;
+  renderMetrics();
+
+  // Full event data, timestamps first — every event carries a wall clock for
+  // joining against host records and a monotonic clock for timing analysis.
+  const body = evts.length === 0
+    ? '<tr><td colspan="7">(no events yet)</td></tr>'
+    : evts.map(e => {
+        const wall = e.wall_ms ?? e.timestamp;
+        const iso = new Date(wall).toISOString();
+        return `<tr>
+          <td>${e.sequence_index}</td>
+          <td>${iso.slice(11, 23)}</td>
+          <td>${wall}</td>
+          <td>${Math.round(e.monotonic_ms)}</td>
+          <td><span class="st" data-s="${e.state}">${e.state}</span></td>
+          <td>${e.source}</td>
+          <td>${e.detail?.offset ?? '·'}</td>
+        </tr>`;
+      }).join('');
+  el('evt').querySelector('tbody').innerHTML = body;
+  const box = el('eventtable');
+  box.scrollTop = box.scrollHeight;
+
+  renderTna();
+}
+
+// Mirror what the adapter feeds the aggregator, so a divergence between the
+// DOM event and the recorded sample is visible rather than inferred.
+function instrument(agg) {
+  const realRecord = agg.record.bind(agg);
+  agg.record = (event) => {
+    events += 1;
+    lastTimestamp = event.timestamp;
+    recorded.push({ ...event });
+    el('evcount').textContent = events;
+    const line = [
+      new Date(event.wallTimestamp ?? Date.now()).toISOString().slice(11, 23),
+      String(event.timestamp | 0).padStart(7),
+      (event.inputType || 'null').padEnd(26),
+      `${event.previousGraphemes}→${event.currentGraphemes}`.padEnd(10),
+      event.replacedSelection ? 'REPLACED' : '        ',
+      event.compositionState !== 'none' ? `ime:${event.compositionState}` : '',
+    ].join(' ');
+    const log = el('log');
+    if (log.textContent.startsWith('(')) log.textContent = '';
+    log.textContent += line + '\n';
+    log.scrollTop = log.scrollHeight;
+    const out = realRecord(event);
+    renderStats();
+    renderStates();
+    return out;
+  };
+  return agg;
+}
+
+// Every typing-v1/v2/v3 metric, live. The aggregator computes these at
+// finalize(), so we snapshot a CLONE of its state and finalize the clone —
+// the real episode keeps running untouched.
+function renderMetrics() {
+  if (!recorded.length) return;
+  let T;
+  try {
+    // Replay the recorded inputs into a THROWAWAY aggregator and finalize that.
+    // Cloning the live one is unreliable (its state is not all plain fields);
+    // replay is correct by construction. O(n²) overall, fine for a harness.
+    const probe = new TypingAggregator();
+    probe.start({ timestamp: episodeStart, targetKind: 'chat_composer', targetId: 'probe' });
+    for (const r of recorded) probe.record(r);
+    T = probe.finalize({ timestamp: lastTimestamp, reason: 'submitted' })?.typing;
+  } catch (err) {
+    el('metrics').innerHTML = `<div class="stat"><b>—</b><span>probe failed: ${err.message}</span></div>`;
+    return;
+  }
+  if (!T) return;
+
+  const n = (v, d = 1) => (v === null || v === undefined) ? '—'
+    : (typeof v === 'number' ? (Number.isInteger(v) ? v : v.toFixed(d)) : v);
+  const loc = T.pause_location_counts || {};
+  const cards = [
+    ['chars/min', n(T.chars_per_min)],
+    ['words/min', n(T.words_per_min)],
+    ['chars/min active', n(T.chars_per_min_active)],
+    ['words/min active', n(T.words_per_min_active)],
+    ['P-bursts', n(T.p_burst_count)],
+    ['R-bursts', n(T.r_burst_count)],
+    ['mean P-burst', n(T.p_burst_mean_graphemes)],
+    ['mean R-burst', n(T.r_burst_mean_graphemes)],
+    ['revision ratio', n(T.revision_ratio, 3)],
+    ['corrections', n(T.correction_count)],
+    ['product ratio', n(T.product_ratio, 3)],
+    ['produced', n(T.produced_graphemes)],
+    ['committed', n(T.committed_graphemes)],
+    ['rev distance mean', n(T.revision_distance_mean, 2)],
+    ['leading-edge ratio', n(T.leading_edge_revision_ratio, 2)],
+    ['first input latency', n(T.first_input_latency_ms) + ' ms'],
+    ['active input', n(T.active_input_ms) + ' ms'],
+    ['pause: mid-word', n(loc.mid_word)],
+    ['pause: word bdy', n(loc.word_boundary)],
+    ['pause: sentence bdy', n(loc.sentence_boundary)],
+    ['pause: para bdy', n(loc.paragraph_boundary)],
+  ];
+  el('metrics').innerHTML = cards
+    .map(([k, v]) => `<div class="stat"><b>${v}</b><span>${k}</span></div>`).join('');
+
+  el('window').textContent = JSON.stringify({ typing: T }, null, 2);
+}
+
+function renderStats() {
+  // Read-only peek at the in-flight episode without finalizing it.
+  const s = [
+    ['events', events],
+    ['graphemes', [...composer.value].length],
+    ['mode', adapter?.graphemeMode ?? '—'],
+    ['state', adapter?.active ? 'recording' : 'stopped'],
+  ];
+  el('stats').innerHTML = s.map(([k, v]) => `<div class="stat"><b>${v}</b><span>${k}</span></div>`).join('');
+}
+
+function start() {
+  adapter?.dispose();
+  events = 0;
+  composer.value = '';
+  el('log').textContent = '(waiting for input)';
+  el('evcount').textContent = '0';
+  el('window').textContent = '—';
+  el('verdict').className = 'verdict';
+  el('verdict').textContent = 'No episode finalized yet.';
+
+  recorded = [];
+  episodeStart = 0;
+  el('metrics').innerHTML = '';
+  // Same database the React app reads, so a harness episode shows up in
+  // the app's Sequence + Patterns screens under the Typing channel.
+  db = db || new IndexedDbOyonStore({ dbName: 'oyon-app' });
+  persist = createSignalEventPersistence({ store: db, batchSize: 20, onError: (e) => console.error('persist failed', e) });
+  eventLog = new SignalEventLog({ onEvent: persist.write });
+  eventLog.start({ capture_id: 'harness-capture', session_id: 'harness-session' });
+  el('statecount').textContent = '0';
+  el('states').innerHTML = '(no events yet)';
+  el('tna').textContent = '—';
+  el('tnanote').textContent = 'needs ≥2 states';
+
+  aggregator = instrument(new TypingAggregator({ onEvent: e => eventLog.record(e) }));
+  adapter = createTypingComposerAdapter({
+    element: composer,
+    aggregator,
+    targetKind: 'chat_composer',
+    targetId: 'harness-composer',
+    onWindow: showWindow,
+  });
+  adapter.start();
+  el('state').textContent = 'recording';
+  el('state').className = 'badge on';
+  renderStats();
+  composer.focus();
+}
+
+async function persistWindow(win) {
+  // The analytics pages read `signal_windows`; persisting only the event log
+  // leaves them empty no matter how many events were captured. Stamp the row
+  // with the identity fields the store indexes on.
+  if (!win || !db) return;
+  const row = {
+    ...win,
+    window_id: `win_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`,
+    capture_id: 'harness-capture',
+    session_id: 'harness-session',
+  };
+  try {
+    await db.bulkAdd('signal_windows', [row]);
+  } catch (error) {
+    console.error('window persist failed', error);
+  }
+}
+
+function showWindow(win) {
+  if (!win) {
+    el('verdict').className = 'verdict bad';
+    el('verdict').textContent = 'finalize() returned null — no episode was active.';
+    return;
+  }
+  el('window').textContent = JSON.stringify(win, null, 2);
+  persistWindow(win);
+  const errors = validateEmotionEvent(win);
+  const v = el('verdict');
+  if (errors.length === 0) {
+    v.className = 'verdict ok';
+    v.textContent = '✓ validateEmotionEvent() → [] — window is transport-valid';
+  } else {
+    v.className = 'verdict bad';
+    v.textContent = `✗ ${errors.length} validation error(s): ${errors.join('; ')}`;
+  }
+  el('state').textContent = 'stopped';
+  el('state').className = 'badge';
+  renderStats();
+  renderStates();
+}
+
+el('submit').addEventListener('click', async () => { adapter?.submit(); await persist?.flush(); });
+el('abandon').addEventListener('click', async () => { adapter?.abandon(); await persist?.flush(); });
+
+// Proof the data is durable, not just in memory: re-read the store and rebuild
+// the transition network from what IndexedDB actually holds.
+el('reload').addEventListener('click', async () => {
+  await persist?.flush();
+  const rows = await readSignalEvents(db, { session_id: 'harness-session', modality: 'typing' });
+  const chain = rows.map(r => r.state);
+  el('states').innerHTML = rows.map(e =>
+    `<span class="st" data-s="${e.state}" title="#${e.sequence_index} (from IndexedDB)">${e.state}</span>`).join('');
+  el('statecount').textContent = `${rows.length} from IndexedDB`;
+  el('evt').querySelector('tbody').innerHTML = rows.map(e => `<tr>
+      <td>${e.sequence_index}</td><td>${new Date(e.wall_ms ?? e.timestamp).toISOString().slice(11,23)}</td>
+      <td>${e.wall_ms ?? e.timestamp}</td><td>${Math.round(e.monotonic_ms)}</td>
+      <td><span class="st" data-s="${e.state}">${e.state}</span></td><td>${e.source}</td>
+      <td>${e.detail?.offset ?? '\u00b7'}</td></tr>`).join('');
+  renderTnaFrom([chain]);
+});
+el('restart').addEventListener('click', start);
+
+// A batched writer loses whatever is still buffered when the tab goes away.
+// `pagehide` is the reliable last call in every target browser; `hidden` covers
+// the tab-switch case that often precedes it.
+window.addEventListener('pagehide', () => { persist?.flush(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') persist?.flush();
+});
+
+// Environment readout — the per-browser differences that matter here.
+const hasSeg = typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function';
+el('env').innerHTML = [
+  `<b>Intl.Segmenter:</b> ${hasSeg ? 'available (true grapheme clusters)' : 'MISSING — counts degrade to code points'}`,
+  `<b>UA:</b> ${navigator.userAgent}`,
+].join('<br>');
+if (hasSeg) el('env').style.cssText = 'background:#e6f4ea;border-color:#a8d5b8;color:#0a7a3d';
+
+const MATRIX = [
+  ['insert / delete', 'Type a sentence, then backspace a few characters.',
+   'inserted_graphemes &gt; 0, deleted_graphemes &gt; 0, revision_ratio = deleted/inserted', false],
+  ['selection replace', 'Select a word, type over it.',
+   'a REPLACED event; replacement_graphemes &gt; 0 only if the replacement is shorter', false],
+  ['paste', 'Copy a paragraph elsewhere, paste it in.',
+   'inputType insertFromPaste; pasted_graphemes = pasted length', false],
+  ['undo / redo', 'Type, then Cmd/Ctrl+Z, then Cmd/Ctrl+Shift+Z.',
+   'historyUndo / historyRedo inputTypes; grapheme counts track the value both ways', false],
+  ['autocorrect', 'Type "teh " on a device with autocorrect on.',
+   'a correction event arrives without a keystroke — counts still reconcile', false],
+  ['dictation', 'Use OS dictation (macOS: press Fn twice) and speak a sentence.',
+   'events arrive with no keydown at all — this is why keydown is not used', true],
+  ['emoji', 'Insert 👩‍👩‍👧‍👦 (a ZWJ family) via the emoji picker.',
+   'counts as ONE grapheme, not 7 code points — requires Intl.Segmenter', false],
+  ['combining marks', 'Type e then a combining acute (U+0301).',
+   'counts as ONE grapheme', false],
+  ['Arabic / RTL', 'Paste or type مرحبا بالعالم.',
+   'grapheme counts correct; no reversal or mis-count', false],
+  ['Finnish', 'Type ääkkösiä — ö, ä, å.',
+   'each accented letter is one grapheme', false],
+  ['IME', 'Switch to a Japanese/Chinese/Korean IME and compose a word.',
+   'compositionState start→update→end; update events do NOT inflate edit_event_count', true],
+  ['submit', 'Click Submit episode.',
+   'submitted true, abandoned false, window validates', false],
+  ['abandon', 'Restart, type, click Abandon episode.',
+   'abandoned true, submitted false', false],
+  ['focus change', 'Type, click outside the textarea, click back, keep typing.',
+   'episode continues; the gap lands in a pause bucket', false],
+  ['tab hidden', 'Type, switch tabs for ~6s, come back, type again.',
+   'NOT finalized — the gap appears in gte_5000_ms', false],
+  ['teardown', 'Submit, then keep typing in the textarea.',
+   'no further events logged; adapter is inert', false],
+  ['double finalize', 'Click Submit twice.',
+   'second click reports finalize() returned null', false],
+];
+
+el('matrix').innerHTML = MATRIX.map(([c, how, expect, manual], i) => `
+  <tr>
+    <td class="case">${c} ${manual ? '<span class="badge">manual</span>' : ''}</td>
+    <td>${how}</td>
+    <td>${expect}</td>
+    <td><label class="chk"><input type="checkbox" data-i="${i}"></label></td>
+  </tr>`).join('');
+
+start();
+</script>
+</body>
+</html>
