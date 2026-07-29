@@ -19,7 +19,8 @@ import {
     auditSuccess,
     buildUserPurgePlan,
     dbGet,
-    ensureBasicCourseMembership,
+    enrollUserInCohort,
+    ensureAutoEnrollMemberships,
     executeUserPurge,
     isValidRole,
     logAudit,
@@ -212,25 +213,10 @@ router.post('/users/batch', authenticateToken, requireAdmin, async (req, res) =>
 });
 
 // Idempotent, revive-aware enrol of a user into a cohort (local to import).
-async function enrollUserInCohort(cohortId, userId) {
-    const existing = await dbAdapter.get(
-        `SELECT id, deleted_at FROM cohort_members WHERE cohort_id = ? AND user_id = ?
-          ORDER BY (deleted_at IS NULL) DESC, id DESC LIMIT 1`,
-        [cohortId, userId]
-    );
-    if (existing && existing.deleted_at == null) return 'already';
-    if (existing) {
-        // Fresh re-enrolment on revive (mirror upsertMember): reset lifecycle to
-        // active + clear the window so access is actually restored.
-        await dbAdapter.run(
-            `UPDATE cohort_members SET deleted_at = NULL, status = 'active', enrolled_from = NULL, enrolled_until = NULL WHERE id = ?`,
-            [existing.id]
-        );
-        return 'revived';
-    }
-    await dbAdapter.run(`INSERT INTO cohort_members (cohort_id, user_id) VALUES (?, ?)`, [cohortId, userId]);
-    return 'enrolled';
-}
+// Moved to _helpers.js so the invite-redemption path (registration-routes.js)
+// enrols through the SAME revive-aware logic instead of growing a second,
+// subtly-different copy. Re-exported here under its original name so the many
+// call sites below read unchanged.
 
 // POST /api/users/import - Wizard commit: create users AND enrol them into a
 // class, with a validate-only `dryRun`. Reuses the batch validation rules and
@@ -320,7 +306,7 @@ router.post('/users/import', authenticateToken, requireAdmin, async (req, res) =
                     );
                 });
                 results.created.push({ row: rowNo, id: newId, username, email, role: finalRole, class: cohort?.name || null });
-                await ensureBasicCourseMembership(newId, tid);
+                await ensureAutoEnrollMemberships(newId, tid);
                 if (cohort) {
                     const outcome = await enrollUserInCohort(cohort.id, newId);
                     results.enrolled.push({ row: rowNo, username, class: cohort.name, outcome });
@@ -405,13 +391,18 @@ router.get('/users/preferences', authenticateToken, (req, res) => {
         (err, prefs) => {
             if (err) return res.status(500).json({ error: err.message });
             if (!prefs) {
+                // language: null (not 'en') — "no preference stored" must stay
+                // distinguishable from a deliberate English pick, or the client
+                // overwrites the user's pre-login localStorage choice with 'en'
+                // on every refresh (LanguageContext falls back correctly on null).
                 return res.json({
                     theme: 'dark',
-                    language: 'en',
+                    language: null,
                     notification_settings: null,
                     dashboard_layout: null,
                     default_llm_settings: null,
-                    default_monitor_settings: null
+                    default_monitor_settings: null,
+                    onboarding_settings: null
                 });
             }
             res.json(redactRow(prefs));
@@ -419,15 +410,54 @@ router.get('/users/preferences', authenticateToken, (req, res) => {
     );
 });
 
+// PUT is a MERGE, not a replace: fields absent from the body keep their
+// stored value. Until 2026-07-08 this was a full-replace upsert, so the
+// profile panel saving only { default_llm_settings } silently reset
+// language and theme back to defaults on every AI-settings save.
 router.put('/users/preferences', authenticateToken, (req, res) => {
-    const { theme, language, notification_settings, dashboard_layout, default_llm_settings, default_monitor_settings, accessibility_settings } = req.body;
+    const { theme, language, notification_settings, dashboard_layout, default_llm_settings, default_monitor_settings, accessibility_settings, onboarding_settings } = req.body;
 
     dbAdapter.get(`SELECT * FROM user_preferences WHERE user_id = ? AND tenant_id = ?`, [req.user.id, tenantId(req)], (readErr, oldPrefs) => {
         if (readErr) return res.status(500).json({ error: readErr.message });
 
+        // JSON columns are stored (and arrive in oldPrefs) as strings;
+        // body values arrive as objects. undefined = "not in this PUT".
+        const keepOrJson = (incoming, stored) =>
+            incoming !== undefined
+                ? (incoming ? JSON.stringify(incoming) : null)
+                : (stored ?? null);
+
+        // Stored JSON string → object, tolerating NULL and legacy garbage.
+        const parseStored = (stored) => {
+            try { return JSON.parse(stored || '{}') || {}; } catch { return {}; }
+        };
+
+        const merged = {
+            theme: theme !== undefined ? (theme || 'dark') : (oldPrefs?.theme || 'dark'),
+            // NULL, never a fabricated 'en': a first-ever PUT that only carries
+            // default_llm_settings must not mint a row claiming the user chose
+            // English (that row would defeat the GET null-language fallback).
+            language: language !== undefined ? (language || null) : (oldPrefs?.language ?? null),
+            notification_settings: keepOrJson(notification_settings, oldPrefs?.notification_settings),
+            dashboard_layout: keepOrJson(dashboard_layout, oldPrefs?.dashboard_layout),
+            default_llm_settings: keepOrJson(default_llm_settings, oldPrefs?.default_llm_settings),
+            default_monitor_settings: keepOrJson(default_monitor_settings, oldPrefs?.default_monitor_settings),
+            accessibility_settings: keepOrJson(accessibility_settings, oldPrefs?.accessibility_settings),
+            // Onboarding keys are SHALLOW-MERGED, not replaced: the first-run
+            // screen writes { first_run_done, voice_mode, oyon_consent } once,
+            // but later single-key writes (a consent flip in Settings → Oyon)
+            // must not erase the sibling keys.
+            onboarding_settings: onboarding_settings !== undefined
+                ? JSON.stringify({
+                    ...parseStored(oldPrefs?.onboarding_settings),
+                    ...(onboarding_settings && typeof onboarding_settings === 'object' ? onboarding_settings : {})
+                  })
+                : (oldPrefs?.onboarding_settings ?? null)
+        };
+
         dbAdapter.run(
-            `INSERT INTO user_preferences (user_id, theme, language, notification_settings, dashboard_layout, default_llm_settings, default_monitor_settings, accessibility_settings, tenant_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `INSERT INTO user_preferences (user_id, theme, language, notification_settings, dashboard_layout, default_llm_settings, default_monitor_settings, accessibility_settings, onboarding_settings, tenant_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(user_id) DO UPDATE SET
              theme = excluded.theme,
              language = excluded.language,
@@ -436,16 +466,18 @@ router.put('/users/preferences', authenticateToken, (req, res) => {
              default_llm_settings = excluded.default_llm_settings,
              default_monitor_settings = excluded.default_monitor_settings,
              accessibility_settings = excluded.accessibility_settings,
+             onboarding_settings = excluded.onboarding_settings,
              updated_at = CURRENT_TIMESTAMP`,
             [
                 req.user.id,
-                theme || 'dark',
-                language || 'en',
-                notification_settings ? JSON.stringify(notification_settings) : null,
-                dashboard_layout ? JSON.stringify(dashboard_layout) : null,
-                default_llm_settings ? JSON.stringify(default_llm_settings) : null,
-                default_monitor_settings ? JSON.stringify(default_monitor_settings) : null,
-                accessibility_settings ? JSON.stringify(accessibility_settings) : null,
+                merged.theme,
+                merged.language,
+                merged.notification_settings,
+                merged.dashboard_layout,
+                merged.default_llm_settings,
+                merged.default_monitor_settings,
+                merged.accessibility_settings,
+                merged.onboarding_settings,
                 tenantId(req)
             ],
             function(err) {
@@ -456,13 +488,8 @@ router.put('/users/preferences', authenticateToken, (req, res) => {
                     resourceId: String(req.user.id),
                     oldValue: oldPrefs,
                     newValue: {
-                        theme: theme || 'dark',
-                        language: language || 'en',
-                        notification_settings,
-                        dashboard_layout,
-                        default_llm_settings: default_llm_settings ? redactAuditSetting('default_llm_settings', JSON.stringify(default_llm_settings)) : null,
-                        default_monitor_settings,
-                        accessibility_settings
+                        ...merged,
+                        default_llm_settings: merged.default_llm_settings ? redactAuditSetting('default_llm_settings', merged.default_llm_settings) : null
                     }
                 });
                 res.json({ message: 'Preferences updated' });
@@ -630,6 +657,17 @@ router.put('/users/:id', authenticateToken, requireAdmin, async (req, res) => {
             [targetUserId, tenantId(req)]
         );
         if (!prior) return res.status(404).json({ error: 'User not found' });
+
+        // Same target-rank guard as PATCH /users/:id/status and POST
+        // /users/bulk-action. Without it this route let any admin open a PEER
+        // admin and set a new password (the body.password branch below hashes
+        // and writes it) — lateral account takeover, audit row only. Editing
+        // yourself stays allowed; the role/status checks below still bound what
+        // you may change about you.
+        const isSelf = String(targetUserId) === String(req.user.id);
+        if (!isSelf && getRoleRank(prior.role) >= getRoleRank(req.user.role)) {
+            return res.status(403).json({ error: 'Cannot modify a user at or above your role' });
+        }
 
         if (requestedRole && !isValidRole(requestedRole)) {
             return res.status(400).json({ error: 'Invalid role' });
@@ -816,6 +854,14 @@ router.delete('/users/:id', authenticateToken, requireAdmin, (req, res) => {
         if (targetErr) return res.status(500).json({ error: targetErr.message });
         if (!targetUser) return res.status(404).json({ error: 'User not found' });
 
+        // Same target-rank guard as PATCH /users/:id/status and POST
+        // /users/bulk-action. This route never had one — it was masked only by
+        // the client hiding the Delete button for peers, which is not a
+        // security boundary (the API is reachable directly).
+        if (getRoleRank(targetUser.role) >= getRoleRank(req.user.role)) {
+            return res.status(403).json({ error: 'Cannot delete a user at or above your role' });
+        }
+
     dbAdapter.get('SELECT COUNT(*) as count FROM case_versions WHERE changed_by = ?', [userId], (versionErr, versionRow) => {
         if (versionErr) return res.status(500).json({ error: versionErr.message });
         if ((versionRow?.count || 0) > 0) {
@@ -831,6 +877,7 @@ router.delete('/users/:id', authenticateToken, requireAdmin, (req, res) => {
                 ['DELETE FROM active_sessions WHERE user_id = ?', [userId]],
                 ['DELETE FROM user_preferences WHERE user_id = ?', [userId]],
                 ['DELETE FROM session_notes WHERE user_id = ?', [userId]],
+                ['DELETE FROM cohort_members WHERE user_id = ?', [userId]],
                 ['DELETE FROM questionnaire_responses WHERE user_id = ?', [userId]],
                 ['DELETE FROM alarm_config WHERE user_id = ?', [userId]],
                 ['DELETE FROM clinical_notes WHERE user_id = ?', [userId]],

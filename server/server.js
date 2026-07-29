@@ -16,6 +16,10 @@ import { fileURLToPath } from 'url';
 import db, { dbReady } from './db.js';
 import dbAdapter from './dbAdapter.js';
 import { runSeeders, needsSeeding } from './seeders/index.js';
+import { ensureCaseCodes } from './seeders/cases.js';
+import seedStemiCourse from './seedStemiCourse.js';
+import { seedLanguageCases } from './seedLanguageCases.js';
+import { seedLlmDefaults } from './seeders/llmSettings.js';
 import { loadKokoro } from './services/kokoroTts.js';
 import { auditPersonaAndCaseVoices } from './healthChecks/voiceCatalogueAudit.js';
 import { configureSlowQueryThresholdFromDb, instrumentSqliteDb } from './observability.js';
@@ -119,9 +123,13 @@ if (fs.existsSync(oyonRoot)) {
     app.use('/standalone', express.static(path.join(oyonRoot, 'standalone')));
 }
 
-// Health Check
-app.get('/', (req, res) => {
-    //res.send('Virtual Patient Platform Backend is Running');
+// Serve the SPA shell. `/register` is listed EXPLICITLY rather than behind a
+// catch-all: this app has no client router, so `/` was the only path that ever
+// served index.html — and an invite link (/register?invite=TOKEN) therefore 404s
+// in production while working fine under `npm run dev`, because Vite's history
+// fallback silently covers it. A wildcard would fix it and also swallow the
+// /docs mounts below, so we name the one path we actually need.
+function serveAppShell(req, res) {
     const frontendPath = path.join(__dirname, "..", "frontend");
 
     if (fs.existsSync(frontendPath)) {
@@ -130,7 +138,10 @@ app.get('/', (req, res) => {
         req.log?.error('frontend folder missing', { frontend_path: frontendPath });
         res.status(404).json({ error: 'Frontend not found' });
     }
-});
+}
+
+app.get('/', serveAppShell);
+app.get('/register', serveAppShell);
 
 app.use('/uploads', express.static(path.join(__dirname, "..", "public","uploads")));
 
@@ -212,14 +223,23 @@ function startHttpsServer(port) {
 
 // Fire-and-forget Kokoro warmup. The model is ~330 MB and the first /tts
 // call after boot otherwise pays the full load cost (~2 s on M-series CPU,
-// longer cold). Triggering loadKokoro() at boot — only when the platform's
-// tts_provider is set to 'kokoro' — eliminates that delay for the first
-// real request without blocking startup.
+// longer cold). Voice 2.0: there is no platform engine setting — kokoro is
+// the seeded safety-net engine (en/it default voices) and the shipped
+// personas carry kokoro voices, so warm it whenever the admin hasn't
+// disabled it. Skipped only on an explicit `tts_provider_enabled_kokoro=0`
+// (a deliberately kokoro-free deployment shouldn't pay the load).
 function maybeWarmupKokoro() {
+    // Test servers run in parallel and exercise TTS through explicit fake
+    // providers. Letting every worker warm/download the real ~330 MB model
+    // into one shared transformers cache can corrupt the in-flight ONNX file
+    // and makes unrelated route tests network-dependent. On-demand synthesis
+    // remains available to dedicated service tests; only boot warmup is skipped.
+    if (process.env.NODE_ENV === 'test') return;
+
     dbAdapter.get(
-        "SELECT setting_value FROM platform_settings WHERE setting_key = 'tts_provider'",
+        "SELECT setting_value FROM platform_settings WHERE setting_key = 'tts_provider_enabled_kokoro'",
         (err, row) => {
-            if (err || !row || row.setting_value !== 'kokoro') return;
+            if (!err && row && (row.setting_value === '0' || row.setting_value === 'false')) return;
             loadKokoro().catch((e) => {
                 kokoroLog.warn('warmup failed', { error: e?.message || String(e) });
             });
@@ -266,17 +286,55 @@ async function initializeAndStart() {
         bootLog.error('seeder failed', { error: err.message, fatal: false });
     }
 
-    // Default platform tts_provider to kokoro on a fresh install — Kokoro
-    // is the offline default and the shipped persona case_voice values
-    // (am_michael, af_bella, etc. in server/db.js DEFAULT_AGENTS) are
-    // Kokoro voice ids. Without this, a fresh boot has no tts_provider
-    // set and the runtime refuses to play. setSettingIfEmpty is idempotent
-    // and ON CONFLICT DO NOTHING — admins who picked another provider
-    // through the UI are not overwritten.
+    // Idempotently fill the default "Basic course" with STEMI lesson content +
+    // a clinical-reasoning survey (no-op once seeded). Non-fatal on failure.
+    await seedStemiCourse();
+
+    // Idempotently seed the native German / Spanish / Italian cases and link
+    // them into the single default "Basic course" alongside the English default
+    // case — one default course holding one case per language. Non-fatal.
+    await seedLanguageCases();
+
+    // Every case must carry a visible language-bearing case_code (IT-0042).
+    // Migration 0035 backfilled pre-existing rows; this sweep covers rows the
+    // seeders just inserted (they run after migrations) and self-heals any
+    // insert path that skipped stamping. Idempotent, non-fatal on failure.
     try {
-        await setSettingIfEmpty('tts_provider', 'kokoro');
+        await ensureCaseCodes(db);
+    } catch (err) {
+        bootLog.error('case code sweep failed', { error: err.message, fatal: false });
+    }
+
+    // Voice 2.0 seeding (VOICE2_PLAN.md §5.5). There is no platform engine
+    // setting anymore — each voice plays on its own (derived) engine. What
+    // gets seeded is the never-mute safety net: one default voice per
+    // registry LANGUAGE, seeded only where a free local engine can actually
+    // SYNTHESIZE that language. That is en only: kokoro-js's runtime voice
+    // map is English-only (28 a/b-prefix voices — the Italian/Japanese
+    // .bin packs in the package are NOT exposed by the model, verified
+    // 2026-07-10), and we can't assume Piper files exist. de/it/fi/sv stay
+    // unseeded; the boot audit names each gap loudly until an admin
+    // installs a Piper voice (de_DE-thorsten, it_IT-riccardo, fi_FI-harri,
+    // sv_SE-nst) or picks a default. Provider enable toggles seed to
+    // enabled (capability gating — no API key ⇒ unusable — already
+    // protects cost). setSettingIfEmpty is ON CONFLICT DO NOTHING, so
+    // admin values and the migration-0034 carry-over are never overwritten.
+    try {
+        await setSettingIfEmpty('tts_default_voice_en', 'af_bella');
+        for (const p of ['kokoro', 'google', 'openai', 'piper']) {
+            await setSettingIfEmpty(`tts_provider_enabled_${p}`, '1');
+        }
     } catch (e) {
-        migrationLog.warn('default tts_provider seed failed', { error: e.message });
+        migrationLog.warn('voice defaults seed failed', { error: e.message });
+    }
+
+    // Make the platform LLM defaults explicit (non-secret only): provider,
+    // base URL, and enabled flag were previously read-time fallbacks with no
+    // stored rows. setSettingIfEmpty never clobbers an admin's saved value.
+    try {
+        await seedLlmDefaults(setSettingIfEmpty);
+    } catch (e) {
+        migrationLog.warn('llm defaults seed failed', { error: e.message });
     }
 
     // Start the server, then trigger TTS warmup async.
@@ -285,8 +343,9 @@ async function initializeAndStart() {
     installGracefulShutdown([httpServer, httpsServer].filter(Boolean));
     maybeWarmupKokoro();
 
-    // Fire-and-forget audit of stored case_voice values vs the active
-    // provider's catalogue. Non-fatal; just logs. See
+    // Fire-and-forget audit of stored case_voice values against their own
+    // DERIVED engines' usability, plus the per-language default voices
+    // themselves (Voice 2.0). Non-fatal; just logs. See
     // server/healthChecks/voiceCatalogueAudit.js for the full rationale.
     // Delay so kokoro's warmup has a chance to populate its catalogue
     // first (Kokoro's voice list loads alongside the model).

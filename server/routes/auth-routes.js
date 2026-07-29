@@ -19,6 +19,7 @@ import {
     csrfCookieOptions,
     generateCsrfToken,
 } from '../middleware/csrf.js';
+import { sqliteTsToIso } from '../sqliteTime.js';
 
 // Account lockout: after MAX_FAILED_LOGINS consecutive failed attempts the
 // account is locked for LOCKOUT_MINUTES. Restored after the routes.js split
@@ -31,13 +32,24 @@ const LOCKOUT_MINUTES = 15;
 
 import { logger } from '../logger.js';
 import {
-    ensureBasicCourseMembership,
+    emailDomainAllowed,
+    enrollUserInCohort,
+    ensureAutoEnrollMemberships,
     isValidRole,
     logAudit,
+    registrationPolicy,
     roleForStorage,
     tenantId,
     validatePassword
 } from './_helpers.js';
+import {
+    claimInviteUse,
+    findInviteByToken,
+    INVITE_ERRORS,
+    inviteRejection,
+    recordInviteUse,
+    releaseInviteUse,
+} from '../lib/invites.js';
 
 function authCookieOptions(maxAgeSeconds = 4 * 60 * 60) {
     return {
@@ -79,6 +91,17 @@ const registerLimiter = rateLimit({
     legacyHeaders: false
 });
 
+// The registration-policy probe is public and fires once per logged-out page
+// load, so it needs a far higher ceiling than register itself — but it is still
+// an unauthenticated endpoint that hits the DB, so it does not go unbounded.
+const policyLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: RATE_LIMIT_DISABLED ? 100_000 : 60,
+    message: { error: 'Too many requests. Please try again shortly.' },
+    standardHeaders: true,
+    legacyHeaders: false
+});
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -95,6 +118,43 @@ try {
 }
 
 const router = express.Router();
+
+// GET /api/auth/registration-policy — PUBLIC (pre-token, by design).
+//
+// The login screen has to know whether to offer "Create an account" before
+// anyone has authenticated. This is a HINT for the UI, never a control: the
+// real gate is POST /auth/register, which re-reads the policy server-side.
+//
+// Deliberately leaks nothing: no user count, no hint whether a given
+// username/email exists, no invite tokens, no pending-request counts.
+// `bootstrap` (the users table is empty) IS included, because the register
+// screen must be able to say "claim this instance" — and it is already
+// trivially observable by registering and seeing whether you come back an admin.
+router.get('/auth/registration-policy', policyLimiter, async (req, res) => {
+    try {
+        const policy = await registrationPolicy();
+        const userCount = await new Promise((resolve, reject) => {
+            dbAdapter.get('SELECT COUNT(*) as count FROM users', (err, row) => {
+                if (err) reject(err); else resolve(row.count);
+            });
+        });
+        const bootstrap = userCount === 0;
+
+        res.json({
+            mode: policy.mode,
+            // A fresh instance is always claimable, whatever the mode says.
+            self_registration: bootstrap || policy.mode !== 'closed',
+            invite_required: !bootstrap && policy.mode === 'invite',
+            approval_required: !bootstrap && policy.mode === 'approval',
+            email_domains: policy.domains,
+            message: policy.message,
+            bootstrap
+        });
+    } catch (err) {
+        (req.log || authLog).warn('registration policy probe failed', { error: err.message });
+        res.status(500).json({ error: 'Could not read the registration policy' });
+    }
+});
 
 router.post('/auth/register', registerLimiter, async (req, res) => {
     const { username, name, email, password, role = 'student' } = req.body;
@@ -128,11 +188,151 @@ router.post('/auth/register', registerLimiter, async (req, res) => {
     // to seed the default users (seeders/users.js). Operators who would rather
     // not race a stranger for the claim should provision the admin up front with
     // ROHY_ADMIN_USERNAME/ROHY_ADMIN_PASSWORD, which leaves the table non-empty.
+    const isBootstrapClaim = userCount === 0;
+
+    // THE REGISTRATION POLICY GATE, and the ordering matters: the bootstrap
+    // claim is resolved FIRST and bypasses the policy entirely. That is what
+    // lets an admin ship an instance as `closed` and still claim it — without
+    // this ordering, a closed fresh install would have no path to a first admin
+    // at all, which is the exact dead end 2.5.2 fixed.
+    let invite = null;
+    if (!isBootstrapClaim) {
+        const policy = await registrationPolicy();
+        const suppliedToken = req.body?.invite || req.body?.invite_code || null;
+
+        // A token that was SUPPLIED but is not usable is always an error, in
+        // every mode. Quietly ignoring it and creating a plain student instead
+        // would silently drop the role and course the invite was carrying — the
+        // user would land in the wrong place and nobody would know why.
+        if (suppliedToken) {
+            invite = await findInviteByToken(suppliedToken);
+            const reason = inviteRejection(invite);
+            if (reason) {
+                invite = null;
+                return res.status(400).json({ code: `invite_${reason}`, error: INVITE_ERRORS[reason] });
+            }
+            if (!emailDomainAllowed(email, invite.email_pattern ? [invite.email_pattern] : [])) {
+                return res.status(400).json({
+                    code: 'email_domain_not_allowed',
+                    error: `This invite is limited to @${invite.email_pattern} addresses.`
+                });
+            }
+        }
+
+        if (policy.mode === 'closed' && !invite) {
+            // Closed governs STRANGERS. A valid invite is a named exception issued
+            // by an admin — the same admin who closed the door — so it still opens
+            // it, which is what an invite is for and what the client (AuthGate) and
+            // the release notes have promised since 2.7.6. Before this, an invitee
+            // on a closed instance was walked through the whole form and then told
+            // to "ask an administrator" — by the administrator who had invited them.
+            //
+            // To suspend outstanding invites, revoke them; that is what revocation
+            // is for. Flipping the mode to `closed` is not a bulk-revoke.
+            return res.status(403).json({
+                code: 'registration_closed',
+                error: policy.message || 'Registration is closed. Ask an administrator to create your account.'
+            });
+        }
+
+        if (policy.mode === 'invite' && !invite) {
+            return res.status(403).json({
+                code: 'invite_required',
+                error: policy.message || 'You need an invite link or code to create an account here.'
+            });
+        }
+
+        // An invite carries its own email rule (checked above) and OVERRIDES the
+        // global allowlist — inviting an external examiner to a @uef.fi-only
+        // instance is a deliberate act by an admin, not an accident.
+        if (!invite && !emailDomainAllowed(email, policy.domains)) {
+            return res.status(400).json({
+                code: 'email_domain_not_allowed',
+                error: `Registration is limited to these email domains: ${policy.domains.join(', ')}.`
+            });
+        }
+
+        // APPROVAL: an applicant is not a user yet. Queue them and stop — no user
+        // row, no token, no cookies, no auto-enrolment, nothing they could use to
+        // reach the platform. Until this branch existed, `approval` fell through to
+        // the plain-student INSERT below and admitted everyone instantly with a
+        // token: an admin who chose "an admin approves" was silently running `open`.
+        //
+        // An invite skips the queue. The admin who minted it already approved this
+        // person, by name, in advance; sending them to a queue would be asking the
+        // same administrator the same question twice. Same reasoning that lets an
+        // invite through a closed door.
+        if (policy.mode === 'approval' && !invite) {
+            const taken = await new Promise((resolve, reject) => {
+                dbAdapter.get(
+                    'SELECT id FROM users WHERE username = ? OR email = ?',
+                    [username, email],
+                    (err, row) => (err ? reject(err) : resolve(Boolean(row)))
+                );
+            });
+            if (taken) {
+                return res.status(409).json({ error: 'Username or email already exists' });
+            }
+
+            // Hashed here, never stored in the clear even for a moment. On approval
+            // the hash moves into the users row untouched, so the applicant signs in
+            // with the password they chose and no admin ever handles it.
+            const requestHash = await bcrypt.hash(password, 10);
+            try {
+                await dbAdapter.run(
+                    `INSERT INTO registration_requests (tenant_id, username, name, email, password_hash, ip_address)
+                     VALUES (?, ?, ?, ?, ?, ?)`,
+                    [tenantId(req), username, name || null, email, requestHash, req.ip || null]
+                );
+            } catch (err) {
+                // The partial unique indexes cover LIVE requests only, so this is a
+                // duplicate application, not a duplicate account.
+                if (String(err.message).includes('UNIQUE')) {
+                    return res.status(409).json({
+                        code: 'approval_already_requested',
+                        error: 'A request for this username or email is already waiting for approval.'
+                    });
+                }
+                throw err;
+            }
+
+            logAudit({
+                userId: null,
+                action: 'register_request',
+                resourceType: 'registration_request',
+                newValue: { username, email },
+                ipAddress: req.ip,
+                userAgent: req.headers['user-agent'],
+                tenantId: tenantId(req),
+            });
+
+            return res.status(202).json({
+                code: 'approval_pending',
+                message: 'Your request has been sent to an administrator. You will be able to sign in once it is approved.'
+            });
+        }
+    }
+
     let finalRole = 'student';
-    if (userCount === 0) {
+    if (isBootstrapClaim) {
         finalRole = 'admin';
+    } else if (invite) {
+        // The role is the INVITE's, never the request body's. An admin decided
+        // this when they minted it, and the rank ceiling was enforced there.
+        finalRole = invite.role;
     } else if (getRoleRank(requestedRole) > ROLE_RANKS.student) {
         return res.status(403).json({ error: 'Only admins can create elevated accounts' });
+    }
+
+    // Claim the use BEFORE creating the user. The conditional UPDATE re-checks
+    // revoked/expired/exhausted atomically, so two people racing for the last
+    // use of an invite cannot both win. If the INSERT below then fails (e.g. a
+    // duplicate username), we hand the use back.
+    if (invite) {
+        const claimed = await claimInviteUse(invite.id);
+        if (!claimed) {
+            return res.status(400).json({ code: 'invite_exhausted', error: INVITE_ERRORS.exhausted });
+        }
     }
 
     try {
@@ -140,10 +340,11 @@ router.post('/auth/register', registerLimiter, async (req, res) => {
         const password_hash = await bcrypt.hash(password, 10);
 
         // Insert user
-        const defaultTenantId = 1;
+        const defaultTenantId = invite?.tenant_id || 1;
         const sql = `INSERT INTO users (username, name, email, password_hash, role, tenant_id) VALUES (?, ?, ?, ?, ?, ?)`;
         dbAdapter.run(sql, [username, name || null, email, password_hash, finalRole, defaultTenantId], async function (err) {
             if (err) {
+                if (invite) await releaseInviteUse(invite.id);
                 if (err.message.includes('UNIQUE')) {
                     return res.status(409).json({ error: 'Username or email already exists' });
                 }
@@ -177,7 +378,23 @@ router.post('/auth/register', registerLimiter, async (req, res) => {
             // Auto-enrol into the tenant's "Basic course" default class so the
             // new user always has the default case (safety net for enforced
             // access). Idempotent + never throws.
-            await ensureBasicCourseMembership(user.id, defaultTenantId);
+            await ensureAutoEnrollMemberships(user.id, defaultTenantId);
+
+            // An invite that names a course puts you IN that course. This is the
+            // whole reason a teacher shares an invite link rather than telling
+            // people to sign up and hunt for a join code.
+            if (invite) {
+                if (invite.cohort_id) {
+                    try {
+                        await enrollUserInCohort(invite.cohort_id, user.id);
+                    } catch (e) {
+                        (req.log || authLog).warn('invite course enrolment failed', {
+                            user_id: user.id, cohort_id: invite.cohort_id, error: e.message
+                        });
+                    }
+                }
+                await recordInviteUse(invite.id, user.id, ipAddress);
+            }
 
             res.cookie(AUTH_COOKIE_NAME, token, authCookieOptions());
             res.cookie(CSRF_COOKIE_NAME, generateCsrfToken(), csrfCookieOptions());
@@ -189,7 +406,10 @@ router.post('/auth/register', registerLimiter, async (req, res) => {
                 resourceType: 'user',
                 resourceId: String(user.id),
                 resourceName: username,
-                newValue: { username, email, role: finalRole, tenant_id: defaultTenantId },
+                newValue: {
+                    username, email, role: finalRole, tenant_id: defaultTenantId,
+                    ...(invite ? { via_invite: invite.id } : {})
+                },
                 tenantId: defaultTenantId,
                 ipAddress,
                 userAgent
@@ -238,11 +458,36 @@ router.post('/auth/login', authLimiter, (req, res) => {
             return res.status(401).json({ error: 'Invalid username or password' });
         }
 
+        // An account an admin disabled must not be able to mint a token. Checked
+        // before bcrypt (same posture as the lockout branch below): a suspended
+        // account is a closed door, not a slow one. authenticateToken already
+        // 403s every SUBSEQUENT request, so skipping this only ever produced a
+        // token that immediately stopped working — while writing a *successful*
+        // login to login_logs and re-running auto-enrolment for the very account
+        // that had just been switched off.
+        if (user.deleted_at || user.status !== 'active') {
+            dbAdapter.run(
+                `INSERT INTO login_logs (user_id, username, action, ip_address, user_agent, tenant_id) VALUES (?, ?, ?, ?, ?, ?)`,
+                [user.id, username, 'failed_login', ipAddress, userAgent, user.tenant_id || 1]
+            );
+            return res.status(403).json({
+                code: 'account_disabled',
+                error: 'This account is not active. Contact an administrator.'
+            });
+        }
+
         // Honour active lockout window. Users with a future `locked_until`
         // get rejected without bcrypt compare so timing-side-channel and
         // CPU-burn aren't escalation paths.
+        //
+        // sqliteTsToIso is load-bearing, not decoration: SQLite writes
+        // `YYYY-MM-DD HH:MM:SS` in UTC with no `Z`, and V8 parses that shape as
+        // LOCAL time. On a server east of UTC (this deploys to Helsinki) the raw
+        // string parsed to a moment already in the past, `lockedUntilMs > now()`
+        // was never true, and the lockout silently did nothing — unlimited
+        // password guessing. Docker's UTC default hid it. See sqliteTime.js.
         if (user.locked_until) {
-            const lockedUntilMs = new Date(user.locked_until).getTime();
+            const lockedUntilMs = new Date(sqliteTsToIso(user.locked_until)).getTime();
             if (Number.isFinite(lockedUntilMs) && lockedUntilMs > Date.now()) {
                 const minsLeft = Math.ceil((lockedUntilMs - Date.now()) / 60000);
                 return res.status(423).json({
@@ -318,7 +563,7 @@ router.post('/auth/login', authLimiter, (req, res) => {
 
             // Ensure the returning user is enrolled in "Basic course" (covers
             // users created before the migration / outside the register flow).
-            await ensureBasicCourseMembership(user.id, user.tenant_id || 1);
+            await ensureAutoEnrollMemberships(user.id, user.tenant_id || 1);
 
             // Set HttpOnly cookie alongside the JSON token. Cookie-aware
             // clients (apiFetch with credentials:'include') get the

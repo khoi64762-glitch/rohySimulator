@@ -16,6 +16,20 @@ import { spawn } from 'node:child_process';
 import { buildWavHeader } from '../services/wav.js';
 import { EvenByteAligner } from '../lib/pcmAlign.js';
 import { assembleSystemPrompt } from '../services/systemPromptAssembly.js';
+import { resolveAffectNote } from '../shared/affectNote.js';
+import {
+    TTS_PROVIDERS,
+    guessVoiceProvider,
+} from '../shared/voiceIdentity.js';
+import {
+    PIPER_DIR,
+    PIPER_BIN,
+    deriveVoiceProvider,
+    providerHasVoice,
+    getProviderStatus,
+    listVoicesForProvider,
+    readVoiceSidecar,
+} from '../services/ttsProviders.js';
 
 
 import { logger } from '../logger.js';
@@ -30,6 +44,7 @@ import {
     enforceBudget,
     recordUsage
 } from '../usage-budget.js';
+import { LLM_MODEL_REGISTRY, LLM_PROVIDERS, defaultModelFor } from '../shared/llmCatalogue.js';
 
 const radiologyLog = logger('radiology');
 const routesLlmLog = logger('routes-llm-tts');
@@ -63,7 +78,6 @@ const DEFAULT_RATE_LIMITS = {
     requestsPerUserHourly: 100
 };
 
-const VOICE_TTS_PROVIDERS = ['piper', 'kokoro', 'openai', 'google', 'browser'];
 
 // F-005: upstream LLM fetches were unbounded. /proxy/llm is intentionally
 // excluded from the global routeTimeout middleware (streaming responses can
@@ -84,7 +98,7 @@ const extractUpstreamError = (errText) => {
 };
 
 router.post('/proxy/llm', authenticateToken, async (req, res) => {
-    const { messages, system_prompt, session_id, agent_llm_config, session_mode } = req.body;
+    const { messages, system_prompt, session_id, agent_llm_config, session_mode, case_language, student_affect } = req.body;
     const userId = req.user.id;
     const today = new Date().toISOString().split('T')[0];
     const startTime = Date.now();
@@ -430,8 +444,30 @@ router.post('/proxy/llm', authenticateToken, async (req, res) => {
         });
 
         // 8. Build system prompt. See assembleSystemPrompt for the ordering
-        // invariant — case content leads, platform template trails.
-        let fullSystemPrompt = assembleSystemPrompt({ system_prompt, systemPromptTemplate });
+        // invariant — case content leads, platform template trails, and the
+        // output-language directive (case_language, registry-validated)
+        // trails everything so it stays dominant.
+        //
+        // Observed learner affect (Plan A): the client sends a structured
+        // signal only; resolveAffectNote is the single authoritative gate
+        // (feature enabled, provider policy local-vs-cloud on the RESOLVED
+        // provider, signal validity/freshness/confidence) and composes the
+        // note from enum-validated fields — client text never reaches the
+        // prompt through this field. Invalid/stale/disallowed → ''.
+        let studentAffectNote = '';
+        if (student_affect) {
+            const affectSettings = await getPlatformLLMSetting('affect_routing', '');
+            studentAffectNote = resolveAffectNote(student_affect, {
+                providerGroup: LLM_PROVIDERS[provider]?.group,
+                settings: affectSettings
+            });
+            if (studentAffectNote) {
+                (req.log || routesLlmLog).info('student affect routed', {
+                    session_id, mode: student_affect?.mode, provider
+                });
+            }
+        }
+        let fullSystemPrompt = assembleSystemPrompt({ system_prompt, systemPromptTemplate, caseLanguage: case_language, studentAffectNote });
 
         // 9. Build request based on provider type
         let llmHeaders = { 'Content-Type': 'application/json' };
@@ -450,7 +486,7 @@ router.post('/proxy/llm', authenticateToken, async (req, res) => {
             }));
 
             requestPayload = {
-                model: model || 'claude-3-5-sonnet-20241022',
+                model: model || defaultModelFor('anthropic'),
                 max_tokens: maxOutputTokens || 1024,
                 messages: anthropicMessages
             };
@@ -796,14 +832,8 @@ router.post('/proxy/llm', authenticateToken, async (req, res) => {
 
 // Get all scenarios (public + user's private ones)
 
-const LLM_MODEL_REGISTRY = [
-    { id: 'claude-opus-4-7',           label: 'Claude Opus 4.7',          tier: 'flagship' },
-    { id: 'claude-sonnet-4-6',         label: 'Claude Sonnet 4.6',        tier: 'balanced' },
-    { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5',         tier: 'fast' },
-    { id: 'claude-3-5-sonnet-20241022',label: 'Claude 3.5 Sonnet (legacy)', tier: 'legacy' },
-    { id: 'claude-3-5-haiku-20241022', label: 'Claude 3.5 Haiku (legacy)',  tier: 'legacy' }
-];
-
+// Model catalogue served to the settings UI. Source of truth:
+// server/shared/llmCatalogue.js (also drives the pickers and pricing seed).
 router.get('/llm/models', authenticateToken, (req, res) => {
     res.json({ models: LLM_MODEL_REGISTRY });
 });
@@ -868,98 +898,80 @@ router.get('/tts/usage', authenticateToken, async (req, res) => {
 });
 
 // ============================================
-// TTS (Piper) ROUTES
+// TTS ROUTES
 // ============================================
+// PIPER_DIR / PIPER_BIN and every catalogue/derivation/usability helper
+// live in server/services/ttsProviders.js — the one validator (Voice 2.0).
 
-const PIPER_DIR = path.join(__dirname, '../data', 'piper');
-// piper1-gpl (the maintained successor to the archived rhasspy/piper) is
-// distributed as a Python wheel; install-piper.sh creates a venv at
-// $PIPER_DIR/venv/ and `pip install piper-tts` exposes the CLI at
-// venv/bin/piper. Old standalone-binary installs (rhasspy/piper unpacked
-// into $PIPER_DIR/piper/piper) and Homebrew installs (/opt/homebrew/bin/piper)
-// continue to work via the PIPER_BIN env override.
-const PIPER_BIN = process.env.PIPER_BIN || path.join(PIPER_DIR, 'venv', 'bin', 'piper');
 const TTS_TEXT_LIMIT = 2000;
-const DEFAULT_TTS_PROVIDER = 'kokoro';
 
-const readVoiceSidecar = (filename) => {
-    const sidecar = path.join(PIPER_DIR, filename + '.json');
-    if (!fs.existsSync(sidecar)) return null;
-    try { return JSON.parse(fs.readFileSync(sidecar, 'utf8')); }
-    catch { return null; }
-};
-
-// GET /api/tts/voices - list voices for the active TTS provider.
-// Accepts ?provider=kokoro|piper to preview voices for an unsaved provider
-// choice; otherwise falls back to the platform setting.
+// GET /api/tts/voices - voice catalogues (Voice 2.0, VOICE2_PLAN.md §5.6).
+// Default response covers ALL providers so pickers can offer every usable
+// engine's voices (grouped, with usability + reason for disabled groups).
+// ?provider=<p> keeps the single-provider shape for per-provider needs
+// (settings tab default-voice selects). Listing never forces a kokoro
+// model load — the static package catalogue serves until the model is up.
 router.get('/tts/voices', authenticateToken, async (req, res) => {
-    const queryProvider = typeof req.query.provider === 'string' ? req.query.provider : '';
-    const ttsProvider = VOICE_TTS_PROVIDERS.includes(queryProvider)
-        ? queryProvider
-        : (await getPlatformSetting('tts_provider')) || DEFAULT_TTS_PROVIDER;
-
-    if (ttsProvider === 'kokoro') {
-        try {
-            const { loadKokoro, listKokoroVoices } = await import('../services/kokoroTts.js');
-            await loadKokoro();
+    try {
+        const queryProvider = typeof req.query.provider === 'string' ? req.query.provider : '';
+        if (TTS_PROVIDERS.includes(queryProvider)) {
+            const status = await getProviderStatus(queryProvider);
             return res.json({
-                provider: 'kokoro',
-                voices: listKokoroVoices(),
+                provider: queryProvider,
+                voices: await listVoicesForProvider(queryProvider),
+                usable: status.usable,
+                reason: status.reason,
                 piperInstalled: fs.existsSync(PIPER_BIN)
             });
-        } catch (err) {
-            (req.log || routesLlmLog).error('kokoro voice listing load failed', {
-                error: err.message,
-                code: err.code || null,
-            });
-            const disabled = err.code === 'KOKORO_DISABLED';
-            return res.status(503).json({
-                error: disabled
-                    ? 'Kokoro is disabled until the next server restart (model load failed). Switch tts_provider in admin settings to recover.'
-                    : 'Kokoro TTS failed to load',
-                code: err.code || null,
-            });
         }
-    }
-
-    if (ttsProvider === 'openai') {
-        const { listOpenaiVoices } = await import('../services/openaiTts.js');
-        return res.json({
-            provider: 'openai',
-            voices: listOpenaiVoices(),
-            piperInstalled: fs.existsSync(PIPER_BIN)
-        });
-    }
-
-    if (ttsProvider === 'google') {
-        const { listGoogleVoices } = await import('../services/googleTts.js');
-        return res.json({
-            provider: 'google',
-            voices: listGoogleVoices(),
-            piperInstalled: fs.existsSync(PIPER_BIN)
-        });
-    }
-
-    const piperInstalled = fs.existsSync(PIPER_BIN);
-    if (!fs.existsSync(PIPER_DIR)) {
-        return res.json({ provider: 'piper', voices: [], piperInstalled });
-    }
-    let files;
-    try {
-        files = fs.readdirSync(PIPER_DIR).filter(f => f.endsWith('.onnx'));
+        const providers = [];
+        for (const p of TTS_PROVIDERS) {
+            const status = await getProviderStatus(p);
+            providers.push({ ...status, voices: await listVoicesForProvider(p) });
+        }
+        res.json({ providers });
     } catch (err) {
-        return res.status(500).json({ error: err.message });
+        (req.log || routesLlmLog).error('voice listing failed', { error: err.message });
+        res.status(500).json({ error: 'Failed to list voices' });
     }
-    const voices = files.map(filename => {
-        const sidecar = readVoiceSidecar(filename);
-        const language = sidecar?.language?.code || sidecar?.language?.name_native || 'unknown';
-        const sampleRate = sidecar?.audio?.sample_rate || 22050;
-        const m = filename.match(/^([a-z]{2}_[A-Z]{2})-([^-]+)-/);
-        const speaker = m?.[2] || filename.replace(/\.onnx$/, '');
-        const gender = inferVoiceGenderFromName(`${speaker} ${filename}`);
-        return { filename, displayName: speaker, language, sampleRate, gender };
-    });
-    res.json({ provider: 'piper', voices, piperInstalled });
+});
+
+// GET /api/tts/voice-usage — which cases/personas rely on each engine,
+// derived per stored case_voice. Feeds the engine-off impact modal in
+// Settings → Voice: a configured voice is LITERAL (it fails rather than
+// substitute), so disabling an engine strands these rows — the admin sees
+// the blast radius, by name, BEFORE flipping the toggle. Admin-only: it
+// enumerates case/persona names across the platform.
+router.get('/tts/voice-usage', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const rows = await new Promise((resolve, reject) => {
+            dbAdapter.all(`
+                SELECT 'persona' AS kind, id, name, config FROM agent_templates
+                WHERE config LIKE '%case_voice%'
+                UNION ALL
+                SELECT 'case' AS kind, id, name, config FROM cases
+                WHERE config LIKE '%case_voice%'
+            `, (err, r) => err ? reject(err) : resolve(r || []));
+        });
+        const byProvider = Object.fromEntries(TTS_PROVIDERS.map(p => [p, []]));
+        const unknown = [];
+        for (const row of rows) {
+            let cfg = row.config;
+            if (typeof cfg === 'string') {
+                try { cfg = JSON.parse(cfg); } catch { cfg = null; }
+            }
+            const cv = cfg?.voice?.case_voice;
+            if (typeof cv !== 'string' || !cv) continue;
+            const { provider } = await deriveVoiceProvider(cv);
+            const entry = { kind: row.kind, id: row.id, name: row.name, voice: cv };
+            if (provider) byProvider[provider].push(entry);
+            else unknown.push(entry);
+        }
+        res.json({ providers: byProvider, unknown });
+    } catch (err) {
+        (req.log || routesLlmLog).error('voice usage scan failed', { error: err.message });
+        res.status(500).json({ error: 'Failed to scan voice usage' });
+    }
 });
 
 // Per-provider input-text pricing (USD per 1M characters). Local providers
@@ -974,63 +986,16 @@ const TTS_COST_PER_M_CHARS = {
     google: 16     // Neural2 / WaveNet — Chirp HD is $30 but we don't model it separately
 };
 
-function inferVoiceGenderFromName(name) {
-    const s = String(name || '').replace(/[_-]+/g, ' ');
-    if (/\b(child|kid|youth|young)\b/i.test(s)) return 'child';
-    if (/\b(amy|bella|aoede|kore|leda|zephyr|nova|shimmer|female|woman|girl)\b/i.test(s)) return 'female';
-    if (/\b(ryan|michael|charon|puck|orus|fenrir|echo|fable|onyx|male|man|boy)\b/i.test(s)) return 'male';
-    if (/\b(neutral|alloy)\b/i.test(s)) return 'neutral';
-    return '';
-}
-
-// Pre-flight voice validation. If the requested voice isn't in the active
-// provider's catalogue (typically because the persona default was saved
-// under a different provider), the request is rejected loudly — no silent
-// hardcoded fallback. This used to substitute a provider default and call
-// it "graceful degradation," but it meant admins who changed the provider
-// in Voice Settings heard the *fallback* voice while the persona dropdown
-// still showed their picked voice. Three weeks of "I changed it and
-// nothing happened" later, we strip the fallback entirely.
-//
-// Returns { ok: true, voice } when the requested voice is valid for the
-// active provider. Returns { ok: false, reason } otherwise — the route
-// layer maps that to a 4xx and the client surfaces it as a toast.
+// Voice 2.0 (VOICE2_PLAN.md §5.3): validation of a (provider, voice) pair
+// delegates to the single catalogue authority in services/ttsProviders.js.
+// Routing itself derives the provider FROM the voice (deriveVoiceProvider);
+// this check exists for the preview route's explicit provider override.
 async function resolveTtsVoice(provider, requestedVoice) {
     try {
-        switch (provider) {
-            case 'kokoro': {
-                const { isKokoroVoice } = await import('../services/kokoroTts.js');
-                if (!(await isKokoroVoice(requestedVoice))) {
-                    return { ok: false, reason: `voice "${requestedVoice}" is not a kokoro voice` };
-                }
-                return { ok: true, voice: requestedVoice };
-            }
-            case 'openai': {
-                const { isOpenaiVoice } = await import('../services/openaiTts.js');
-                if (!isOpenaiVoice(requestedVoice)) {
-                    return { ok: false, reason: `voice "${requestedVoice}" is not an openai voice` };
-                }
-                return { ok: true, voice: requestedVoice };
-            }
-            case 'google': {
-                const { isGoogleVoice } = await import('../services/googleTts.js');
-                if (!isGoogleVoice(requestedVoice)) {
-                    return { ok: false, reason: `voice "${requestedVoice}" is not a google voice` };
-                }
-                return { ok: true, voice: requestedVoice };
-            }
-            case 'piper': {
-                const valid = typeof requestedVoice === 'string'
-                    && requestedVoice.endsWith('.onnx')
-                    && fs.existsSync(path.join(PIPER_DIR, requestedVoice));
-                if (!valid) {
-                    return { ok: false, reason: `piper voice "${requestedVoice}" is not installed` };
-                }
-                return { ok: true, voice: requestedVoice };
-            }
-            default:
-                return { ok: false, reason: `unknown provider "${provider}"` };
-        }
+        const ok = await providerHasVoice(provider, requestedVoice);
+        return ok
+            ? { ok: true, voice: requestedVoice }
+            : { ok: false, reason: `voice "${requestedVoice}" is not a ${provider} voice` };
     } catch (err) {
         routesLlmLog.warn('tts voice catalogue check failed', { provider, error: err.message });
         return { ok: false, reason: `catalogue check failed: ${err.message}` };
@@ -1095,35 +1060,36 @@ async function pipePcmStream(res, asyncIter) {
     res.end();
 }
 
-// POST /api/tts - synthesize speech (returns audio/wav OR x-rohy-pcm-stream)
-// Dispatches to:
-//   - Piper  (local subprocess, ~25 MB voices, very fast, robotic)
-//   - Kokoro (kokoro-js, ~330 MB local model, ~0.7× realtime, natural)
-//   - OpenAI (cloud, lowest latency, native streaming PCM at 24 kHz)
-// based on the `tts_provider` platform setting.
-// Main TTS route: caller cannot specify provider. Provider always comes
-// from platform_settings.tts_provider. This is the runtime path for
-// every patient/discussant/etc. voice playback.
-//
-// The admin preview button uses /tts/preview below, which accepts a
-// provider override on the body so admins can test voices without
-// flipping the platform setting.
+// POST /api/tts - synthesize speech (returns audio/wav OR x-rohy-pcm-stream).
+// Voice 2.0 + sovereignty (VOICE2_PLAN.md v1.4): THE VOICE OWNS ITS ENGINE,
+// AND A CONFIGURED VOICE IS LITERAL. The provider is derived from the
+// requested voice id by exact catalogue membership — there is no platform
+// engine setting, and body/query provider fields are ignored on this route.
+// A voice whose engine can't play it (unknown id, engine not installed /
+// unkeyed / disabled) is an honest 400 — the server NEVER substitutes a
+// stand-in for an explicit voice (owner directive: the case sound reigns
+// supreme; a wrong voice is worse than an honest error). The per-language
+// default voices are a CLIENT-side tier for personas with no voice
+// configured at all; by the time a request reaches this route the voice is
+// always explicit. The engine-off impact modal in Settings → Voice warns
+// admins which cases a toggle strands BEFORE they flip it.
 router.post('/tts', authenticateToken, async (req, res) => {
-    return handleTtsSynthesis(req, res, { allowProviderOverride: false });
+    return handleTtsSynthesis(req, res, { isPreview: false });
 });
 
-// Admin preview: same synthesis, but accepts `provider` on the body so
-// the Voice settings tab can preview a voice from any provider without
-// changing the active platform setting. Admin-auth gated because the
-// runtime should never route through this path.
+// Admin preview: accepts a `provider` override on the body so the Voice
+// settings tab can audition any voice without touching the runtime path.
+// Same literal-or-error semantics as the main route.
 router.post('/tts/preview', authenticateToken, requireAdmin, async (req, res) => {
-    return handleTtsSynthesis(req, res, { allowProviderOverride: true });
+    return handleTtsSynthesis(req, res, { isPreview: true });
 });
 
-async function handleTtsSynthesis(req, res, { allowProviderOverride }) {
-    // `gender` is still accepted on the wire so older clients don't break,
-    // but it's no longer consulted — the resolver dropped slot-based logic.
-    const { text, voice: requestedVoice, rate, pitch, provider: bodyProvider } = req.body || {};
+async function handleTtsSynthesis(req, res, { isPreview }) {
+    // `gender` and `provider` are still accepted on the wire so older
+    // clients don't break; `provider` is only consulted on the preview
+    // route. `language` (registry code) is accepted for diagnostics — it
+    // names the session language in rejection logs.
+    const { text, voice: requestedVoice, rate, pitch, provider: bodyProvider, language: bodyLanguage } = req.body || {};
 
     if (typeof text !== 'string' || !text.trim()) {
         return res.status(400).json({ error: 'text required' });
@@ -1135,30 +1101,79 @@ async function handleTtsSynthesis(req, res, { allowProviderOverride }) {
         return res.status(400).json({ error: 'voice required' });
     }
 
-    // Provider resolution:
-    //   - Main /tts route → platform setting only. Body/query provider
-    //     fields are silently ignored (older clients still send them).
-    //   - /tts/preview route → body.provider wins, query.provider as
-    //     legacy fallback, else platform setting.
-    let ttsProvider;
-    if (allowProviderOverride) {
-        const queryProvider = typeof req.query.provider === 'string' && VOICE_TTS_PROVIDERS.includes(req.query.provider)
-            ? req.query.provider
-            : null;
-        const bodyProviderOverride = typeof bodyProvider === 'string' && VOICE_TTS_PROVIDERS.includes(bodyProvider)
-            ? bodyProvider
-            : null;
-        const providerOverride = bodyProviderOverride || queryProvider;
-        ttsProvider = providerOverride || (await getPlatformSetting('tts_provider')) || DEFAULT_TTS_PROVIDER;
+    // ---- Plan which (provider, voice) actually synthesizes ----
+    let plan;
+    if (isPreview) {
+        const queryProvider = typeof req.query.provider === 'string' && TTS_PROVIDERS.includes(req.query.provider)
+            ? req.query.provider : null;
+        const bodyProviderOverride = typeof bodyProvider === 'string' && TTS_PROVIDERS.includes(bodyProvider)
+            ? bodyProvider : null;
+        const provider = bodyProviderOverride || queryProvider
+            || (await deriveVoiceProvider(requestedVoice)).provider;
+        if (!provider) {
+            return res.status(400).json({
+                error: 'invalid_voice',
+                message: `Voice "${requestedVoice}" is in no provider's catalogue.`,
+                requested_voice: requestedVoice
+            });
+        }
+        const resolved = await resolveTtsVoice(provider, requestedVoice);
+        if (!resolved.ok) {
+            return res.status(400).json({
+                error: 'invalid_voice',
+                message: `Voice "${requestedVoice}" is not valid for provider "${provider}".`,
+                provider,
+                requested_voice: requestedVoice,
+                reason: resolved.reason
+            });
+        }
+        plan = { provider, voice: requestedVoice, substituted: false };
     } else {
-        ttsProvider = (await getPlatformSetting('tts_provider')) || DEFAULT_TTS_PROVIDER;
+        // A configured voice is LITERAL: it plays on its own derived engine
+        // or the request fails honestly. No stand-ins.
+        const { provider: derived } = await deriveVoiceProvider(requestedVoice);
+        if (!derived) {
+            const guessedProvider = guessVoiceProvider(requestedVoice);
+            routesLlmLog.warn('tts voice rejected', {
+                requested_voice: requestedVoice,
+                provider: guessedProvider,
+                language: bodyLanguage || null,
+                reason: 'unknown_voice'
+            });
+            return res.status(400).json({
+                error: 'invalid_voice',
+                message: `Voice "${requestedVoice}" is in no provider's catalogue. Re-pick it in the case editor or Agent Personas.`,
+                provider: guessedProvider,
+                requested_voice: requestedVoice,
+                reason: 'unknown_voice'
+            });
+        }
+        const status = await getProviderStatus(derived);
+        if (!status.usable) {
+            routesLlmLog.warn('tts voice rejected', {
+                requested_voice: requestedVoice,
+                provider: derived,
+                language: bodyLanguage || null,
+                reason: 'engine_unusable',
+                engine_status: status.reason
+            });
+            return res.status(400).json({
+                error: 'invalid_voice',
+                message: `Voice "${requestedVoice}" needs the "${derived}" engine, which is not usable on this server (${status.reason}). Fix the engine in Settings → Voice or re-pick the voice.`,
+                provider: derived,
+                requested_voice: requestedVoice,
+                reason: 'engine_unusable',
+                detail: status.reason
+            });
+        }
+        plan = { provider: derived, voice: requestedVoice };
     }
 
     try {
         await enforceBudget({
             tenantId: tenantId(req),
             userId: req.user?.id,
-            provider: `tts-${ttsProvider}`,
+            provider: `tts-${plan.provider}`,
             metric: 'characters',
             requested: text.length
         });
@@ -1169,43 +1184,87 @@ async function handleTtsSynthesis(req, res, { allowProviderOverride }) {
         throw err;
     }
 
-    // Validate the requested voice against the active provider's catalogue.
-    // No hardcoded fallback — if the persona was authored under a different
-    // provider, we'd rather surface that to the admin than silently swap to
-    // some default voice that doesn't match the dropdown selection.
-    const resolved = await resolveTtsVoice(ttsProvider, requestedVoice);
-    if (!resolved.ok) {
-        routesLlmLog.warn('tts voice rejected', {
-            provider: ttsProvider,
-            requested_voice: requestedVoice,
-            reason: resolved.reason
-        });
-        return res.status(400).json({
-            error: 'invalid_voice',
-            message: `Voice "${requestedVoice}" is not valid for the active TTS provider (${ttsProvider}). Pick a voice from this provider's catalogue in Settings → Voice or the Patient persona.`,
-            provider: ttsProvider,
-            requested_voice: requestedVoice,
-            reason: resolved.reason
-        });
-    }
-    const voice = resolved.voice;
-
-    // Record char usage up-front. We charge optimistically — even if the
-    // synth fails partway through, we already paid for the API call
-    // (Google/OpenAI bill on submission, not delivery). For local providers
-    // this is a $0 row that still lets us see usage volume per user.
-    recordTtsUsage(req.user?.id, ttsProvider, text.length);
+    // Record char usage up-front for the engine that actually synthesizes.
+    // Paid engines bill on submission, not delivery; local rows are $0 but
+    // keep per-user volume visible.
+    recordTtsUsage(req.user?.id, plan.provider, text.length);
     await recordUsage({
         tenantId: tenantId(req),
         userId: req.user?.id,
-        provider: `tts-${ttsProvider}`,
+        provider: `tts-${plan.provider}`,
         metric: 'characters',
         amount: text.length
     });
 
-    if (ttsProvider === 'google') {
+    try {
+        return await synthesizeToResponse(req, res, plan, { text, rate, pitch });
+    } catch (err) {
+        // A runtime engine failure (quota, network, 5xx) is an honest error
+        // — the configured voice is literal, so there is no retry onto a
+        // stand-in (owner directive, VOICE2_PLAN.md v1.4). The first-chunk
+        // pre-flight keeps the response uncommitted until the engine
+        // actually delivers, so the client gets a real JSON error instead
+        // of a dead stream.
+        return sendSynthesisError(req, res, plan.provider, err);
+    }
+}
+
+// Maps a synthesis error to an HTTP response. Only reachable while no audio
+// bytes have been written (pre-flight contract); if headers somehow went
+// out, end the stream — audio can't be unsaid.
+function sendSynthesisError(req, res, provider, err) {
+    (req.log || routesLlmLog).error('tts synthesis failed', {
+        provider,
+        error: err.message,
+        code: err.code || null,
+    });
+    if (res.headersSent) {
+        if (!res.writableEnded) res.end();
+        return;
+    }
+    let status = 502, msg = `${provider} synthesis failed`;
+    if (err.code === 'UNKNOWN_VOICE') { status = 400; msg = err.message; }
+    else if (err.code === 'NO_API_KEY' || err.code === 'BAD_API_KEY') { status = 503; msg = err.message; }
+    else if (err.code === 'KOKORO_DISABLED') {
+        status = 503;
+        msg = 'Kokoro is disabled until the next server restart (model load failed).';
+    } else if (provider === 'kokoro' || provider === 'piper') {
+        status = 500; // local engine — upstream 502 semantics don't apply
+        msg = err.publicMessage || msg;
+    }
+    return res.status(status).json({ error: msg, code: err.code || null });
+}
+
+// First-chunk pre-flight (VOICE2_PLAN.md §5.3): pull the first upstream
+// chunk BEFORE the caller flushes response headers, so an engine that
+// fails at request time throws while the response is still uncommitted —
+// handleTtsSynthesis can then substitute the default voice or send an
+// honest JSON error instead of a dead stream.
+async function preflightFirstChunk(asyncIterable) {
+    const iterator = asyncIterable[Symbol.asyncIterator]();
+    const first = await iterator.next(); // throws on request-time failure
+    async function* resumed() {
+        if (!first.done) yield first.value;
+        for (;;) {
+            const next = await iterator.next();
+            if (next.done) break;
+            yield next.value;
+        }
+    }
+    return resumed();
+}
+
+// Synthesizes plan.voice on plan.provider and writes the audio to `res`.
+// CONTRACT: while headers are unsent this function THROWS on failure and
+// never writes an error response — handleTtsSynthesis owns retry/error
+// policy. Once audio bytes are flowing, a mid-stream failure ends the
+// stream here (nothing else is possible).
+async function synthesizeToResponse(req, res, plan, { text, rate, pitch }) {
+    const voice = plan.voice;
+    const stream = req.query.stream === '1' || req.headers.accept?.includes('application/x-rohy-pcm-stream');
+
+    if (plan.provider === 'google') {
         const { synthesizeGoogleStream, synthesizeGoogleWav } = await import('../services/googleTts.js');
-        const stream = req.query.stream === '1' || req.headers.accept?.includes('application/x-rohy-pcm-stream');
         // Google supports 0.25–4.0; widened from 0.5–1.5 so an elderly or
         // respiratory-distressed patient can sound notably slower (~0.7) and
         // an anxious / tachypneic patient can sound faster (~1.3) without
@@ -1218,38 +1277,28 @@ async function handleTtsSynthesis(req, res, { allowProviderOverride }) {
             : 0;
         const apiKey = (await getPlatformSetting('google_tts_api_key')) || '';
         if (stream) {
+            // Pre-flight: a request-time failure throws here, before any
+            // header/byte is committed — the caller can still substitute.
+            const chunks = await preflightFirstChunk(
+                synthesizeGoogleStream({ text, voice, speed, pitch: pitchSemitones, apiKey })
+            );
             try {
-                await pipePcmStream(res, synthesizeGoogleStream({ text, voice, speed, pitch: pitchSemitones, apiKey }));
-                return;
+                await pipePcmStream(res, chunks);
             } catch (err) {
-                (req.log || routesLlmLog).error('google tts streaming synthesis failed', { error: err.message });
-                if (!res.headersSent) {
-                    const status = err.code === 'UNKNOWN_VOICE' ? 400
-                        : err.code === 'NO_API_KEY' || err.code === 'BAD_API_KEY' ? 503
-                        : 502;
-                    return res.status(status).json({ error: err.message });
-                }
-                return res.end();
+                (req.log || routesLlmLog).error('google tts failed mid-stream', { error: err.message });
+                if (!res.writableEnded) res.end();
             }
+            return;
         }
-        try {
-            const wav = await synthesizeGoogleWav({ text, voice, speed, pitch: pitchSemitones, apiKey });
-            res.set('Content-Type', 'audio/wav');
-            res.set('Cache-Control', 'no-store');
-            res.set('Content-Length', String(wav.length));
-            return res.end(wav);
-        } catch (err) {
-            (req.log || routesLlmLog).error('google tts synthesis failed', { error: err.message });
-            const status = err.code === 'UNKNOWN_VOICE' ? 400
-                : err.code === 'NO_API_KEY' || err.code === 'BAD_API_KEY' ? 503
-                : 502;
-            return res.status(status).json({ error: err.message });
-        }
+        const wav = await synthesizeGoogleWav({ text, voice, speed, pitch: pitchSemitones, apiKey });
+        res.set('Content-Type', 'audio/wav');
+        res.set('Cache-Control', 'no-store');
+        res.set('Content-Length', String(wav.length));
+        return res.end(wav);
     }
 
-    if (ttsProvider === 'openai') {
+    if (plan.provider === 'openai') {
         const { synthesizeOpenaiStream, synthesizeOpenaiWav } = await import('../services/openaiTts.js');
-        const stream = req.query.stream === '1' || req.headers.accept?.includes('application/x-rohy-pcm-stream');
         // OpenAI clamps speed to [0.25, 4.0] internally; we honour the same
         // 0.5–1.5 window the rest of the platform uses so cases stay portable.
         const speed = (rate !== undefined && rate !== null && Number.isFinite(parseFloat(rate)))
@@ -1265,36 +1314,25 @@ async function handleTtsSynthesis(req, res, { allowProviderOverride }) {
             || (platformLlmProvider === 'openai' ? platformLlmApiKey : '');
 
         if (stream) {
+            const chunks = await preflightFirstChunk(
+                synthesizeOpenaiStream({ text, voice, speed, apiKey })
+            );
             try {
-                await pipePcmStream(res, synthesizeOpenaiStream({ text, voice, speed, apiKey }));
-                return;
+                await pipePcmStream(res, chunks);
             } catch (err) {
-                (req.log || routesLlmLog).error('openai tts streaming synthesis failed', { error: err.message });
-                if (!res.headersSent) {
-                    const status = err.code === 'UNKNOWN_VOICE' ? 400
-                        : err.code === 'NO_API_KEY' || err.code === 'BAD_API_KEY' ? 503
-                        : 502;
-                    return res.status(status).json({ error: err.message });
-                }
-                return res.end();
+                (req.log || routesLlmLog).error('openai tts failed mid-stream', { error: err.message });
+                if (!res.writableEnded) res.end();
             }
+            return;
         }
-        try {
-            const wav = await synthesizeOpenaiWav({ text, voice, speed, apiKey });
-            res.set('Content-Type', 'audio/wav');
-            res.set('Cache-Control', 'no-store');
-            res.set('Content-Length', String(wav.length));
-            return res.end(wav);
-        } catch (err) {
-            (req.log || routesLlmLog).error('openai tts synthesis failed', { error: err.message });
-            const status = err.code === 'UNKNOWN_VOICE' ? 400
-                : err.code === 'NO_API_KEY' || err.code === 'BAD_API_KEY' ? 503
-                : 502;
-            return res.status(status).json({ error: err.message });
-        }
+        const wav = await synthesizeOpenaiWav({ text, voice, speed, apiKey });
+        res.set('Content-Type', 'audio/wav');
+        res.set('Cache-Control', 'no-store');
+        res.set('Content-Length', String(wav.length));
+        return res.end(wav);
     }
 
-    if (ttsProvider === 'kokoro') {
+    if (plan.provider === 'kokoro') {
         // Streaming path: emit a custom binary frame per Kokoro sentence so
         // the browser can start playing the first sentence while later ones
         // are still being synthesized.
@@ -1304,7 +1342,6 @@ async function handleTtsSynthesis(req, res, { allowProviderOverride }) {
         //   then repeating frames:
         //       4 bytes — pcm byte length (uint32, 0 = end-of-stream)
         //       N bytes — int16 PCM samples
-        const stream = req.query.stream === '1' || req.headers.accept?.includes('application/x-rohy-pcm-stream');
         const speed = (rate !== undefined && rate !== null && Number.isFinite(parseFloat(rate)))
             ? Math.max(0.5, Math.min(1.5, parseFloat(rate)))
             : 1;
@@ -1315,15 +1352,20 @@ async function handleTtsSynthesis(req, res, { allowProviderOverride }) {
             // new sentences so we don't burn ~600 MB of inference for nobody.
             let clientGone = false;
             req.on('close', () => { if (!res.writableEnded) clientGone = true; });
+            const { synthesizeKokoroStream } = await import('../services/kokoroTts.js');
+            // Pre-flight the first sentence: UNKNOWN_VOICE / KOKORO_DISABLED
+            // now surface as honest JSON errors (they throw before headers),
+            // where the old order — flush headers, then load the model —
+            // could only kill the stream silently.
+            const chunks = await preflightFirstChunk(synthesizeKokoroStream({ text, voice, speed }));
             try {
-                const { synthesizeKokoroStream } = await import('../services/kokoroTts.js');
                 res.set('Content-Type', 'application/x-rohy-pcm-stream');
                 res.set('Cache-Control', 'no-store');
                 res.set('X-Accel-Buffering', 'no'); // bypass nginx buffering if proxied
                 res.flushHeaders?.();
                 if (res.socket) res.socket.setNoDelay(true);
                 let headerSent = false;
-                for await (const { sampleRate, pcm } of synthesizeKokoroStream({ text, voice, speed })) {
+                for await (const { sampleRate, pcm } of chunks) {
                     if (clientGone) break;
                     if (!headerSent) {
                         const hdr = Buffer.alloc(4);
@@ -1348,58 +1390,42 @@ async function handleTtsSynthesis(req, res, { allowProviderOverride }) {
                 res.write(eof);
                 return res.end();
             } catch (err) {
-                (req.log || routesLlmLog).error('kokoro streaming synthesis failed', {
+                (req.log || routesLlmLog).error('kokoro tts failed mid-stream', {
                     error: err.message,
                     code: err.code || null,
                 });
-                if (!res.headersSent && !clientGone) {
-                    // UNKNOWN_VOICE — name the bad voice. KOKORO_DISABLED —
-                    // tell admin to switch providers. Anything else gets a
-                    // generic message; details stay in the log.
-                    let status = 500, msg = 'Kokoro synthesis failed';
-                    if (err.code === 'UNKNOWN_VOICE') { status = 400; msg = err.message; }
-                    else if (err.code === 'KOKORO_DISABLED') {
-                        status = 503;
-                        msg = 'Kokoro is disabled until the next server restart. Switch tts_provider in admin settings to recover.';
-                    }
-                    return res.status(status).json({ error: msg, code: err.code || null });
-                }
-                if (!res.writableEnded) return res.end();
+                if (!res.writableEnded) res.end();
                 return;
             }
         }
 
         // Non-streaming fallback: full WAV in one response.
-        try {
-            const { synthesizeKokoro } = await import('../services/kokoroTts.js');
-            const wav = await synthesizeKokoro({ text, voice, speed });
-            res.set('Content-Type', 'audio/wav');
-            res.set('Cache-Control', 'no-store');
-            res.set('Content-Length', String(wav.length));
-            return res.end(wav);
-        } catch (err) {
-            (req.log || routesLlmLog).error('kokoro synthesis failed', {
-                error: err.message,
-                code: err.code || null,
-            });
-            let status = 500, msg = 'Kokoro synthesis failed';
-            if (err.code === 'UNKNOWN_VOICE') { status = 400; msg = err.message; }
-            else if (err.code === 'KOKORO_DISABLED') {
-                status = 503;
-                msg = 'Kokoro is disabled until the next server restart. Switch tts_provider in admin settings to recover.';
-            }
-            return res.status(status).json({ error: msg, code: err.code || null });
-        }
+        const { synthesizeKokoro } = await import('../services/kokoroTts.js');
+        const wav = await synthesizeKokoro({ text, voice, speed });
+        res.set('Content-Type', 'audio/wav');
+        res.set('Cache-Control', 'no-store');
+        res.set('Content-Length', String(wav.length));
+        return res.end(wav);
     }
 
     // ---- Piper path ----
+    if (plan.provider !== 'piper') {
+        // Unreachable by construction — plans only carry derived providers.
+        throw new Error(`unknown provider "${plan.provider}"`);
+    }
+    const publicError = (message, code) => {
+        const err = new Error(message);
+        err.publicMessage = message;
+        if (code) err.code = code;
+        return err;
+    };
     if (voice.includes('/') || voice.includes('\\') || voice.includes('..') || !voice.endsWith('.onnx')) {
-        return res.status(400).json({ error: 'invalid voice filename' });
+        throw publicError('invalid voice filename', 'UNKNOWN_VOICE');
     }
 
     const voiceFile = path.join(PIPER_DIR, voice);
     if (!voiceFile.startsWith(PIPER_DIR + path.sep) || !fs.existsSync(voiceFile)) {
-        return res.status(400).json({ error: 'unknown voice' });
+        throw publicError('unknown voice', 'UNKNOWN_VOICE');
     }
     // Resolve symlinks: a planted symlink within PIPER_DIR pointing outside
     // would otherwise pass startsWith but feed Piper an arbitrary file path.
@@ -1409,13 +1435,13 @@ async function handleTtsSynthesis(req, res, { allowProviderOverride }) {
         const realVoiceFile = fs.realpathSync(voiceFile);
         const realPiperDir = fs.realpathSync(PIPER_DIR);
         if (!realVoiceFile.startsWith(realPiperDir + path.sep)) {
-            return res.status(400).json({ error: 'unknown voice' });
+            throw new Error('symlink escape');
         }
     } catch {
-        return res.status(400).json({ error: 'unknown voice' });
+        throw publicError('unknown voice', 'UNKNOWN_VOICE');
     }
     if (!fs.existsSync(PIPER_BIN)) {
-        return res.status(503).json({ error: 'Piper TTS binary not installed on server' });
+        throw publicError('Piper TTS binary not installed on server', 'NO_API_KEY');
     }
 
     const sidecar = readVoiceSidecar(voice);
@@ -1430,7 +1456,7 @@ async function handleTtsSynthesis(req, res, { allowProviderOverride }) {
         fs.writeFileSync(tmpFile, text, 'utf8');
     } catch (err) {
         routesLlmLog.error('piper temp input write failed', { error: err.message });
-        return res.status(500).json({ error: 'Failed to prepare TTS input' });
+        throw publicError('Failed to prepare TTS input');
     }
 
     // piper1-gpl (Python rewrite) accepts `-m / --model`, `-i / --input-file`,
@@ -1451,58 +1477,64 @@ async function handleTtsSynthesis(req, res, { allowProviderOverride }) {
     } catch (err) {
         routesLlmLog.error('piper spawn failed', { error: err.message });
         try { fs.unlinkSync(tmpFile); } catch { /* noop */ }
-        return res.status(500).json({ error: 'Failed to start Piper' });
+        throw publicError('Failed to start Piper');
     }
 
-    const chunks = [];
-    let totalLen = 0;
-    let stderrBuf = '';
-    let aborted = false;
-    let clientGone = false;
+    // Promise wrapper keeps the synthesizeToResponse contract: reject before
+    // any bytes are written (caller formats the error), resolve after the
+    // WAV is fully sent or the client is gone.
+    await new Promise((resolve, reject) => {
+        const chunks = [];
+        let totalLen = 0;
+        let stderrBuf = '';
+        let aborted = false;
+        let clientGone = false;
 
-    const cleanup = () => {
-        try { fs.unlinkSync(tmpFile); } catch { /* noop */ }
-    };
+        const cleanup = () => {
+            try { fs.unlinkSync(tmpFile); } catch { /* noop */ }
+        };
 
-    // If the client disconnects before piper finishes, kill the subprocess so
-    // we don't burn CPU and disk on a synthesis nobody's listening to. The
-    // close handler will fire afterwards and run cleanup().
-    req.on('close', () => {
-        if (res.writableEnded) return;
-        clientGone = true;
-        aborted = true;
-        try { piper.kill('SIGTERM'); } catch { /* noop */ }
-    });
-
-    piper.stdout.on('data', (c) => {
-        chunks.push(c);
-        totalLen += c.length;
-        if (totalLen > 50 * 1024 * 1024) {
+        // If the client disconnects before piper finishes, kill the subprocess
+        // so we don't burn CPU and disk on a synthesis nobody's listening to.
+        req.on('close', () => {
+            if (res.writableEnded) return;
+            clientGone = true;
             aborted = true;
             try { piper.kill('SIGTERM'); } catch { /* noop */ }
-        }
-    });
-    piper.stderr.on('data', (d) => { stderrBuf += d.toString(); });
-    piper.on('error', (err) => {
-        routesLlmLog.error('piper process error', { error: err.message });
-        cleanup();
-        if (!res.headersSent && !clientGone) res.status(500).json({ error: 'Piper process error' });
-    });
-    piper.on('close', (code) => {
-        cleanup();
-        if (clientGone || res.headersSent) return;
-        if (aborted) return res.status(500).json({ error: 'TTS output exceeded size limit' });
-        if (code !== 0) {
-            routesLlmLog.warn('piper exited non-zero', { code, stderr: stderrBuf.slice(0, 500) });
-            return res.status(500).json({ error: 'Piper synthesis failed' });
-        }
-        const pcm = Buffer.concat(chunks, totalLen);
-        const header = buildWavHeader(pcm.length, sampleRate);
-        res.set('Content-Type', 'audio/wav');
-        res.set('Cache-Control', 'no-store');
-        res.set('Content-Length', String(header.length + pcm.length));
-        res.write(header);
-        res.end(pcm);
+        });
+
+        piper.stdout.on('data', (c) => {
+            chunks.push(c);
+            totalLen += c.length;
+            if (totalLen > 50 * 1024 * 1024) {
+                aborted = true;
+                try { piper.kill('SIGTERM'); } catch { /* noop */ }
+            }
+        });
+        piper.stderr.on('data', (d) => { stderrBuf += d.toString(); });
+        piper.on('error', (err) => {
+            routesLlmLog.error('piper process error', { error: err.message });
+            cleanup();
+            if (clientGone) return resolve();
+            reject(publicError('Piper process error'));
+        });
+        piper.on('close', (code) => {
+            cleanup();
+            if (clientGone || res.headersSent) return resolve();
+            if (aborted) return reject(publicError('TTS output exceeded size limit'));
+            if (code !== 0) {
+                routesLlmLog.warn('piper exited non-zero', { code, stderr: stderrBuf.slice(0, 500) });
+                return reject(publicError('Piper synthesis failed'));
+            }
+            const pcm = Buffer.concat(chunks, totalLen);
+            const header = buildWavHeader(pcm.length, sampleRate);
+            res.set('Content-Type', 'audio/wav');
+            res.set('Cache-Control', 'no-store');
+            res.set('Content-Length', String(header.length + pcm.length));
+            res.write(header);
+            res.end(pcm);
+            resolve();
+        });
     });
 }
 

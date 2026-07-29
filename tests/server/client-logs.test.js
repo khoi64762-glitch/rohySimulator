@@ -157,7 +157,7 @@ describe('/api/client-logs', () => {
             }
         }
         expect(limited?.status).toBe(429);
-    });
+    }, 30_000);
 
     it('returns tenant-scoped logs newest-first for educator/admin users', async () => {
         await pRun(

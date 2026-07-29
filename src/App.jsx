@@ -1,16 +1,22 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
+import { useTranslation } from 'react-i18next';
 import PatientMonitor from './components/monitor/PatientMonitor';
 import PatientVisual from './components/patient/PatientVisual';
 import ChatInterface from './components/chat/ChatInterface';
 import ConfigPanel from './components/settings/ConfigPanel';
-import LoginPage from './components/auth/LoginPage';
-import RegisterPage from './components/auth/RegisterPage';
+import AuthGate from './components/auth/AuthGate';
 import OrdersDrawer from './components/orders/OrdersDrawer';
 import LabResultsModal from './components/investigations/LabResultsModal';
 import RadiologyResultsModal from './components/investigations/RadiologyResultsModal';
 import UserProfilePanel from './components/settings/UserProfilePanel';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ToastProvider } from './contexts/ToastContext';
+import { LanguageProvider, useLanguage } from './contexts/LanguageContext';
+import { useCaseLanguageSync } from './hooks/useCaseLanguageSync';
+import TopBarControls from './components/common/TopBarControls';
+// Lazy so the TipTap/react-query lessons bundle stays out of the main chunk,
+// loading only when a user opens the lessons room.
+const LessonsRoomContainer = lazy(() => import('./components/lessons/LessonsRoomContainer'));
 import { VoiceProvider } from './contexts/VoiceContext';
 import { NotificationProvider } from './notifications/NotificationContext';
 import { useNotifications } from './notifications/useNotifications';
@@ -20,7 +26,8 @@ import DiagnosticBar from './components/debug/DiagnosticBar';
 import { PatientRecordProvider } from './services/PatientRecord';
 import EventLogger, { COMPONENTS, registerWindowLifecycleLogging } from './services/eventLogger';
 import { ApiError, apiFetch, apiPut } from './services/apiClient';
-import { Settings, X, LogOut, User, ChevronDown, Activity, StopCircle, AlertTriangle, HelpCircle } from 'lucide-react';
+import { pickLandingCase } from './services/landingCase';
+import { X, StopCircle, AlertTriangle } from 'lucide-react';
 import BodyMapDebug from './components/examination/BodyMapDebug';
 import TnaDashboard from './components/analytics/tna/TnaDashboardV2';
 import DiscussionScreen from './components/discussion/DiscussionScreen';
@@ -31,13 +38,19 @@ import AgentPersonaEditor from './components/settings/AgentPersonaEditor';
 import OyonCaptureWidget from './components/oyon/OyonCaptureWidget';
 import AoiRegion from './components/oyon/AoiRegion';
 import { HelpCenter, OnboardingTour } from './help';
+import FirstRunGate, { useSetup } from './components/setup/FirstRunGate';
 
 // Persistence rule: a session ends ONLY through the Exit or End buttons
 // (or an explicit case-switch). Refresh, tab close, idle time — none of
 // those count as exits. We restore whatever the user had whenever the app
 // boots, and never silently wipe based on time-since-last-activity.
 function MainApp() {
+   const { t } = useTranslation('app');
    const [showFullPageSettings, setShowFullPageSettings] = useState(false);
+   const [showLessonsRoom, setShowLessonsRoom] = useState(false);
+   // The course tied to the active case, resolved when the Course card opens.
+   // { cohortId, cohortName } — one case, one course (no picker).
+   const [courseCohortId, setCourseCohortId] = useState({ cohortId: null, cohortName: null });
    const [showUserProfile, setShowUserProfile] = useState(false);
    const [showUserMenu, setShowUserMenu] = useState(false);
    const [showTnaAnalytics, setShowTnaAnalytics] = useState(false);
@@ -68,6 +81,9 @@ function MainApp() {
    // the nonce is ConfigPanel's key.
    const [settingsNavNonce] = useState(0);
    const { user, logout, isAdmin } = useAuth();
+   const { uiLanguage, setUiLanguage } = useLanguage();
+   // Recall path for the first-run wizard ("Platform setup" menu item).
+   const { openSetupWizard } = useSetup();
    const isAdminUser = isAdmin();
    const canSeeOyonAnalytics = user?.role === 'educator' || user?.role === 'admin';
    const [sessionValidated, setSessionValidated] = useState(false);
@@ -80,6 +96,9 @@ function MainApp() {
    // Restore and validate session from localStorage on mount
    const [activeCase, setActiveCase] = useState(null);
    const [sessionId, setSessionId] = useState(null);
+   // A case with config.case_language overrides the session dialogue
+   // language (LLM directive, STT locale, fallback voice) while active.
+   useCaseLanguageSync(activeCase);
    const [selectedResult, setSelectedResult] = useState(null);
    // currentRoom drives the in-session bottom navigator. One of:
    //   'chat'        — main patient-chat UI (default)
@@ -191,18 +210,23 @@ function MainApp() {
       return () => { cancelled = true; };
    }, [sessionId]);
 
-   // Fetch and load default case if no session exists
+   // Fetch and load the landing case if no session exists. A student lands on
+   // the case that speaks THEIR interface language — the demo course carries one
+   // case per language (EN/DE/ES/IT), so a German UI opens the German patient,
+   // a Spanish UI the Spanish one, etc. When no case matches the UI language
+   // (e.g. a Finnish UI with no Finnish case yet), fall back to the tenant
+   // default (the English STEMI), which is always present and always visible.
    const loadDefaultCase = async () => {
       try {
          const data = await apiFetch('/cases');
-         const defaultCase = data?.cases?.find(c => c.is_default);
-         if (defaultCase) {
-            console.log('Auto-loading default case:', defaultCase.name);
-            setActiveCase(defaultCase);
-            EventLogger.caseLoaded(defaultCase.id, defaultCase.name);
+         const landingCase = pickLandingCase(data?.cases || [], uiLanguage);
+         if (landingCase) {
+            console.log('Auto-loading landing case:', landingCase.name, `(ui=${uiLanguage})`);
+            setActiveCase(landingCase);
+            EventLogger.caseLoaded(landingCase.id, landingCase.name);
          }
       } catch (err) {
-         console.error('Failed to load default case:', err);
+         console.error('Failed to load landing case:', err);
       }
    };
 
@@ -251,6 +275,7 @@ function MainApp() {
       let view = 'home';
       if (personaEditorTarget !== null) view = 'persona-editor';
       else if (showFullPageSettings)    view = 'settings';
+      else if (showLessonsRoom)         view = 'lessons';
       else if (showTnaAnalytics)        view = 'tna';
       else if (showOyonAnalytics)       view = 'oyon';
       // 'view' tracks full-page surfaces above the in-session UI; the
@@ -267,7 +292,7 @@ function MainApp() {
       };
    }, [
       personaEditorTarget, personaEditorReturn,
-      showFullPageSettings, showTnaAnalytics, showOyonAnalytics, currentRoom, showUserProfile,
+      showFullPageSettings, showLessonsRoom, showTnaAnalytics, showOyonAnalytics, currentRoom, showUserProfile,
       settingsInitialTab, settingsInitialStep,
    ]);
    const applyView = (saved) => {
@@ -452,6 +477,27 @@ function MainApp() {
       setCurrentRoom(target);
    };
 
+   // Open the lessons room for the ACTIVE case's course. Resolves the case →
+   // its cohort server-side; the room shows that course's content, or the
+   // "no course content" empty state if the course is empty. Falls back to the
+   // course picker when the case maps to no accessible course.
+   const openCourseForCase = useCallback(async () => {
+      let course = { cohortId: null, cohortName: null };
+      try {
+         if (activeCase?.id != null) {
+            const r = await apiFetch(`/courses/for-case/${activeCase.id}`);
+            course = { cohortId: r?.data?.cohortId ?? null, cohortName: r?.data?.cohortName ?? null };
+         }
+      } catch { /* show the empty state */ }
+      setCourseCohortId(course);
+      setShowLessonsRoom(true);
+      // Stamp telemetry + gaze windows with the lessons surface, mirroring
+      // the currentRoom effect — the lessons view is an early return, so the
+      // room effect never sees it and events would misattribute to the
+      // underlying simulator room.
+      EventLogger.roomChanged('lessons');
+   }, [activeCase]);
+
    // Explicit "End & Debrief": stops the server-side session, sets the
    // sticky caseEnded flag so the patient-room chrome reflects it, and
    // routes the user straight into the debrief room. Idempotent on the
@@ -505,6 +551,14 @@ function MainApp() {
    const handleOpenSettings = () => {
       setShowFullPageSettings(true);
       EventLogger.componentOpened(COMPONENTS.CONFIG_PANEL, 'Settings');
+   };
+
+   // Cases shortcut from the top-bar menu — open Settings straight onto the
+   // case list (the "Select Case" tab students use), not the default tab.
+   const handleOpenCases = () => {
+      setSettingsInitialTab('cases');
+      setShowFullPageSettings(true);
+      EventLogger.componentOpened(COMPONENTS.CONFIG_PANEL, 'Cases');
    };
 
    const handleCloseSettings = () => {
@@ -566,6 +620,7 @@ function MainApp() {
    const oyonRoom = personaEditorTarget !== null ? 'persona-editor'
       : showFullPageSettings ? 'settings'
       : showTnaAnalytics ? 'tna'
+      : showLessonsRoom ? 'lessons'
       : currentRoom;
 
    // Publish the pill's live width as --oyon-pill-w on <html> so headers it
@@ -623,6 +678,30 @@ function MainApp() {
       </div>
    ) : null;
 
+   // Persistent settings/account menu + language switcher. Built once here
+   // and rendered in every screen's header (via the same `roomNav`-style
+   // prop the room screens already accept) so the gear + language switch
+   // no longer vanish when the user leaves the chat room.
+   const topBarControls = user ? (
+      <TopBarControls
+         isAdminUser={isAdminUser}
+         canSeeOyonAnalytics={canSeeOyonAnalytics}
+         onOpenCases={handleOpenCases}
+         onOpenProfile={() => setShowUserProfile(true)}
+         onOpenSettings={handleOpenSettings}
+         onOpenHelp={() => setShowHelpCenter(true)}
+         onOpenEmotionAnalytics={() => setShowOyonAnalytics(true)}
+         onOpenCaseAnalytics={() => setShowTnaAnalytics(true)}
+         onOpenSetup={isAdminUser ? openSetupWizard : undefined}
+         onLogout={() => {
+            EventLogger.log('CLICKED', 'button', { objectId: 'logout', objectName: 'Logout', component: COMPONENTS.APP });
+            logout();
+         }}
+         uiLanguage={uiLanguage}
+         onSetLanguage={setUiLanguage}
+      />
+   ) : null;
+
    // Mounted at the App.jsx level so it owns the entire viewport (the
    // user's "not a toy" feedback was specifically about cramped chrome).
    if (personaEditorTarget !== null) {
@@ -639,6 +718,26 @@ function MainApp() {
    }
 
    // Show full-page settings
+   if (showLessonsRoom) {
+      return (
+         <>
+         {oyonPill}
+         <div className="h-screen w-screen rohy-offwhite-bg overflow-hidden">
+            <Suspense fallback={<div className="p-8 text-sm text-neutral-500">Loading…</div>}>
+               <LessonsRoomContainer
+                  cohortId={courseCohortId.cohortId}
+                  cohortName={courseCohortId.cohortName}
+                  onBackToSimulation={() => {
+                     setShowLessonsRoom(false);
+                     EventLogger.roomChanged(currentRoom);
+                  }}
+               />
+            </Suspense>
+         </div>
+         </>
+      );
+   }
+
    if (showFullPageSettings) {
       return (
          <>
@@ -727,6 +826,7 @@ function MainApp() {
          <>
          {showExamination ? (
             <PhysicalExamScreen
+               topBarControls={topBarControls}
                activeCase={activeCase}
                sessionId={sessionId}
                physicalExam={caseSnapshot?.config?.physical_exam ?? activeCase?.config?.physical_exam ?? null}
@@ -743,12 +843,14 @@ function MainApp() {
                   <RoomNavigator
                      currentRoom={currentRoom}
                      onSelectRoom={navigateToRoom}
+                     onOpenCourse={openCourseForCase}
                      sessionId={sessionId}
                   />
                }
             />
          ) : showInvestigations ? (
             <InvestigationsScreen
+               topBarControls={topBarControls}
                activeCase={activeCase}
                sessionId={sessionId}
                patientInfo={patientInfo}
@@ -757,12 +859,14 @@ function MainApp() {
                   <RoomNavigator
                      currentRoom={currentRoom}
                      onSelectRoom={navigateToRoom}
+                     onOpenCourse={openCourseForCase}
                      sessionId={sessionId}
                   />
                }
             />
          ) : showDiscussion ? (
             <DiscussionScreen
+               topBarControls={topBarControls}
                sessionId={sessionId}
                activeCase={activeCase}
                caseEnded={caseEnded}
@@ -771,6 +875,7 @@ function MainApp() {
                   <RoomNavigator
                      currentRoom={currentRoom}
                      onSelectRoom={navigateToRoom}
+                     onOpenCourse={openCourseForCase}
                      sessionId={sessionId}
                   />
                }
@@ -788,13 +893,13 @@ function MainApp() {
          {multiTabWarning && (
             <div className="fixed top-2 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-3 px-4 py-2 bg-amber-600/95 text-amber-50 text-sm rounded-lg shadow-xl border border-amber-700 max-w-2xl">
                <span>
-                  <strong>Heads up:</strong> this session is open in another browser tab. Last-write-wins applies.
+                  <strong>{t('multi_tab_heads_up')}</strong> {t('multi_tab_warning')}
                </span>
                <button
                   onClick={() => setMultiTabWarning(false)}
                   className="px-2 py-0.5 rounded bg-amber-700 hover:bg-amber-800 text-xs"
                >
-                  Dismiss
+                  {t('dismiss')}
                </button>
             </div>
          )}
@@ -806,111 +911,12 @@ function MainApp() {
             <div className="h-[45%] border-b border-neutral-800 relative">
                <PatientVisual caseData={activeCase} />
 
-               {/* Settings menu — far-left top corner. Replaces the old
-                   admin/username pill. Single menu now contains Profile,
-                   Support, and Analytics shortcuts (educator+/admin, based on
-                   role gate) in one place. The case-name banner that used to
-                   sit here was hidden per the operator
-                   request — students don't need the diagnosis spoiled in
-                   the header. */}
-               <div className="absolute top-4 left-4 z-10 flex items-center gap-2">
-                  <div className="relative">
-                     <button
-                        type="button"
-                        onClick={() => {
-                           setShowUserMenu(v => !v);
-                        }}
-                        aria-expanded={showUserMenu}
-                        aria-controls="app-user-menu"
-                        aria-label="Settings and profile menu"
-                        className={`rohy-topbar-menu-trigger text-sm ${showUserMenu ? 'rohy-topbar-menu-trigger-open' : ''}`}
-                     >
-                        <Settings className="w-4 h-4 text-[var(--rohy-accent)]" />
-                        <span>Settings</span>
-                        <ChevronDown className={`w-4 h-4 text-[var(--rohy-muted)] transition-transform ${showUserMenu ? 'rotate-180' : ''}`} />
-                     </button>
-
-                     {/* Dropdown */}
-                     {showUserMenu && (
-                        <>
-                           <div className="fixed inset-0 z-40" onClick={closeTopMenus} />
-                           <div
-                              id="app-user-menu"
-                              role="menu"
-                              className="absolute left-0 top-full mt-2 z-50 rohy-menu rohy-topbar-menu-panel"
-                           >
-                              <button
-                                 type="button"
-                                 onClick={() => { setShowUserProfile(true); setShowUserMenu(false); }}
-                                 role="menuitem"
-                                 className="rohy-topbar-menu-item"
-                              >
-                                 <User className="w-4 h-4" />
-                                 My Profile
-                              </button>
-                              <button
-                                 type="button"
-                                 onClick={() => { handleOpenSettings(); setShowUserMenu(false); }}
-                                 role="menuitem"
-                                 className="rohy-topbar-menu-item"
-                              >
-                                 <Settings className="w-4 h-4" />
-                                 Open Settings
-                              </button>
-                              <button
-                                 type="button"
-                                 onClick={() => { setShowHelpCenter(true); setShowUserMenu(false); }}
-                                 role="menuitem"
-                                 className="rohy-topbar-menu-item"
-                              >
-                                 <HelpCircle className="w-4 h-4" />
-                                 Help &amp; Support
-                              </button>
-                              {(canSeeOyonAnalytics || isAdminUser) && (
-                                 <div className="rohy-menu-divider" />
-                              )}
-                              {canSeeOyonAnalytics && (
-                                 <button
-                                    type="button"
-                                    onClick={() => { setShowOyonAnalytics(true); setShowUserMenu(false); }}
-                                    role="menuitem"
-                                    className="rohy-topbar-menu-item"
-                                 >
-                                    <Activity className="w-4 h-4" />
-                                    Emotion Analytics
-                                 </button>
-                              )}
-                              {isAdminUser && (
-                                 <button
-                                    type="button"
-                                    onClick={() => { setShowTnaAnalytics(true); setShowUserMenu(false); }}
-                                    role="menuitem"
-                                    className="rohy-topbar-menu-item"
-                                 >
-                                    <Activity className="w-4 h-4" />
-                                    Case Analytics
-                                 </button>
-                              )}
-                              {(canSeeOyonAnalytics || isAdminUser) && (
-                                 <div className="rohy-menu-divider" />
-                              )}
-                              <button
-                                 type="button"
-                                 onClick={() => {
-                                    EventLogger.log('CLICKED', 'button', { objectId: 'logout', objectName: 'Logout', component: COMPONENTS.APP });
-                                    logout();
-                                    closeTopMenus();
-                                 }}
-                                 role="menuitem"
-                                 className="rohy-topbar-menu-item rohy-topbar-menu-item-danger"
-                              >
-                                 <LogOut className="w-4 h-4" />
-                                 Logout
-                              </button>
-                           </div>
-                        </>
-                     )}
-                  </div>
+               {/* Settings menu + language switcher — far-left top corner.
+                   Now the shared TopBarControls, identical to the one rendered
+                   in every other screen's header, so the gear and language
+                   switch are consistent app-wide. */}
+               <div className="absolute top-4 left-4 z-10">
+                  {topBarControls}
                </div>
 
                {/* End & Debrief — the explicit way for the learner to close
@@ -922,10 +928,10 @@ function MainApp() {
                      <button
                         onClick={() => setShowEndConfirm(true)}
                         className="px-3 py-2 bg-red-900/70 hover:bg-red-800/80 backdrop-blur-md rounded-full flex items-center gap-2 text-sm text-red-50 border border-red-700/60 transition-colors"
-                        title="End the current session and open the debrief"
+                        title={t('end_debrief_title')}
                      >
                         <StopCircle className="w-4 h-4" />
-                        <span>End &amp; Debrief</span>
+                        <span>{t('end_debrief')}</span>
                      </button>
                   </div>
                )}
@@ -988,6 +994,7 @@ function MainApp() {
                <RoomNavigator
                   currentRoom={currentRoom}
                   onSelectRoom={navigateToRoom}
+                  onOpenCourse={openCourseForCase}
                   sessionId={sessionId}
                />
             </div>
@@ -1060,19 +1067,20 @@ function MainApp() {
 }
 
 function EndSessionConfirm({ onCancel, onConfirm }) {
+   const { t } = useTranslation('app');
    return (
       <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
          <div className="bg-neutral-900 border border-red-800/70 rounded-lg shadow-2xl w-full max-w-md">
             <div className="px-6 py-5 border-b border-neutral-800 flex items-center gap-3">
                <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0" />
-               <h2 className="text-base font-semibold text-white">End this session?</h2>
+               <h2 className="text-base font-semibold text-white">{t('end_session_confirm_title')}</h2>
             </div>
             <div className="px-6 py-5 text-sm text-neutral-300 space-y-2">
-               <p>This closes the case for debrief. Once ended:</p>
+               <p>{t('end_session_confirm_intro')}</p>
                <ul className="list-disc list-inside text-neutral-400 space-y-1 ml-1">
-                  <li>The patient timeline stops advancing.</li>
-                  <li>Orders, exams, and chat are locked.</li>
-                  <li>You can review the transcript in the debrief room but cannot reopen the case.</li>
+                  <li>{t('end_session_confirm_timeline')}</li>
+                  <li>{t('end_session_confirm_locked')}</li>
+                  <li>{t('end_session_confirm_transcript')}</li>
                </ul>
             </div>
             <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-neutral-800">
@@ -1080,14 +1088,14 @@ function EndSessionConfirm({ onCancel, onConfirm }) {
                   onClick={onCancel}
                   className="px-4 py-2 text-sm rounded border border-neutral-700 text-neutral-300 hover:text-white"
                >
-                  Cancel
+                  {t('cancel')}
                </button>
                <button
                   onClick={onConfirm}
                   className="px-4 py-2 text-sm rounded text-white font-semibold bg-red-700 hover:bg-red-600 flex items-center gap-2"
                >
                   <StopCircle className="w-4 h-4" />
-                  End &amp; Debrief
+                  {t('end_debrief')}
                </button>
             </div>
          </div>
@@ -1125,10 +1133,6 @@ function BodyMapDebugApp() {
 }
 
 export default function App() {
-   // showRegister must be declared before any conditional return so its
-   // hook ordering stays stable across renders (Rules of Hooks).
-   const [showRegister, setShowRegister] = useState(false);
-
    if (isBodyMapDebug) {
       return <BodyMapDebugApp />;
    }
@@ -1139,23 +1143,24 @@ export default function App() {
             {/* Bridge so non-React producers (EventLogger singleton) can call notify() */}
             <NotificationApiBridge />
             <ToastProvider>
-               <VoiceProvider>
-                  <AuthenticatedApp
-                     showRegister={showRegister}
-                     setShowRegister={setShowRegister}
-                  />
-                  {/* Surfaces. They render fixed-position UI / side effects, so they
-                      can sit at the root regardless of which page is active. */}
-                  <ToastSurface />
-                  <BannerSurface />
-                  <AudioSurface />
-                  <ConsoleSurface />
-                  <BackendSurfaceBridge />
-                  {/* Diagnostic bar — runtime context (LLM, voice, speaker,
-                      session, tenant). Default off; toggle from the floating
-                      pill in the bottom-right or via Settings → General. */}
-                  <DiagnosticBar />
-               </VoiceProvider>
+               {/* Language sits above VoiceProvider so speech (STT locale,
+                   TTS mismatch warnings) can key off caseLanguage. */}
+               <LanguageProvider>
+                  <VoiceProvider>
+                     <AuthenticatedApp />
+                     {/* Surfaces. They render fixed-position UI / side effects, so they
+                         can sit at the root regardless of which page is active. */}
+                     <ToastSurface />
+                     <BannerSurface />
+                     <AudioSurface />
+                     <ConsoleSurface />
+                     <BackendSurfaceBridge />
+                     {/* Diagnostic bar — runtime context (LLM, voice, speaker,
+                         session, tenant). Default off; toggle from the floating
+                         pill in the bottom-right or via Settings → General. */}
+                     <DiagnosticBar />
+                  </VoiceProvider>
+               </LanguageProvider>
             </ToastProvider>
          </ScopedNotificationProvider>
       </AuthProvider>
@@ -1203,7 +1208,8 @@ function NotificationApiBridge() {
    return null;
 }
 
-function AuthenticatedApp({ showRegister, setShowRegister }) {
+function AuthenticatedApp() {
+   const { t } = useTranslation('app');
    const { user, loading } = useAuth();
 
    // Show loading spinner while checking authentication
@@ -1212,20 +1218,24 @@ function AuthenticatedApp({ showRegister, setShowRegister }) {
          <div className="flex items-center justify-center h-screen bg-neutral-950">
             <div className="text-center">
                <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-               <p className="text-neutral-400">Loading...</p>
+               <p className="text-neutral-400">{t('loading')}</p>
             </div>
          </div>
       );
    }
 
-   // Show login/register if not authenticated
+   // Show login/register if not authenticated. AuthGate owns the login↔register
+   // toggle and the registration-policy probe that decides whether registering is
+   // even on offer.
    if (!user) {
-      if (showRegister) {
-         return <RegisterPage onSwitchToLogin={() => setShowRegister(false)} />;
-      }
-      return <LoginPage onSwitchToRegister={() => setShowRegister(true)} />;
+      return <AuthGate />;
    }
 
-   // Show main app if authenticated
-   return <MainApp />;
+   // Show main app if authenticated — behind the first-run gate (admin
+   // setup wizard / student first-run screen, each shown until completed).
+   return (
+      <FirstRunGate>
+         <MainApp />
+      </FirstRunGate>
+   );
 }

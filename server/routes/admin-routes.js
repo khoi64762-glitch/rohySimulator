@@ -19,11 +19,34 @@ import {
 } from '../redaction.js';
 import { logger } from '../logger.js';
 import { DEFAULT_TURNAROUND_MINUTES } from '../lib/turnaround.js';
+import { TTS_PROVIDERS, voiceMatchesLanguage } from '../shared/voiceIdentity.js';
+import { LANGUAGES } from '../shared/languages.js';
+import {
+    AFFECT_MODES,
+    AFFECT_PROVIDER_POLICIES,
+    AFFECT_REACTIVITIES,
+    DEFAULT_AFFECT_ROUTING,
+    normalizeAffectSettings,
+} from '../shared/affectNote.js';
+import {
+    deriveVoiceProvider,
+    getAllProviderStatus,
+    defaultVoiceKey,
+    defaultVoiceKeys,
+    providerEnabledKey,
+    providerEnabledKeys,
+} from '../services/ttsProviders.js';
 import {
     auditSuccess,
+    dbAll,
+    dbGet,
     redactAuditSetting,
     redactRows,
+    REGISTRATION_MODES,
+    registrationPolicy,
     resetCohortCaseEnforcementCache,
+    resetRegistrationPolicyCache,
+    tenantId,
     verifySessionOwnership
 } from './_helpers.js';
 
@@ -1138,6 +1161,179 @@ router.put('/platform-settings/cohort-case-enforcement', authenticateToken, requ
     }
 });
 
+// --- Registration policy ----------------------------------------------------
+// How people get accounts: open | approval | invite | closed. Absent = 'open'
+// (the historical behaviour), which is what makes this non-breaking for installs
+// that never opt in. The public read used by the login screen is
+// GET /auth/registration-policy — this pair is the ADMIN surface.
+router.get('/platform-settings/registration', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const policy = await registrationPolicy();
+        res.json({
+            mode: policy.mode,
+            email_domains: policy.domains,
+            message: policy.message
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.put('/platform-settings/registration', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const mode = req.body?.mode;
+        if (!REGISTRATION_MODES.includes(mode)) {
+            return res.status(400).json({ error: `mode must be one of: ${REGISTRATION_MODES.join(', ')}` });
+        }
+
+        // Accept an array or a comma-separated string; store canonical bare
+        // hostnames so the reader never has to guess ('@UEF.fi ' → 'uef.fi').
+        const rawDomains = Array.isArray(req.body?.email_domains)
+            ? req.body.email_domains.join(',')
+            : (req.body?.email_domains || '');
+        const domains = String(rawDomains)
+            .split(',')
+            .map((d) => d.trim().toLowerCase().replace(/^@/, ''))
+            .filter(Boolean);
+        const bad = domains.find((d) => !/^[a-z0-9.-]+\.[a-z]{2,}$/.test(d));
+        if (bad) {
+            return res.status(400).json({ error: `'${bad}' is not a valid email domain` });
+        }
+
+        const message = typeof req.body?.message === 'string' ? req.body.message.slice(0, 500) : '';
+
+        await setAuditedPlatformSetting(req, 'registration_mode', mode, 'update_registration_policy');
+        await setAuditedPlatformSetting(req, 'registration_email_domains', domains.join(','), 'update_registration_policy');
+        await setAuditedPlatformSetting(req, 'registration_message', message, 'update_registration_policy');
+        resetRegistrationPolicyCache();
+
+        res.json({ mode, email_domains: domains, message: message || null });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// --- Platform default UI language -------------------------------------------
+// The language brand-new users (and the pre-login login screen) start in.
+// Per-user choice always wins once made; this only seeds the fallback chain
+// (server pref → localStorage pick → THIS → 'en'). GET is public — the login
+// page needs it before any token exists (same posture as the monitor GET).
+router.get('/platform-settings/language', async (req, res) => {
+    try {
+        const value = await getPlatformSetting('default_ui_language');
+        res.json({
+            default_ui_language: value && LANGUAGES[value] ? value : 'en'
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.put('/platform-settings/language', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const code = req.body?.default_ui_language;
+        if (typeof code !== 'string' || !LANGUAGES[code]) {
+            return res.status(400).json({
+                error: `default_ui_language must be one of: ${Object.keys(LANGUAGES).join(', ')}`
+            });
+        }
+        await setAuditedPlatformSetting(req, 'default_ui_language', code, 'update_default_ui_language');
+        res.json({ default_ui_language: code });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// --- First-run setup (admin wizard) ------------------------------------------
+// One derived-status read powering the whole checklist; the wizard renders a
+// green/amber/red chip per step from this and never invents server state.
+// Everything here is a cheap re-read of settings the dedicated routes own —
+// this endpoint deliberately has NO write side beyond the completion flag.
+router.get('/setup/status', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const [
+            provider, model, baseUrl, apiKey, llmEnabled,
+            voiceEnabled, defaultLang, setupCompleted, affectRaw
+        ] = await Promise.all([
+            'llm_provider', 'llm_model', 'llm_base_url', 'llm_api_key', 'llm_enabled',
+            'voice_mode_enabled', 'default_ui_language', 'setup_completed', 'affect_routing'
+        ].map(getPlatformSetting));
+
+        const voiceDefaultRows = await Promise.all(
+            Object.keys(LANGUAGES).map(async (code) => [code, Boolean(await getPlatformSetting(defaultVoiceKey(code)))])
+        );
+        const languagesMissingDefaultVoice = voiceDefaultRows
+            .filter(([, present]) => !present)
+            .map(([code]) => code);
+
+        const cases = await dbAll(
+            `SELECT id, name, case_code, is_default,
+                    lower(coalesce(json_extract(config, '$.case_language'), 'en')) AS case_language
+               FROM cases
+              WHERE tenant_id = ? AND deleted_at IS NULL AND is_available = 1
+              ORDER BY is_default DESC, case_code ASC`,
+            [tenantId(req)]
+        );
+        const casesByLanguage = Object.fromEntries(Object.keys(LANGUAGES).map(code => [
+            code, cases.filter(c => c.case_language === code).length
+        ]));
+        const defaultCase = cases.find(c => c.is_default) || null;
+
+        const oyonRow = await dbGet(
+            'SELECT emotion_capture_enabled FROM oyon_settings WHERE tenant_id = ?',
+            [String(tenantId(req))]
+        );
+
+        res.json({
+            setup_completed: setupCompleted === 'true',
+            llm: {
+                provider: provider || 'lmstudio',
+                model: model || '',
+                base_url: baseUrl || '',
+                key_present: Boolean(apiKey),
+                enabled: llmEnabled !== 'false'
+            },
+            language: {
+                default_ui_language: defaultLang && LANGUAGES[defaultLang] ? defaultLang : 'en'
+            },
+            cases: {
+                total: cases.length,
+                by_language: casesByLanguage,
+                default_case: defaultCase
+                    ? { id: defaultCase.id, name: defaultCase.name, case_code: defaultCase.case_code, case_language: defaultCase.case_language }
+                    : null,
+                list: cases.map(c => ({
+                    id: c.id,
+                    name: c.name,
+                    case_code: c.case_code,
+                    case_language: c.case_language,
+                    is_default: Boolean(c.is_default)
+                }))
+            },
+            voice: {
+                enabled: voiceEnabled === 'true',
+                languages_missing_default_voice: languagesMissingDefaultVoice
+            },
+            oyon: { enabled: Boolean(oyonRow?.emotion_capture_enabled) },
+            affect: { enabled: normalizeAffectSettings(affectRaw).enabled }
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Completion flag. "Finish" and "Dismiss" both land here — either way the
+// wizard stops auto-showing; it stays reachable from the top-bar menu.
+router.put('/platform-settings/setup', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const completed = req.body?.completed === true || req.body?.completed === 'true';
+        await setAuditedPlatformSetting(req, 'setup_completed', completed ? 'true' : 'false', 'update_setup_completed');
+        res.json({ completed });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Default LLM settings
 const DEFAULT_LLM_SETTINGS = {
     provider: 'lmstudio',
@@ -1298,6 +1494,51 @@ router.post('/platform-settings/llm/test', authenticateToken, requireAdmin, asyn
     }
 });
 
+// POST /api/platform-settings/llm/models/detect - list the models the configured
+// server actually has loaded (Admin only). LM Studio (and every other
+// OpenAI-compatible server) refuses to guess when more than one model is loaded
+// — it returns 400 "Multiple models are loaded. Please specify a model." — so the
+// admin needs to know the exact ids on offer. This proxies the provider's
+// standard `GET <baseUrl>/models` list so the picker can be populated live.
+//
+// Body params (baseUrl/apiKey/provider) let the caller detect against UNSAVED
+// edits; each falls back to the persisted platform setting when omitted.
+router.post('/platform-settings/llm/models/detect', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const provider = req.body?.provider || await getPlatformSetting('llm_provider') || DEFAULT_LLM_SETTINGS.provider;
+        const baseUrl = (req.body?.baseUrl ?? await getPlatformSetting('llm_base_url')) || DEFAULT_LLM_SETTINGS.baseUrl;
+        const apiKey = (req.body?.apiKey ?? await getPlatformSetting('llm_api_key')) || '';
+
+        if (provider === 'anthropic') {
+            // Anthropic has no OpenAI-style /models list to enumerate here; the
+            // curated catalogue already covers it, so there's nothing to detect.
+            return res.json({ models: [], supported: false });
+        }
+
+        const headers = { 'Content-Type': 'application/json' };
+        if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+        const endpoint = `${String(baseUrl).replace(/\/$/, '')}/models`;
+
+        (req.log || routesLlmLog).info('llm models detect', { provider, endpoint });
+        const resp = await fetch(endpoint, { method: 'GET', headers });
+        if (!resp.ok) {
+            const errText = await resp.text();
+            return res.status(400).json({ error: `Model list request returned ${resp.status}: ${errText}` });
+        }
+        const data = await resp.json();
+        // OpenAI-compatible shape: { data: [{ id }, …] }. Fall back to a bare
+        // array in case a server returns the list directly.
+        const rows = Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []);
+        const models = rows
+            .map((m) => (typeof m === 'string' ? m : m?.id))
+            .filter((id) => typeof id === 'string' && id.trim() !== '');
+        res.json({ models, supported: true });
+    } catch (err) {
+        (req.log || routesLlmLog).error('llm models detect failed', { error: err.message });
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // GET /api/platform-settings/rate-limits - Get rate limit configuration
 router.get('/platform-settings/rate-limits', authenticateToken, async (req, res) => {
     try {
@@ -1417,27 +1658,13 @@ router.put('/platform-settings/chat', authenticateToken, requireAdmin, async (re
 // All fields are nullable except voice_mode_enabled (defaults false).
 // No frontend defaults — admin must populate before voice mode is usable.
 
-const VOICE_TTS_PROVIDERS = ['piper', 'kokoro', 'openai', 'google', 'browser'];
-
-// Subset of TTS providers that have an actual voice catalogue served by
-// /api/tts (i.e. excluding 'browser', which speaks via the client's Web
-// Speech API). The platform stores per-provider voice slots and per-provider
-// persona-default voices ONLY for these four — that's what makes switching
-// between, say, Kokoro and Google preserve each provider's settings instead
-// of the old globally-stored single voice ID that broke on switch.
-const TTS_PROVIDERS_WITH_CATALOG = ['piper', 'kokoro', 'openai', 'google'];
+// Voice 2.0 (VOICE2_PLAN.md §5.4): there is no `tts_provider` engine
+// setting, no per-provider `voice_<p>_<gender>` slot keys, and no
+// `default_voice_<p>_<gender>` persona-default keys — the voice endpoints
+// own exactly ONE defaults family: `tts_default_voice_<lang>` (one per
+// registry language) plus `tts_provider_enabled_<p>` policy toggles.
+// Migration 0034 deletes the retired rows.
 const VOICE_GENDERS = ['male', 'female', 'child'];
-
-// `voice_<provider>_<gender>` — per-provider voice slot. Replaces the old
-// `piper_voice_<gender>` keys (which were misnamed: they served all
-// providers but lived under one provider's prefix).
-const VOICE_SLOT_KEYS = TTS_PROVIDERS_WITH_CATALOG
-    .flatMap(p => VOICE_GENDERS.map(g => `voice_${p}_${g}`));
-
-// `default_voice_<provider>_<gender>` — per-provider persona-default voice.
-// Replaces the old flat `default_voice_<gender>` (which broke on switch).
-const PERSONA_DEFAULT_VOICE_KEYS = TTS_PROVIDERS_WITH_CATALOG
-    .flatMap(p => VOICE_GENDERS.map(g => `default_voice_${p}_${g}`));
 const VOICE_STT_PROVIDERS = ['browser'];
 const VOICE_AVATAR_TYPES = ['3d_head', 'none'];
 
@@ -1462,7 +1689,7 @@ const isBcp47 = (s) => typeof s === 'string' && /^[a-zA-Z]{2,3}(-[A-Za-z0-9]{2,8
 router.get('/platform-settings/voice', authenticateToken, async (req, res) => {
     try {
         const flatKeys = [
-            'voice_mode_enabled', 'tts_provider',
+            'voice_mode_enabled',
             'tts_rate', 'tts_pitch',
             'stt_provider', 'stt_language',
             'avatar_type', 'llm_model_voice',
@@ -1470,13 +1697,11 @@ router.get('/platform-settings/voice', authenticateToken, async (req, res) => {
         ];
         const raw = {};
         for (const k of flatKeys) raw[k] = await getPlatformSetting(k);
-        for (const k of VOICE_SLOT_KEYS) raw[k] = await getPlatformSetting(k);
 
         const toFloat = (v) => v === null || v === undefined || v === '' ? null : parseFloat(v);
 
         const out = {
             voice_mode_enabled: raw.voice_mode_enabled === 'true',
-            tts_provider: raw.tts_provider || null,
             tts_rate: toFloat(raw.tts_rate),
             tts_pitch: toFloat(raw.tts_pitch),
             stt_provider: raw.stt_provider || null,
@@ -1488,7 +1713,17 @@ router.get('/platform-settings/voice', authenticateToken, async (req, res) => {
             openai_tts_api_key_set: !!raw.openai_tts_api_key || !!process.env.OPENAI_API_KEY,
             openai_tts_api_key_via_env: !raw.openai_tts_api_key && !!process.env.OPENAI_API_KEY
         };
-        for (const k of VOICE_SLOT_KEYS) out[k] = raw[k] || null;
+        // Voice 2.0: per-language default voices (the fallback safety net,
+        // VOICE2_PLAN.md §5.5) + per-provider enable toggles + live provider
+        // status so the client never re-probes capability itself.
+        for (const lang of Object.keys(LANGUAGES)) {
+            out[defaultVoiceKey(lang)] = (await getPlatformSetting(defaultVoiceKey(lang))) || null;
+        }
+        for (const p of TTS_PROVIDERS) {
+            const v = await getPlatformSetting(providerEnabledKey(p));
+            out[providerEnabledKey(p)] = v !== '0' && v !== 'false';
+        }
+        out.providers = await getAllProviderStatus();
         res.json(out);
     } catch (err) {
         (req.log || routesLlmLog).error('voice platform settings read failed', { error: err.message });
@@ -1501,12 +1736,13 @@ router.put('/platform-settings/voice', authenticateToken, requireAdmin, async (r
     try {
         const body = req.body || {};
         const allowed = new Set([
-            'voice_mode_enabled', 'tts_provider',
+            'voice_mode_enabled',
             'tts_rate', 'tts_pitch',
             'stt_provider', 'stt_language',
             'avatar_type', 'llm_model_voice',
             'google_tts_api_key', 'openai_tts_api_key',
-            ...VOICE_SLOT_KEYS
+            ...defaultVoiceKeys(),
+            ...providerEnabledKeys()
         ]);
 
         for (const key of Object.keys(body)) {
@@ -1523,6 +1759,7 @@ router.put('/platform-settings/voice', authenticateToken, requireAdmin, async (r
         };
 
         const writes = [];
+        const warnings = [];
         const setIfPresent = (key, val) => writes.push([key, val]);
 
         if ('voice_mode_enabled' in body) {
@@ -1531,21 +1768,47 @@ router.put('/platform-settings/voice', authenticateToken, requireAdmin, async (r
             }
             setIfPresent('voice_mode_enabled', body.voice_mode_enabled ? 'true' : 'false');
         }
-        if ('tts_provider' in body) {
-            if (body.tts_provider !== null && !VOICE_TTS_PROVIDERS.includes(body.tts_provider)) {
-                return res.status(400).json({ error: `tts_provider must be one of ${VOICE_TTS_PROVIDERS.join(', ')}` });
+        // Per-language default voices (VOICE2_PLAN.md §5.5). Validation is
+        // the same catalogue authority /api/tts routes with — a typo'd
+        // default cannot be saved. Tolerant on check ERRORS: "not found
+        // anywhere" rejects, "couldn't check" saves with a warning (an
+        // admin must be able to save a kokoro default on a box where the
+        // kokoro import is broken). A voice that provably speaks the wrong
+        // language rejects; unknown language passes.
+        for (const lang of Object.keys(LANGUAGES)) {
+            const k = defaultVoiceKey(lang);
+            if (!(k in body)) continue;
+            const v = body[k];
+            if (v === null || v === '' || v === undefined) {
+                setIfPresent(k, ''); // clearing restores loud-fail for this language
+                continue;
             }
-            setIfPresent('tts_provider', body.tts_provider || '');
-        }
-        // Per-provider voice slots: voice_<provider>_<gender>. Same safety
-        // check used for the legacy piper_voice_* keys, applied uniformly.
-        for (const k of VOICE_SLOT_KEYS) {
-            if (k in body) {
-                if (body[k] !== null && body[k] !== '' && !isSafeVoiceFilename(body[k])) {
-                    return res.status(400).json({ error: `${k} must be a safe voice id` });
+            if (typeof v !== 'string' || !isSafeVoiceFilename(v)) {
+                return res.status(400).json({ error: `${k} must be a safe voice id` });
+            }
+            const { provider, checkErrors } = await deriveVoiceProvider(v);
+            if (!provider) {
+                if (checkErrors.length > 0) {
+                    warnings.push(`${k}: could not verify "${v}" (catalogue check failed for: ${checkErrors.join(', ')}); saved unverified`);
+                    setIfPresent(k, v);
+                    continue;
                 }
-                setIfPresent(k, body[k] || '');
+                return res.status(400).json({ error: `${k}: voice "${v}" is in no provider's catalogue` });
             }
+            if (voiceMatchesLanguage(v, provider, lang) === false) {
+                return res.status(400).json({ error: `${k}: voice "${v}" (${provider}) does not speak "${lang}"` });
+            }
+            setIfPresent(k, v);
+        }
+        // Per-provider enable toggles (VOICE2_PLAN.md §5.2 — the cost
+        // policy switch; capability is probed, never stored).
+        for (const p of TTS_PROVIDERS) {
+            const k = providerEnabledKey(p);
+            if (!(k in body)) continue;
+            if (typeof body[k] !== 'boolean') {
+                return res.status(400).json({ error: `${k} must be boolean` });
+            }
+            setIfPresent(k, body[k] ? '1' : '0');
         }
         if ('tts_rate' in body) {
             const v = validateRange(body.tts_rate, 0.5, 1.5);
@@ -1607,33 +1870,100 @@ router.put('/platform-settings/voice', authenticateToken, requireAdmin, async (r
             await setAuditedPlatformSetting(req, k, v, 'update_platform_voice_settings');
         }
 
-        res.json({ message: 'Voice settings updated successfully', updated: writes.map(w => w[0]) });
+        res.json({
+            message: 'Voice settings updated successfully',
+            updated: writes.map(w => w[0]),
+            ...(warnings.length > 0 ? { warnings } : {})
+        });
     } catch (err) {
         (req.log || routesLlmLog).error('voice platform settings update failed', { error: err.message });
         res.status(500).json({ error: 'Failed to update voice settings' });
     }
 });
 
-// Per-gender persona defaults. Cases inherit these by patient gender
-// unless overridden individually. Two key shapes:
+// --- Affect routing (Plan A, todo/plan-a-implementation-spec.md) -------------
+// One JSON platform key (`affect_routing`) holding the whole config, stored
+// normalized. GET is any-authed-user — the chat client needs the routing
+// decision (mode, thresholds) before it computes a signal; there is nothing
+// sensitive in it. PUT is admin-only. The proxy route re-reads the stored
+// value on every LLM call, so the server stays the authoritative gate no
+// matter what a stale client sends.
+
+// GET /api/platform-settings/affect - Affect-routing config (any authed user)
+router.get('/platform-settings/affect', authenticateToken, async (req, res) => {
+    try {
+        const raw = await getPlatformSetting('affect_routing');
+        res.json(normalizeAffectSettings(raw));
+    } catch (err) {
+        (req.log || routesLlmLog).error('affect settings load failed', { error: err.message });
+        res.status(500).json({ error: 'Failed to load affect settings' });
+    }
+});
+
+// PUT /api/platform-settings/affect - Update affect-routing config (Admin only)
+router.put('/platform-settings/affect', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const body = req.body || {};
+        const allowed = new Set(Object.keys(DEFAULT_AFFECT_ROUTING));
+        for (const key of Object.keys(body)) {
+            if (!allowed.has(key)) {
+                return res.status(400).json({ error: `Unknown setting: ${key} (endpoint: /platform-settings/affect)` });
+            }
+        }
+        // Loud validation (voice-settings pattern): reject bad values rather
+        // than silently coercing — an admin must know their input didn't take.
+        if ('enabled' in body && typeof body.enabled !== 'boolean') {
+            return res.status(400).json({ error: 'enabled must be boolean' });
+        }
+        if ('affect_mode' in body && !AFFECT_MODES.includes(body.affect_mode)) {
+            return res.status(400).json({ error: `affect_mode must be one of: ${AFFECT_MODES.join(', ')}` });
+        }
+        if ('providers' in body && !AFFECT_PROVIDER_POLICIES.includes(body.providers)) {
+            return res.status(400).json({ error: `providers must be one of: ${AFFECT_PROVIDER_POLICIES.join(', ')}` });
+        }
+        if ('reactivity' in body && !AFFECT_REACTIVITIES.includes(body.reactivity)) {
+            return res.status(400).json({ error: `reactivity must be one of: ${AFFECT_REACTIVITIES.join(', ')}` });
+        }
+        if ('may_acknowledge' in body && typeof body.may_acknowledge !== 'boolean') {
+            return res.status(400).json({ error: 'may_acknowledge must be boolean' });
+        }
+        if ('min_confidence' in body) {
+            const f = Number(body.min_confidence);
+            if (!Number.isFinite(f) || f < 0 || f > 1) {
+                return res.status(400).json({ error: 'min_confidence must be a number between 0 and 1' });
+            }
+        }
+        if ('max_age_ms' in body) {
+            const f = Number(body.max_age_ms);
+            if (!Number.isFinite(f) || f < 1000 || f > 120000) {
+                return res.status(400).json({ error: 'max_age_ms must be between 1000 and 120000' });
+            }
+        }
+        const current = normalizeAffectSettings(await getPlatformSetting('affect_routing'));
+        const merged = normalizeAffectSettings({ ...current, ...body });
+        await setAuditedPlatformSetting(req, 'affect_routing', JSON.stringify(merged), 'update_affect_settings');
+        res.json(merged);
+    } catch (err) {
+        (req.log || routesLlmLog).error('affect settings update failed', { error: err.message });
+        res.status(500).json({ error: 'Failed to update affect settings' });
+    }
+});
+
+// Per-gender persona defaults — FLAT, provider-independent keys only:
+//   default_avatar_<gender>   — GLB filename, no TTS interaction
+//   default_rate_<gender>     — TTS speed (0.5–1.5), applies to any engine
+//   default_pitch_<gender>    — provider pitch in semitones (-10–10)
 //
-//   FLAT (provider-independent):
-//     default_avatar_<gender>   — GLB filename, no TTS interaction
-//     default_rate_<gender>     — TTS speed (0.5–1.5), applies to any engine
-//     default_pitch_<gender>    — provider pitch in semitones (-10–10)
-//
-//   PER-PROVIDER (because voice IDs are provider-specific):
-//     default_voice_<provider>_<gender>  — voice ID for that provider
-//
-// The flat `default_voice_<gender>` from before was the source of "switching
-// providers breaks playback" — a Google voice ID can't be synthesized by
-// Kokoro. Those legacy keys are dropped by migration 0022 and no longer
-// recreated on boot.
+// Voice defaults do NOT live here. The gendered per-provider
+// `default_voice_<provider>_<gender>` family (a no-op since the 2026-05
+// resolver collapse) is retired by migration 0034; the live defaults are
+// the per-LANGUAGE `tts_default_voice_<lang>` keys on
+// /platform-settings/voice (VOICE2_PLAN.md §5.5).
 const PERSONA_GENDERS = VOICE_GENDERS;
 const PERSONA_FLAT_FIELDS = ['avatar', 'rate', 'pitch'];
 const PERSONA_FLAT_KEYS = PERSONA_GENDERS
     .flatMap(g => PERSONA_FLAT_FIELDS.map(f => `default_${f}_${g}`));
-const PERSONA_KEYS = new Set([...PERSONA_FLAT_KEYS, ...PERSONA_DEFAULT_VOICE_KEYS]);
+const PERSONA_KEYS = new Set(PERSONA_FLAT_KEYS);
 
 // GET /api/platform-settings/avatars - Per-gender persona defaults (any authed user)
 router.get('/platform-settings/avatars', authenticateToken, async (req, res) => {
@@ -1665,7 +1995,6 @@ router.put('/platform-settings/avatars', authenticateToken, requireAdmin, async 
             }
         }
         const isSafeGlb   = (v) => typeof v === 'string' && /^[a-zA-Z0-9_-]+\.glb$/.test(v);
-        const isSafeVoice = (v) => typeof v === 'string' && /^[a-zA-Z0-9_.-]+$/.test(v) && !v.includes('..');
         const inRange = (v, lo, hi) => {
             const n = Number(v);
             return Number.isFinite(n) && n >= lo && n <= hi;
@@ -1681,9 +2010,6 @@ router.put('/platform-settings/avatars', authenticateToken, requireAdmin, async 
             }
             if (k.startsWith('default_avatar_') && !isSafeGlb(raw)) {
                 return res.status(400).json({ error: `${k} must be a safe GLB filename` });
-            }
-            if (k.startsWith('default_voice_') && !isSafeVoice(raw)) {
-                return res.status(400).json({ error: `${k} must be a safe voice filename` });
             }
             if (k.startsWith('default_rate_')  && !inRange(raw, 0.5, 1.5)) {
                 return res.status(400).json({ error: `${k} must be between 0.5 and 1.5` });

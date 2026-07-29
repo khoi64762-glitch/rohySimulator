@@ -1,6 +1,8 @@
 import express from 'express';
-import crypto from 'crypto';
 import dbAdapter from '../dbAdapter.js';
+// Join-code generation lives in server/lib/joinCode.js (single owner of the
+// alphabet / retry logic) so the boot seed can allocate codes identically.
+import { allocateJoinCode, normalizeCode } from '../lib/joinCode.js';
 import {
     authenticateToken,
     requireEducator,
@@ -8,7 +10,6 @@ import {
     ROLE_RANKS,
     hasRoleAtLeast,
 } from '../middleware/auth.js';
-import { logger } from '../logger.js';
 import { auditSuccess, tenantId } from './_helpers.js';
 import {
     buildEventFilter,
@@ -21,54 +22,8 @@ import {
 } from '../lib/learningEventAggregates.js';
 
 const router = express.Router();
-const cohortsLog = logger('routes-cohorts');
 
 const isAdmin = (req) => hasRoleAtLeast(req.user, ROLE_RANKS.admin);
-
-// Excludes ambiguous glyphs (0/O, 1/I/L) so a shared code can't be
-// mistyped between teacher and student.
-const JOIN_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-const JOIN_CODE_LENGTH = 8;
-const JOIN_CODE_MAX_RETRIES = 6;
-
-function generateJoinCode() {
-    const bytes = crypto.randomBytes(JOIN_CODE_LENGTH);
-    let out = '';
-    for (let i = 0; i < JOIN_CODE_LENGTH; i++) {
-        out += JOIN_CODE_ALPHABET[bytes[i] % JOIN_CODE_ALPHABET.length];
-    }
-    return out;
-}
-
-// Allocate a join_code on `cohort`, retrying on a partial-unique collision
-// against another live cohort's code. Returns the code on success, or null
-// if every retry collided (the caller decides how to surface that). This is
-// the single owner of join-code generation — both POST /cohorts (create
-// with join_code) and POST /cohorts/:id/join-code call it so the retry /
-// alphabet logic lives in exactly one place.
-async function allocateJoinCode(cohortId) {
-    let lastErr = null;
-    for (let attempt = 0; attempt < JOIN_CODE_MAX_RETRIES; attempt++) {
-        const code = generateJoinCode();
-        try {
-            await dbAdapter.run(`UPDATE cohorts SET join_code = ? WHERE id = ?`, [code, cohortId]);
-            return code;
-        } catch (err) {
-            // Partial-unique collision on a live join_code — retry with a
-            // fresh code. Any other error is fatal.
-            if (/UNIQUE constraint/i.test(err.message)) {
-                lastErr = err;
-                continue;
-            }
-            throw err;
-        }
-    }
-    cohortsLog.error('join code generation exhausted retries', {
-        cohort_id: cohortId,
-        error: lastErr?.message,
-    });
-    return null;
-}
 
 // WHY this access rule (the security chokepoint — read before touching).
 //
@@ -273,10 +228,21 @@ router.post('/cohorts', authenticateToken, requireEducator, async (req, res, nex
 router.get('/cohorts', authenticateToken, requireEducator, async (req, res, next) => {
     try {
         const params = [tenantId(req)];
-        let where = `tenant_id = ? AND deleted_at IS NULL`;
+        let where = `c.tenant_id = ? AND c.deleted_at IS NULL`;
         if (!isAdmin(req)) {
-            where += ` AND owner_user_id = ?`;
-            params.push(req.user.id);
+            // Ownership is not the only way to reach a course: loadOwnedCohort()
+            // admits a live teacher-member too, so a co-teacher could PATCH a
+            // course, assign cases to it and read its analytics — while it never
+            // appeared in their course list, because this filter asked only about
+            // owner_user_id. The list has to admit whoever the gate admits, or the
+            // course is unreachable from the UI that lists it.
+            where += ` AND (c.owner_user_id = ?
+                            OR EXISTS (SELECT 1 FROM cohort_members m
+                                        WHERE m.cohort_id = c.id
+                                          AND m.user_id = ?
+                                          AND m.member_role = 'teacher'
+                                          AND m.deleted_at IS NULL))`;
+            params.push(req.user.id, req.user.id);
         }
         const rows = await dbAdapter.all(
             `SELECT c.*,
@@ -701,22 +667,42 @@ router.patch('/cohorts/:id/cases/:caseId', authenticateToken, requireEducator, a
         if (from === false || until === false) {
             return res.status(400).json({ error: 'available_from / available_until must be valid dates' });
         }
-        if (from && until && Date.parse(from) > Date.parse(until)) {
+
+        // This is a PATCH, so an ABSENT key means "leave it alone" and an explicit
+        // null means "clear it". It used to write both columns unconditionally:
+        // `PATCH {available_until: '2026-04-30'}` to extend a deadline also wiped
+        // available_from to NULL, quietly opening the case earlier than the teacher
+        // had set. The sibling member PATCH below already read-merges; this one
+        // didn't. Key presence is the signal — parseDateInput maps both an absent
+        // key and an explicit null to `undefined`, so it cannot tell them apart.
+        const existing = await dbAdapter.get(
+            `SELECT available_from, available_until FROM cohort_cases
+              WHERE cohort_id = ? AND case_id = ? AND deleted_at IS NULL`,
+            [cohort.id, caseId]
+        );
+        if (!existing) return res.status(404).json({ error: 'Case assignment not found' });
+
+        const sent = (key) => Object.prototype.hasOwnProperty.call(body, key);
+        const nextFrom = sent('available_from') ? (from ?? null) : existing.available_from;
+        const nextUntil = sent('available_until') ? (until ?? null) : existing.available_until;
+
+        if (nextFrom && nextUntil && Date.parse(nextFrom) > Date.parse(nextUntil)) {
             return res.status(400).json({ error: 'available_from must be on or before available_until' });
         }
+
         const result = await dbAdapter.run(
             `UPDATE cohort_cases SET available_from = ?, available_until = ?
               WHERE cohort_id = ? AND case_id = ? AND deleted_at IS NULL`,
-            [from ?? null, until ?? null, cohort.id, caseId]
+            [nextFrom, nextUntil, cohort.id, caseId]
         );
         if (!result.changes) return res.status(404).json({ error: 'Case assignment not found' });
         auditSuccess(req, {
             action: 'cohort.cases.window',
             resourceType: 'cohort',
             resourceId: cohort.id,
-            metadata: { case_id: caseId, available_from: from ?? null, available_until: until ?? null },
+            metadata: { case_id: caseId, available_from: nextFrom, available_until: nextUntil },
         });
-        res.json({ updated: true, case_id: caseId, available_from: from ?? null, available_until: until ?? null });
+        res.json({ updated: true, case_id: caseId, available_from: nextFrom, available_until: nextUntil });
     } catch (err) {
         next(err);
     }
@@ -981,7 +967,12 @@ router.delete('/cohorts/:id/join-code', authenticateToken, requireEducator, asyn
 
 router.post('/cohorts/join', authenticateToken, requireStudent, async (req, res, next) => {
     try {
-        const joinCode = typeof req.body?.join_code === 'string' ? req.body.join_code.trim() : '';
+        // normalizeCode is the same fold the invite path uses: upper-case, drop
+        // anything outside the alphabet. A join code is read off a slide, said out
+        // loud, pasted from a chat message — `rkm7pq2h` and `RKM7-PQ2H` are the
+        // same code, and a raw trim()+exact match answered "No cohort found for
+        // that join code", which reads as a wrong code rather than wrong casing.
+        const joinCode = normalizeCode(req.body?.join_code);
         if (!joinCode) {
             return res.status(400).json({ error: 'join_code is required' });
         }

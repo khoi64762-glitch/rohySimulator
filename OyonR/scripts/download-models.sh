@@ -99,9 +99,10 @@ copy_vendor() {
 
 # ONNX Runtime Web — the SIMD+threaded wasm backend AND its asyncify variant.
 # onnxruntime-web loads `ort-wasm-simd-threaded.asyncify.{mjs,wasm}` at runtime
-# for the classifier's inference path. Omitting either file produces a 404,
-# prevents the emotion model from loading, and leaves the Oyon pill in Error.
-# jsep/webgpu/jspi remain excluded because those execution providers are off.
+# (not the plain build) for the classifier's inference path — omitting it 404s
+# the model load and the Oyon pill shows "Error" (rohy-dev, 2026-07-10). The
+# jsep/webgpu/jspi variants are still skipped: they are only loaded by the
+# WebGPU/WebNN execution providers, which this app does not enable.
 if ort_dist="$(resolve_in_node_modules onnxruntime-web/dist)"; then
   for f in ort.min.mjs \
            ort-wasm-simd-threaded.mjs ort-wasm-simd-threaded.wasm \

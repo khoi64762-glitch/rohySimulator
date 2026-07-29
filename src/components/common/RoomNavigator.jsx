@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { FlaskConical, GraduationCap, MessageCircle, Scan, Stethoscope } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { FlaskConical, GraduationCap, MessageCircle, Scan, Stethoscope, BookOpen } from 'lucide-react';
 import { apiFetch } from '../../services/apiClient';
 
 // Bottom navigation bar shared across every in-session surface — main
@@ -27,8 +28,8 @@ import { apiFetch } from '../../services/apiClient';
 const ROOM_DEFS = [
     {
         key: 'chat',
-        label: 'Patient',
-        sub: 'chat',
+        labelKey: 'room_chat',
+        subKey: 'room_chat_sub',
         icon: MessageCircle,
         iconText: 'text-rose-300',
         activeText: 'text-rose-200',
@@ -38,8 +39,8 @@ const ROOM_DEFS = [
     },
     {
         key: 'examination',
-        label: 'Examination',
-        sub: 'physical exam',
+        labelKey: 'room_examination',
+        subKey: 'room_examination_sub',
         icon: Stethoscope,
         iconText: 'text-emerald-300',
         activeText: 'text-emerald-200',
@@ -49,8 +50,8 @@ const ROOM_DEFS = [
     },
     {
         key: 'lab',
-        label: 'Laboratory',
-        sub: 'investigations',
+        labelKey: 'room_lab',
+        subKey: 'room_lab_sub',
         icon: FlaskConical,
         iconText: 'text-purple-300',
         activeText: 'text-purple-200',
@@ -61,8 +62,8 @@ const ROOM_DEFS = [
     },
     {
         key: 'radiology',
-        label: 'Radiology',
-        sub: 'imaging',
+        labelKey: 'room_radiology',
+        subKey: 'room_radiology_sub',
         icon: Scan,
         iconText: 'text-cyan-300',
         activeText: 'text-cyan-200',
@@ -73,8 +74,8 @@ const ROOM_DEFS = [
     },
     {
         key: 'consultant',
-        label: 'Consultant',
-        sub: 'debrief',
+        labelKey: 'room_consultant',
+        subKey: 'room_consultant_sub',
         icon: GraduationCap,
         iconText: 'text-amber-300',
         activeText: 'text-amber-200',
@@ -123,12 +124,13 @@ function useReadyCounts(sessionId) {
     return counts;
 }
 
-export default function RoomNavigator({ currentRoom, onSelectRoom, sessionId = null }) {
+export default function RoomNavigator({ currentRoom, onSelectRoom, onOpenCourse = null, sessionId = null }) {
+    const { t } = useTranslation('common');
     const counts = useReadyCounts(sessionId);
     return (
         <nav
             className="flex items-stretch gap-1 px-3 py-2 bg-slate-950/95 backdrop-blur border-t border-slate-800 shadow-[0_-8px_24px_-12px_rgba(0,0,0,0.6)]"
-            aria-label="Room navigation"
+            aria-label={t('room_navigation')}
         >
             {ROOM_DEFS.map((room) => (
                 <RoomButton
@@ -139,12 +141,29 @@ export default function RoomNavigator({ currentRoom, onSelectRoom, sessionId = n
                     onClick={() => onSelectRoom(room.key)}
                 />
             ))}
+            {/* Course — a peer of the rooms but visually smaller and in black,
+                opening this case's course content (lessons + surveys). */}
+            {onOpenCourse && (
+                <button
+                    type="button"
+                    onClick={onOpenCourse}
+                    aria-label={t('room_course', { defaultValue: 'Course' })}
+                    className="shrink-0 self-stretch px-3 rounded-lg flex items-center gap-2 bg-black text-white/85 ring-1 ring-white/10 hover:bg-neutral-900 hover:text-white transition-colors"
+                >
+                    <BookOpen className="w-4 h-4" />
+                    <span className="text-xs font-semibold">{t('room_course', { defaultValue: 'Course' })}</span>
+                </button>
+            )}
         </nav>
     );
 }
 
 function RoomButton({ room, active, badge, onClick }) {
+    const { t } = useTranslation('common');
     const Icon = room.icon;
+    // Room names come from the static ROOM_DEFS key map; every labelKey /
+    // subKey has a matching entry in src/locales/en/common.json.
+    const label = t(room.labelKey);
     // The badge accent is only declared on lab/radiology room defs, so
     // its absence doubles as the gate for "this room never shows a badge."
     const showBadge = badge > 0 && Boolean(room.badgeAccent);
@@ -153,7 +172,7 @@ function RoomButton({ room, active, badge, onClick }) {
             type="button"
             onClick={onClick}
             aria-pressed={active}
-            aria-label={showBadge ? `${room.label} — ${badge} ready ${badge === 1 ? 'result' : 'results'}` : room.label}
+            aria-label={showBadge ? t('room_ready_results', { label, count: badge }) : label}
             className={`relative flex-1 px-4 py-2.5 rounded-lg flex items-center justify-center gap-2.5 transition-colors group ${
                 active
                     ? `${room.activeBg} ring-1 ${room.activeRing}`
@@ -176,12 +195,12 @@ function RoomButton({ room, active, badge, onClick }) {
                 <span className={`text-sm font-semibold ${
                     active ? 'text-white' : 'text-slate-300 group-hover:text-white'
                 }`}>
-                    {room.label}
+                    {label}
                 </span>
                 <span className={`text-[10px] uppercase tracking-wider ${
                     active ? room.activeText : 'text-slate-500'
                 }`}>
-                    {room.sub}
+                    {t(room.subKey)}
                 </span>
             </div>
             {active && (

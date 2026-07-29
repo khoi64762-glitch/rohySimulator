@@ -964,8 +964,10 @@ router.post('/sessions/:sessionId/order-labs', authenticateToken, (req, res) => 
 
     (req.log || routesOrdersLog).info('lab order request received', { session_id: sessionId, lab_ids, turnaround_override });
 
-    // Verify session exists and user has access; pull snapshot in same query
-    dbAdapter.get('SELECT user_id, case_id, case_snapshot FROM sessions WHERE id = ?', [sessionId], (err, session) => {
+    // Verify session exists and user has access; pull snapshot in same query.
+    // The tenant predicate is not optional: without it, an educator in tenant B
+    // reached a tenant-A learner's live session and could order into it.
+    dbAdapter.get('SELECT user_id, case_id, case_snapshot FROM sessions WHERE id = ? AND tenant_id = ?', [sessionId, tenantId(req)], (err, session) => {
         if (err) {
             return res.status(500).json({ error: err.message });
         }
@@ -1033,9 +1035,17 @@ router.post('/sessions/:sessionId/order-labs', authenticateToken, (req, res) => 
 
                 // Get configured labs
                 if (configuredIds.length > 0) {
-                    const labsSql = `SELECT id, turnaround_minutes, test_name FROM case_investigations WHERE deleted_at IS NULL AND id IN (${configuredIds.map(() => '?').join(',')})`;
+                    // `AND case_id = ?` is the whole ballgame. `lab_ids` is client
+                    // input; without this predicate a learner could post the ids of
+                    // ANY case's investigations — including another tenant's — and
+                    // the server would happily bind those rows to their own session,
+                    // after which the results were readable back out. A session may
+                    // only order the investigations configured for its own case.
+                    const labsSql = `SELECT id, turnaround_minutes, test_name FROM case_investigations
+                                     WHERE deleted_at IS NULL AND case_id = ?
+                                       AND id IN (${configuredIds.map(() => '?').join(',')})`;
 
-                    dbAdapter.all(labsSql, configuredIds, (err, labs) => {
+                    dbAdapter.all(labsSql, [session.case_id, ...configuredIds], (err, labs) => {
                         if (err) {
                             (req.log || routesOrdersLog).error('labs fetch failed', { error: err.message });
                             return finalizeOrders();
@@ -1245,9 +1255,17 @@ router.post('/sessions/:sessionId/order-labs', authenticateToken, (req, res) => 
 });
 
 // GET /api/sessions/:sessionId/lab-results - Get completed lab results
-router.get('/sessions/:sessionId/lab-results', authenticateToken, (req, res) => {
+// The gate here is not decoration. This route used to carry `authenticateToken`
+// and nothing else: no ownership check, no tenant filter, and a WHERE clause of
+// `io.session_id = ?` taken straight from the URL. Any logged-in student could
+// walk session ids and read every other learner's — and every other tenant's —
+// lab results. Ordering an investigation is the graded act in this product; its
+// results are the answer key.
+router.get('/sessions/:sessionId/lab-results', authenticateToken, async (req, res) => {
     const { sessionId } = req.params;
-    
+
+    if (!await verifySessionOwnership(sessionId, req.user, res, { requireSession: true })) return;
+
     const sql = `
         SELECT 
             io.id as order_id,
@@ -1498,7 +1516,7 @@ router.post('/sessions/:sessionId/order-radiology', authenticateToken, (req, res
     }
 
     // Verify session exists and get case config (snapshot-preferred)
-    dbAdapter.get('SELECT s.user_id, s.case_id, s.case_snapshot, c.config FROM sessions s JOIN cases c ON s.case_id = c.id WHERE s.id = ?', [sessionId], (err, session) => {
+    dbAdapter.get('SELECT s.user_id, s.case_id, s.case_snapshot, c.config FROM sessions s JOIN cases c ON s.case_id = c.id WHERE s.id = ? AND s.tenant_id = ?', [sessionId, tenantId(req)], (err, session) => {
         if (err) return res.status(500).json({ error: err.message });
         if (!session) return res.status(404).json({ error: 'Session not found' });
         if (session.user_id !== req.user.id && !hasRoleAtLeast(req.user, ROLE_RANKS.educator)) {
@@ -1688,7 +1706,7 @@ router.get('/sessions/:sessionId/available-treatments', authenticateToken, (req,
     const { sessionId } = req.params;
     const { type } = req.query; // Optional filter: medication, iv_fluid, oxygen, nursing
 
-    dbAdapter.get('SELECT s.case_id, s.case_snapshot, c.config FROM sessions s JOIN cases c ON s.case_id = c.id WHERE s.id = ?', [sessionId], (err, session) => {
+    dbAdapter.get('SELECT s.case_id, s.case_snapshot, c.config FROM sessions s JOIN cases c ON s.case_id = c.id WHERE s.id = ? AND s.tenant_id = ?', [sessionId, tenantId(req)], (err, session) => {
         if (err) return res.status(500).json({ error: err.message });
         if (!session) return res.status(404).json({ error: 'Session not found' });
 
@@ -1778,7 +1796,7 @@ router.post('/sessions/:sessionId/order-treatment', authenticateToken, (req, res
     }
 
     // Verify session and access (snapshot-aware select for downstream config)
-    dbAdapter.get('SELECT s.user_id, s.case_id, s.case_snapshot, c.config FROM sessions s JOIN cases c ON s.case_id = c.id WHERE s.id = ?', [sessionId], (err, session) => {
+    dbAdapter.get('SELECT s.user_id, s.case_id, s.case_snapshot, c.config FROM sessions s JOIN cases c ON s.case_id = c.id WHERE s.id = ? AND s.tenant_id = ?', [sessionId, tenantId(req)], (err, session) => {
         if (err) return res.status(500).json({ error: err.message });
         if (!session) return res.status(404).json({ error: 'Session not found' });
         if (session.user_id !== req.user.id && !hasRoleAtLeast(req.user, ROLE_RANKS.educator)) {
@@ -1805,15 +1823,20 @@ router.post('/sessions/:sessionId/order-treatment', authenticateToken, (req, res
                 // Insert the order
                 const insertSql = `
                     INSERT INTO treatment_orders (
-                        session_id, treatment_type, medication_id, treatment_item,
+                        session_id, tenant_id, treatment_type, medication_id, treatment_item,
                         dose, dose_value, dose_unit, route, frequency,
                         rate, rate_value, rate_unit, duration_minutes,
                         urgency, is_high_alert, notes, feedback, points_awarded
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 `;
 
+                // tenant_id was omitted here while the reader (GET
+                // /sessions/:id/treatment-orders) filters on it, and the column
+                // defaults to 1 — so every treatment a tenant-2 learner ordered was
+                // written into tenant 1 and then vanished from their own MAR. Same
+                // bug the radiology path was fixed for; this path never got it.
                 dbAdapter.run(insertSql, [
-                    sessionId, treatment_type, medication_id || null, treatment_name,
+                    sessionId, tenantId(req), treatment_type, medication_id || null, treatment_name,
                     dose || null, dose_value || null, dose_unit || null,
                     route || effect?.route || null, frequency || null,
                     rate || null, rate_value || null, rate_unit || null,
@@ -1895,10 +1918,12 @@ router.post('/sessions/:sessionId/administer/:orderId', authenticateToken, (req,
         } catch { /* noop */ }
     };
 
-    // Verify session and order
+    // Verify session and order. Reached through treatment_orders, so the tenant
+    // predicate has to land on the SESSION — the order row inherits its scope
+    // from the session it belongs to, not the other way round.
     dbAdapter.get(`SELECT t.*, s.user_id, s.case_id FROM treatment_orders t
             JOIN sessions s ON t.session_id = s.id
-            WHERE t.id = ? AND t.session_id = ?`, [orderId, sessionId], (err, order) => {
+            WHERE t.id = ? AND t.session_id = ? AND s.tenant_id = ?`, [orderId, sessionId, tenantId(req)], (err, order) => {
         try {
             if (err) return sendError(500, err);
             if (!order) return sendError(404, 'Order not found');
@@ -1929,10 +1954,20 @@ router.post('/sessions/:sessionId/administer/:orderId', authenticateToken, (req,
                 return sendError(500, e, { phase: 'effect-classify' });
             }
 
-            // Update order status
-            dbAdapter.run(`UPDATE treatment_orders SET status = ?, administered_at = ? WHERE id = ?`,
-                [isContinuous ? 'in_progress' : 'administered', now, orderId], (err) => {
+            // Update order status. `AND status = 'ordered'` makes this a compare-
+            // and-swap, not a blind write: the status check above is a read, and
+            // two in-flight administer requests (a double-click, or React
+            // StrictMode firing the handler twice) both passed it before either
+            // wrote. Both then inserted into active_treatments and the effects
+            // engine applied the drug twice. Losing the race is now a 409, and
+            // `this.changes` is why this callback is a function and not an arrow.
+            dbAdapter.run(`UPDATE treatment_orders SET status = ?, administered_at = ?
+                           WHERE id = ? AND status = 'ordered'`,
+                [isContinuous ? 'in_progress' : 'administered', now, orderId], function onAdministered(err) {
                 if (err) return sendError(500, err, { phase: 'order-update' });
+                if (this.changes === 0) {
+                    return sendError(409, 'This order has already been administered');
+                }
 
                 // No effect row → respond without active_treatments insert.
                 if (!effect) {
@@ -2056,7 +2091,7 @@ router.put('/sessions/:sessionId/discontinue/:orderId', authenticateToken, (req,
 
     dbAdapter.get(`SELECT t.*, s.user_id FROM treatment_orders t
             JOIN sessions s ON t.session_id = s.id
-            WHERE t.id = ? AND t.session_id = ?`, [orderId, sessionId], (err, order) => {
+            WHERE t.id = ? AND t.session_id = ? AND s.tenant_id = ?`, [orderId, sessionId, tenantId(req)], (err, order) => {
         if (err) return res.status(500).json({ error: err.message });
         if (!order) return res.status(404).json({ error: 'Order not found' });
         if (order.user_id !== req.user.id && !hasRoleAtLeast(req.user, ROLE_RANKS.educator)) {

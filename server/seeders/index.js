@@ -5,10 +5,18 @@
  * Usage:
  *   - Automatically runs on server startup if database is empty
  *   - Can also be run manually: node server/seeders/index.js
+ *
+ * The Basic course (default class + STEMI lesson/MCQ/survey + default-case
+ * link) is part of the fresh-DB seed CONTRACT but is created by
+ * server/seedStemiCourse.js, which server.js runs unconditionally right
+ * after these seeders — migration 0031 no-ops on fresh installs because it
+ * runs before any users exist. Contract pinned by
+ * tests/server/seed-basic-course.test.js.
  */
 
 import { seedUsers, defaultUsers } from './users.js';
 import { seedCases, defaultCases } from './cases.js';
+import { seedRegistrationPolicy } from './registrationPolicy.js';
 import { logger } from '../logger.js';
 
 const seederLog = logger('seeder');
@@ -23,7 +31,8 @@ export async function runSeeders(db) {
 
     const results = {
         users: { seeded: 0, skipped: 0, error: null },
-        cases: { seeded: 0, skipped: 0, error: null }
+        cases: { seeded: 0, skipped: 0, error: null },
+        registration: { seeded: 0, skipped: 0, error: null }
     };
 
     // Seed users first
@@ -40,6 +49,16 @@ export async function runSeeders(db) {
     } catch (err) {
         seederLog.error('case seeding failed', { error: err.message });
         results.cases.error = err.message;
+    }
+
+    // A fresh install should not be wide open on first boot. Non-fatal: if this
+    // fails the instance falls back to 'open' (absent = open), which is the
+    // pre-feature behaviour — never a hard boot failure over a default.
+    try {
+        results.registration = await seedRegistrationPolicy(db);
+    } catch (err) {
+        seederLog.error('registration policy seeding failed', { error: err.message });
+        results.registration.error = err.message;
     }
 
     // Only the dev-default path creates the well-known accounts worth naming in

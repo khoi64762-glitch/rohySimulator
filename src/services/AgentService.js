@@ -337,7 +337,7 @@ export const AgentService = {
    * Send a message to an agent via the LLM proxy
    * Handles the full flow: build context, send message, log response
    */
-  async sendAgentMessage(sessionId, agent, userMessage, patientRecord, teamLog, currentVitals, conversationHistory = [], activeCase = null) {
+  async sendAgentMessage(sessionId, agent, userMessage, patientRecord, teamLog, currentVitals, conversationHistory = [], activeCase = null, { caseLanguage = null } = {}) {
     try {
       await this.addMessage(sessionId, agent.agent_type, 'user', userMessage);
 
@@ -354,6 +354,11 @@ export const AgentService = {
         messages,
         system_prompt: systemPrompt
       };
+      // Session dialogue language — the server appends the registry's
+      // output-language directive (systemPromptAssembly), same contract as
+      // the patient chat in llmService. Without this, nurse/consultant/
+      // relative replies stay English in a non-English session.
+      if (caseLanguage) requestBody.case_language = caseLanguage;
 
       // Per-persona LLM routing — send only the template id. The server
       // (proxy-routes.js) reads the template by id and applies its LLM
@@ -435,37 +440,43 @@ export const AgentService = {
     return Math.floor(Math.random() * (max - min + 1)) + min;
   },
 
+  // `label` stays English (logged/tested contract); `labelKey`/`labelParams`
+  // are the chat-namespace translation key the UI renders via
+  // t(labelKey, labelParams) — this service stays hook-free.
   getAgentDisplayStatus(agent, elapsedMinutes) {
     if (!agent.enabled) {
-      return { status: 'disabled', label: 'Not Available', canChat: false, canPage: false };
+      return { status: 'disabled', label: 'Not Available', labelKey: 'agent_status_not_available', canChat: false, canPage: false };
     }
     if (agent.status === 'present') {
-      return { status: 'present', label: 'Available', canChat: true, canPage: false };
+      return { status: 'present', label: 'Available', labelKey: 'agent_status_available', canChat: true, canPage: false };
     }
     if (agent.status === 'paged') {
-      return { status: 'paged', label: 'On the way...', canChat: false, canPage: false };
+      return { status: 'paged', label: 'On the way...', labelKey: 'agent_status_on_the_way', canChat: false, canPage: false };
     }
     if (agent.status === 'departed') {
-      return { status: 'departed', label: 'Left', canChat: false, canPage: false };
+      return { status: 'departed', label: 'Left', labelKey: 'agent_status_left', canChat: false, canPage: false };
     }
     if (agent.availability_type === 'absent') {
-      return { status: 'absent', label: 'Not Available', canChat: false, canPage: false };
+      return { status: 'absent', label: 'Not Available', labelKey: 'agent_status_not_available', canChat: false, canPage: false };
     }
     if (agent.availability_type === 'on-call') {
-      return { status: 'on-call', label: 'On-Call', canChat: false, canPage: true };
+      return { status: 'on-call', label: 'On-Call', labelKey: 'agent_status_on_call', canChat: false, canPage: true };
     }
     if (agent.available_from_minute > 0 && elapsedMinutes < agent.available_from_minute) {
+      const minutes = agent.available_from_minute - elapsedMinutes;
       return {
         status: 'not-yet',
-        label: `Available in ${agent.available_from_minute - elapsedMinutes} min`,
+        label: `Available in ${minutes} min`,
+        labelKey: 'agent_status_available_in',
+        labelParams: { minutes },
         canChat: false,
         canPage: false
       };
     }
     if (agent.depart_at_minute && elapsedMinutes >= agent.depart_at_minute) {
-      return { status: 'departed', label: 'Left', canChat: false, canPage: false };
+      return { status: 'departed', label: 'Left', labelKey: 'agent_status_left', canChat: false, canPage: false };
     }
-    return { status: 'present', label: 'Available', canChat: true, canPage: false };
+    return { status: 'present', label: 'Available', labelKey: 'agent_status_available', canChat: true, canPage: false };
   }
 };
 

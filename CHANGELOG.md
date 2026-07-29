@@ -9,6 +9,324 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.8.0] — 2026-07-29
+
+This is the first published release of the development line previously
+versioned as 2.6.x and 2.7.x. The detailed 2.7.x milestone entries remain
+below for traceability; they were not published as separate GitHub releases.
+
+### Added
+
+- **Courses, lessons, and surveys.** Educators can organise learners into
+  courses, author rich lessons, assign cases, collect surveys, and run the
+  student classroom experience from the same platform.
+- **Six-language experience.** German, Spanish, Italian, Finnish, and Swedish
+  join English across the learner and instructor UI, with language-aware cases,
+  voices, and local Piper voice packs.
+- **Voice 2.0.** Case-owned voice identity, multilingual Google TTS, improved
+  Kokoro and Piper routing, provider-aware settings, and clearer voice controls.
+- **First-run onboarding.** Administrators get a platform setup checklist;
+  learners and teachers get role-appropriate welcome flows and saved language,
+  microphone, voice, and consent choices.
+- **Registration governance.** Open, closed, invite-only, and
+  administrator-approval modes; email-domain rules; revocable invitation links
+  and codes; course auto-enrolment; and an approval queue that stores only
+  password hashes.
+- **Consent-bound affect routing.** When explicitly enabled, fresh local Oyon
+  affect signals can inform the AI patient's in-character response without
+  exposing raw camera data or claiming to measure emotion.
+
+### Changed
+
+- Redesigned LLM settings, consolidated top-bar controls, expanded course and
+  case browsing, immutable case languages and codes, and plain-text response
+  support.
+- Fresh installations default to closed registration while preserving a safe
+  first-admin claim or explicit `ROHY_ADMIN_*` provisioning path. Existing
+  installations retain their prior open behavior until configured.
+- Brought forward the verified 2.5 release pipeline: required Oyon asyncify and
+  MediaPipe assets are packaged and probed across Docker, air-gap, and
+  published-image installation paths.
+
+### Fixed
+
+- Corrected course co-teacher visibility, availability-window updates,
+  join-code normalisation, course case-move authorization, affect-setting error
+  logging, and a broken lesson survey response action.
+- Corrected account lockout timestamp handling east of UTC, refused suspended
+  accounts before token creation, and aligned client/server password rules.
+- Corrected hard deletion of auto-enrolled users by removing their course
+  membership inside the same cleanup transaction.
+- Corrected LLM error-message namespace extraction so the i18n gate no longer
+  creates empty duplicate keys in the shared catalogue.
+- Added regression coverage for registration pathways, course administration,
+  first-run bootstrap, runtime assets, and session-running authorization.
+
+### Security
+
+- Closed session and order IDOR paths, enforced session ownership and tenant/case
+  binding for lab results, examinations, treatments, and staff access, and made
+  order administration atomic.
+- Enforced target-rank ceilings so administrators cannot edit, reset, or delete
+  peer administrators through direct API calls.
+
+## [2.7.14] — 2026-07-15
+
+### Changed
+
+- Regenerated the `docs/reference/**` reference from source now that the new
+  registration/approval routes and migration 0038 have landed (adds the
+  registration API page and refreshes the data/schema and config references), and
+  synced the i18n catalogues with the approval-queue UI strings. Keeps the
+  `docs:check` and `i18n:check` gates green.
+
+## [2.7.13] — 2026-07-15
+
+### Added
+
+- **Server regression tests locking the audit fixes.** New pathway suites:
+  `session-running-pathways` (lab-results IDOR, order-labs case binding, exam
+  tenant/case trinity), `course-admin-pathways` (co-teacher visibility, window
+  read-merge, join-code normalisation, case-move authorisation), and the
+  registration/approval-queue pathways (park/approve/reject/re-apply, invite
+  skips queue, closed-admits-invite, lockout east of UTC, suspended login).
+  Shared `tests/utils/authHttp.js` helper for HTTP + DB seeding.
+
+## [2.7.12] — 2026-07-15
+
+### Fixed
+
+- The affect-settings load/update handlers now log the error before returning
+  500 — the failure was previously swallowed, leaving a 500 with no trace. Also
+  dropped an unused `getAllProviderStatus` import from the proxy routes.
+
+## [2.7.11] — 2026-07-15
+
+### Fixed
+
+- **Course-administration defects (audit).** A co-teacher now sees the courses
+  they co-teach in `GET /cohorts` — the list filtered on `owner_user_id` alone,
+  so a course a co-teacher could PATCH and assign cases to never appeared for
+  them. The cohort-case window PATCH now read-merges: sending only
+  `available_until` no longer wipes `available_from` (which quietly re-opened the
+  case earlier than the teacher set). Join codes are normalised on the way in
+  (case-folded, separators dropped), so `RKM7-PQ2H` and `rkm7pq2h` are the same
+  code. Moving a case out of a course you don't manage is refused (403) — the
+  permission was checked on the course the case moved *to* and on nothing it
+  moved out of, so any educator could strip another teacher's case from theirs.
+
+## [2.7.10] — 2026-07-15
+
+### Added
+
+- **Registration approval queue (migration 0038).** `approval` mode was
+  selectable and advertised by the public probe, but `/auth/register` had no
+  branch for it — it behaved exactly like `open`, admitting everyone with a token.
+  It now parks an applicant in `registration_requests` (hashed at request time,
+  never a user row) and an admin approves or rejects from the Users workspace; on
+  approval the hash moves into the new `users` row untouched, so the applicant
+  signs in with the password they chose. A valid invite skips the queue.
+
+### Fixed
+
+- **Auth-entry hardening (audit).** Account lockout compared a SQLite UTC
+  timestamp parsed as local time, so on a server east of UTC the lock was always
+  already "in the past" and did nothing (unlimited guessing) — it now converts
+  correctly. Suspended/deleted accounts are refused before bcrypt instead of
+  minting a token that immediately stops working. A valid invite now opens a
+  `closed` door (closed governs strangers, not admin-issued invitees).
+
+## [2.7.9] — 2026-07-15
+
+### Fixed
+
+- **Session-running IDOR and tenant escapes (audit).** `GET
+  /sessions/:id/lab-results` now requires session ownership — it previously
+  carried `authenticateToken` and nothing else, so any logged-in student could
+  walk session ids and read another learner's results (the graded answer key).
+  Lab orders are bound to the session's own case (`AND case_id = ?`), so a client
+  can no longer order another case's — or tenant's — investigations. Exam findings
+  and treatment orders now persist the caller's `tenant_id` (they defaulted to
+  tenant 1, silently moving a tenant-2 learner's data out of their own tenant and
+  out of reach of the erasure purge), and take `case_id` from the session rather
+  than the request body. `verifySessionOwnership` scopes staff access to their own
+  tenant. Administering an order is now a compare-and-swap (409 on a double-fire)
+  and the client-supplied turnaround override is clamped, so `Infinity` can no
+  longer permanently brick an investigation.
+
+## [2.7.8] — 2026-07-15
+
+### Fixed
+
+- **ESLint is back to zero errors.** Cleared 12 pre-existing errors that were
+  blocking a clean lint gate: unused imports/props in `App.jsx`,
+  `InvestigationWorklist.jsx`, `LanguageContext.jsx`, a server test, and the
+  vendored `lessons/**` editors; one unnecessary regex escape in the lessons
+  `sanitize.js` URI allow-list (semantically identical); and a real bug in the
+  lessons `SurveyManager` — the injected `onViewResponses` handler was destructured
+  by the parent but never threaded to `SurveysTable`, so the "Responses" row action
+  referenced an undefined variable (a `ReferenceError` on click, masked only because
+  it fell through to the LAILA URL). The handler is now passed down. Warnings are
+  untouched; behaviour is otherwise unchanged.
+
+## [2.7.7] — 2026-07-14
+
+### Added
+
+- **A front door worth arriving at.** The logged-out screens now sit in a split layout:
+  a brand panel that says what Rohy is — AI patients, an AI care team, real labs and
+  radiology, consent-bound affect capture, process analytics — beside the sign-in card.
+  The language picker moved into that panel, so it is chosen once and the whole
+  login/register flow follows.
+- **The invite code has a home on the login card.** "Register with an invitation code"
+  opens the register form with the code field already expanded. A code is one artifact
+  with two deliveries — a link and something you can read down the phone — so the box
+  is now reachable in *every* mode that permits registration, not only invite-only.
+  Left collapsed behind a one-line prompt otherwise, and marked optional when it is.
+
+### Fixed
+
+- **The register form no longer accepts passwords the server rejects.** It asked for six
+  characters; the server demanded eight with an uppercase letter, a lowercase letter and
+  a number, and refused the account after the fact. The rules are now shown as a live
+  checklist as you type, from `src/utils/passwordRules.js` — the client mirror of the
+  server's `validatePassword()`. Password fields can be revealed.
+
+## [2.7.6] — 2026-07-14
+
+### Added
+
+- **Invites — a link and a code, and they are the same thing.** An administrator
+  can mint an invite in Settings → Users → Invites, choose the role and the course
+  it grants, cap how many people may use it, and set when it expires. Share it as
+  a link (`/register?invite=…`) or read the code out loud — both are the same
+  token, so there is nothing to keep in sync. Anyone who uses it lands in the
+  course automatically.
+- **Invite-only registration.** With the mode set to *Invite only*, an invite is
+  required to sign up. A valid invite also gets someone in when self-registration
+  is otherwise closed — that is what an invite is: a named exception to the rule
+  on the front door.
+- Invites are revocable (people who already joined keep their accounts), and every
+  redemption is recorded. The code itself never reaches the audit log.
+
+### Fixed
+
+- **Invite links would have 404'd in production.** Only `/` ever served the app,
+  so any path-based link died at the web server — invisible in development, where
+  Vite's history fallback quietly covers it. `/register` is now served explicitly
+  (not by a wildcard, which would have swallowed the docs site).
+
+### Notes
+
+- Rohy still cannot send email, so an invite is a copy-paste artifact — like the
+  course join codes teachers already share. The dialog puts the link and the code
+  in front of you, ready to copy, rather than making you hunt for them.
+
+## [2.7.5] — 2026-07-14
+
+### Added
+
+- **Registration is no longer always open.** An administrator now chooses how
+  people get accounts, in Settings → Platform → Users: **Open** (anyone who can
+  reach the page signs up — what Rohy has always done) or **Closed** (only
+  administrators create accounts). *Approval required* and *Invite only* appear
+  in the picker and land next.
+- **Allowed email domains.** Restrict self-registration to your institution's
+  domains. Accounts an administrator creates are never restricted.
+- **A message for people who can't sign up.** With registration closed the login
+  screen no longer shows a dead "Create Account" link; it shows who to ask, using
+  the text you set.
+
+### Changed
+
+- **A brand-new install is now closed by default.** Previously any freshly
+  deployed instance was open to whoever found the URL. **Existing installs are
+  untouched** — with no setting stored, registration stays open exactly as before,
+  and upgrading changes nothing.
+- **The first account still claims a fresh instance**, in every mode. The
+  bootstrap is resolved before the policy is consulted and bypasses it entirely,
+  so shipping an instance as closed can never leave it with no way to reach a
+  first administrator.
+- The register screen no longer tells every visitor that "the first user will
+  automatically become an administrator" — it says so only while that is actually
+  true.
+
+## [2.7.4] — 2026-07-14
+
+### Security
+
+- **An admin could take over another admin's account.** `PUT /users/:id` and
+  `DELETE /users/:id` checked the *requested* role against the caller but never
+  the *target's* rank — unlike `PATCH /users/:id/status` and
+  `POST /users/bulk-action`, which both refuse a target at or above the caller.
+  So any admin could open a peer admin in the edit form and set a new password.
+  The Users table hid the Delete button for peers but rendered **Edit**
+  unconditionally, and a hidden button is not a security boundary: the API is
+  reachable directly. Both routes now carry the same target-rank guard as their
+  siblings (editing *yourself* is still allowed), and the client only offers Edit
+  where the server would accept it.
+
+## [2.7.2] — 2026-07-14
+
+Ports the two fixes released as 2.5.2 on the 2.5.x line (see below); both bugs
+were present here too.
+
+### Fixed
+
+- **A fresh install can reach an admin again.** Production refuses to seed the
+  well-known `admin`/`admin123` account and `/auth/register` forced every signup
+  to `student`, so a freshly pulled image had no path to an admin at all — and
+  the first-run setup wizard assumes you already are one. Now: set
+  `ROHY_ADMIN_USERNAME` + `ROHY_ADMIN_PASSWORD` to provision the first admin with
+  your own password, or leave them unset and the first account registered through
+  the UI claims the instance.
+- **The cohort-case enforcement toggle actually does something.** Course-scoped
+  case access ships as opt-in (`enforce_cohort_case_access`, default OFF), but
+  the case catalog, the direct case read and the session launch gate all applied
+  it to every student unconditionally — the flag was read by nobody, so the admin
+  toggle (and the setup wizard's step 6) was a no-op, and students on every
+  install have been restricted to the default case plus course assignments since
+  migration 0030. All three sites now share one `caseAccessEnforcedFor()` gate.
+
+## [2.7.1] — 2026-07-12
+
+### Added
+
+- **First-run setup for administrators.** New admins land in a six-step
+  setup checklist: connect the AI engine (with a live connection test —
+  students can't chat until it passes, and the wizard says so), pick the
+  platform's default language, confirm the default course and case, enable
+  voice, enable emotion capture, and choose who sees which cases. Every step
+  is optional and everything stays editable later — the checklist can be
+  dismissed and reopened any time from the menu → **Platform setup**.
+- **A welcome screen for students and teachers.** On first login you pick
+  your language, see the case you'll start with, choose whether you want to
+  talk to the patient out loud (with a microphone check), and — where the
+  camera-based emotion capture is enabled — see and decide the consent that
+  was previously set silently. Teachers get a pointer to case authoring.
+  Choices are saved to your account, so they follow you across devices.
+- **Platform default language.** Administrators can now set the language new
+  users start in (previously always English). Each user's own choice still
+  wins.
+
+### Fixed
+
+- Your "talk to the patient" preference now survives a page reload instead
+  of resetting to off every time.
+
+## [2.7.0] — 2026-07-12
+
+### Added
+
+- **The patient senses how you're doing.** When an administrator enables
+  affect routing, the AI patient is told each turn how you currently appear
+  (from the consent-gated Oyon emotion capture) and reacts in character — a
+  frightened patient settles when you seem calm, and gets more distressed
+  when you seem flustered. The patient never claims to see or measure your
+  emotions. Off by default, admin-configurable (signal type, confidence and
+  freshness thresholds), and restricted to local AI providers unless
+  explicitly widened. Nothing is routed without your capture consent.
+
 ## [2.5.6] — 2026-07-19
 
 ### Fixed
@@ -450,3 +768,7 @@ case editor, multi-tenant auth.
 [2.1.0]: https://github.com/mohsaqr/rohySimulator/releases/tag/v2.1.0
 [2.0.0]: https://github.com/mohsaqr/rohySimulator/releases/tag/v2.0.0
 [1.0.0]: https://github.com/mohsaqr/rohySimulator/releases/tag/v1.0.0
+[2.8.0]: https://github.com/mohsaqr/rohySimulator/releases/tag/v2.8.0
+[2.5.6]: https://github.com/mohsaqr/rohySimulator/releases/tag/v2.5.6
+[2.5.5]: https://github.com/mohsaqr/rohySimulator/releases/tag/v2.5.5
+[2.5.4]: https://github.com/mohsaqr/rohySimulator/releases/tag/v2.5.4

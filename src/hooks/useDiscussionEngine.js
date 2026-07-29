@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useLanguage } from '../contexts/LanguageContext';
 import { LLMService } from '../services/llmService';
 import { VoiceService } from '../services/voiceService';
 import { apiPost } from '../services/apiClient';
@@ -8,22 +9,26 @@ import { buildPersonaBlocks } from '../utils/personaBlocks';
 import { roleAnchor } from '../utils/roleAnchor';
 import EventLogger, { COMPONENTS } from '../services/eventLogger';
 
-// Discussant voice — same shared resolver the patient chat uses. No slot
-// logic, no hardcoded fallback: the discussant must have a case_voice set
-// in their persona or the resolver returns null and the discussion stays
-// silent (loudly, via toast in the caller).
-function resolveDiscussantVoice(discussant, voiceSettings) {
+// Discussant voice — same shared resolver as the patient chat (Voice 2.0:
+// identical tiers, identical visibility). The discussant's own voice plays
+// on its own engine; when it can't, the language-matched platform default
+// substitutes with truth metadata the caller must surface.
+function resolveDiscussantVoice(discussant, voiceSettings, language) {
     if (!voiceSettings) return null;
     const r = resolveVoice({
         voice: discussant?.voice,
-        voiceSettings
+        voiceSettings,
+        language
     });
     if (!r.file) return null;
     return {
         voice: r.file,
         provider: r.provider,
         rate: r.rate ?? 1.0,
-        pitch: r.pitch
+        pitch: r.pitch,
+        substituted: r.substituted,
+        requestedFile: r.requestedFile,
+        substitutionReason: r.substitutionReason
     };
 }
 
@@ -44,6 +49,11 @@ async function logTurn(sessionId, role, content) {
 //   - viseme + speaking state for the avatar
 //   - lifecycle cleanup so leaving mid-stream cancels everything
 export function useDiscussionEngine({ sessionId, activeCase, discussant, voiceMode, voiceSettings }) {
+    // Session dialogue language — threaded into every discussant LLM call so
+    // the server appends the output-language directive (same contract as the
+    // patient chat). Without it a non-English learner gets an English
+    // discussant behind a localized UI.
+    const { caseLanguage } = useLanguage();
     const [messages, setMessages] = useState([]);
     const [busy, setBusy] = useState(false);
     const [speaking, setSpeaking] = useState(false);
@@ -148,13 +158,25 @@ export function useDiscussionEngine({ sessionId, activeCase, discussant, voiceMo
 
         let speech = null;
         if (voiceMode) {
-            const resolved = resolveDiscussantVoice(discussant, voiceSettings);
+            const resolved = resolveDiscussantVoice(discussant, voiceSettings, caseLanguage);
+            if (resolved?.substituted) {
+                // Truth clause: a substituted discussant voice is announced,
+                // same as patient chat (one console line here — the room has
+                // no toast surface; the wire headers + DiagnosticBar carry
+                // the visible half).
+                console.warn('[useDiscussionEngine] voice substitution', {
+                    requested: resolved.requestedFile,
+                    playing: resolved.voice,
+                    reason: resolved.substitutionReason
+                });
+            }
             if (resolved?.voice) {
                 speech = VoiceService.beginSpeechSession({
                     voice: resolved.voice,
                     rate: resolved.rate,
                     pitch: resolved.pitch,
                     provider: resolved.provider,
+                    language: caseLanguage,
                     onStart: () => setSpeaking(true),
                     onVisemes: setVisemes,
                     onEnd: () => {
@@ -181,6 +203,7 @@ export function useDiscussionEngine({ sessionId, activeCase, discussant, voiceMo
                     signal: controller.signal,
                     silent: silentUser,
                     agentTemplateId: discussant.templateId || null,
+                    caseLanguage,
                     // The discussant owns its transcript via logTurn() →
                     // agent_conversations. It must NOT also write to the
                     // patient `interactions` thread, or the debrief bleeds
@@ -236,7 +259,7 @@ export function useDiscussionEngine({ sessionId, activeCase, discussant, voiceMo
             abortRef.current = null;
             speechRef.current = null;
         }
-    }, [sessionId, activeCase, discussant, voiceMode, voiceSettings, busy, messages]);
+    }, [sessionId, activeCase, discussant, voiceMode, voiceSettings, busy, messages, caseLanguage]);
 
     const startConversation = useCallback(() => {
         // Opening turn: the instruction "your first reply opens the debrief"

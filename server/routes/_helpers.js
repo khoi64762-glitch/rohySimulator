@@ -75,6 +75,115 @@ export async function caseAccessEnforcedFor(user) {
     return cohortCaseEnforcementOn();
 }
 
+// --- Registration policy ----------------------------------------------------
+// How people get accounts, set by an admin in Platform → Users:
+//
+//   open     anyone who can reach the URL self-registers   (the historical behaviour)
+//   approval anyone may request; an admin approves          (phase 3)
+//   invite   self-registration requires an invite           (phase 2)
+//   closed   no self-registration; admins create users
+//
+// ABSENT SETTING = 'open'. That is what makes this non-breaking: an existing
+// install that never opts in behaves exactly as it did before the feature
+// existed. Fresh installs are seeded to a safe mode by server/seeders.
+//
+// The bootstrap (empty users table → first account claims the instance as
+// admin) is checked BEFORE this policy in POST /auth/register and bypasses it
+// entirely, so a fresh box stays claimable in every mode.
+
+export const REGISTRATION_MODES = ['open', 'approval', 'invite', 'closed'];
+export const DEFAULT_REGISTRATION_MODE = 'open';
+
+let _policyCache = { value: null, at: 0 };
+const POLICY_CACHE_MS = 15000;
+
+/** Normalise the stored comma-separated domain list into bare hostnames. */
+function parseDomains(raw) {
+    if (!raw) return [];
+    return raw
+        .split(',')
+        .map((d) => d.trim().toLowerCase().replace(/^@/, ''))
+        .filter(Boolean);
+}
+
+/**
+ * The current registration policy (cached ~15s).
+ *
+ * Deliberately UNLIKE cohortCaseEnforcementOn(): on a read error we serve the
+ * last-good cached value rather than the default. A transient DB failure must
+ * never silently re-open a closed instance. We only fall back to 'open' when
+ * there has never been a successful read — and that case is safe, because an
+ * instance nobody has ever configured is a fresh one, which the bootstrap
+ * covers regardless of mode.
+ *
+ * @returns {Promise<{mode: string, domains: string[], message: string|null}>}
+ */
+export async function registrationPolicy() {
+    const now = Date.now();
+    if (_policyCache.value && now - _policyCache.at < POLICY_CACHE_MS) {
+        return _policyCache.value;
+    }
+    try {
+        const rows = await dbAll(
+            `SELECT setting_key, setting_value FROM platform_settings
+              WHERE setting_key IN ('registration_mode', 'registration_email_domains', 'registration_message')`
+        );
+        const byKey = Object.fromEntries((rows || []).map((r) => [r.setting_key, r.setting_value]));
+        const stored = byKey.registration_mode;
+        const value = {
+            mode: REGISTRATION_MODES.includes(stored) ? stored : DEFAULT_REGISTRATION_MODE,
+            domains: parseDomains(byKey.registration_email_domains),
+            message: byKey.registration_message || null
+        };
+        _policyCache = { value, at: now };
+        return value;
+    } catch (err) {
+        if (_policyCache.value) {
+            routesCasesLog.warn('registration policy read failed, serving cached value', { error: err.message });
+            return _policyCache.value;
+        }
+        routesCasesLog.warn('registration policy unreadable, defaulting to open', { error: err.message });
+        return { mode: DEFAULT_REGISTRATION_MODE, domains: [], message: null };
+    }
+}
+
+/** Drop the cached policy after a write (admin route / tests call this). */
+export function resetRegistrationPolicyCache() {
+    _policyCache = { value: null, at: 0 };
+}
+
+/**
+ * True when `email` is acceptable under an allowlist. An empty list allows
+ * everything. Domains are matched on the exact host after '@' (a sub-domain of
+ * an allowed domain is NOT allowed — 'evil.uef.fi' must not pass a 'uef.fi'
+ * allowlist just because it ends with it).
+ */
+export function emailDomainAllowed(email, domains) {
+    if (!domains || domains.length === 0) return true;
+    const host = String(email || '').split('@')[1]?.toLowerCase();
+    if (!host) return false;
+    return domains.includes(host);
+}
+
+/**
+ * The closing half of a date window: "this bound has not passed yet".
+ *
+ * A teacher who types 2026-03-31 into an "available until" box means the case is
+ * open THROUGH the 31st. SQLite reads a bare date as midnight, so a plain
+ * `datetime(bound) >= datetime('now')` closed the case at 00:00 on the 31st and
+ * silently ate the whole final day — including the deadline day of a class.
+ * A date-only bound therefore expires at the END of that day; a bound with a time
+ * component is respected to the second, because someone who wrote one meant it.
+ *
+ * `learningEventAggregates.isDateOnly` makes the identical distinction for the
+ * analytics filters. `column` is a trusted internal literal, never request input.
+ */
+function liveUntil(column) {
+    return `(${column} IS NULL OR
+             datetime(${column}, CASE WHEN length(${column}) = 10 THEN '+1 day' ELSE '+0 seconds' END)
+               > datetime('now'))`;
+}
+
 /**
  * SQL `EXISTS (...)` fragment: true when the given cases-row alias is assigned,
  * in-window, to a live active in-window membership of the bound user. Contains
@@ -97,39 +206,79 @@ export function cohortCaseVisibleExists(caseAlias = 'c') {
            AND cm.deleted_at IS NULL
            AND cm.status = 'active'
            AND (co.starts_at IS NULL OR datetime(co.starts_at) <= datetime('now'))
-           AND (co.ends_at IS NULL OR datetime(co.ends_at) >= datetime('now'))
+           AND ${liveUntil('co.ends_at')}
            AND (cc.available_from IS NULL OR datetime(cc.available_from) <= datetime('now'))
-           AND (cc.available_until IS NULL OR datetime(cc.available_until) >= datetime('now'))
+           AND ${liveUntil('cc.available_until')}
            AND (cm.enrolled_from IS NULL OR datetime(cm.enrolled_from) <= datetime('now'))
-           AND (cm.enrolled_until IS NULL OR datetime(cm.enrolled_until) >= datetime('now'))
+           AND ${liveUntil('cm.enrolled_until')}
     )`;
 }
 
 /**
- * Idempotently enrol a user into their tenant's "Basic course" default class —
- * the safety net that guarantees every student always has the default case, so
- * enforcement can never lock anyone out. No-op if the class is absent for the
- * tenant or the user is already a live member. Never throws (login/register must
- * not fail on this).
+ * Idempotently enrol a user into every AUTO-ENROL class in their tenant
+ * (`cohorts.auto_enroll = 1`) — the safety net that guarantees every student
+ * always has the default class (the "Basic course"), so enforcement can never
+ * lock anyone out. One INSERT per matching cohort the user is not already a
+ * live member of. No-op if no auto-enrol class exists for the tenant. Never
+ * throws (login/register must not fail on this). The seedStemiCourse comment
+ * already names this hook `ensureAutoEnrollMemberships`.
  */
-export async function ensureBasicCourseMembership(userId, tenant_id) {
+export async function ensureAutoEnrollMemberships(userId, tenant_id) {
     if (!userId) return;
     try {
+        // The NOT EXISTS deliberately looks at EVERY membership row, live or
+        // soft-deleted. It used to filter `m.deleted_at IS NULL`, which meant a
+        // removed membership did not block a fresh insert — and because this runs
+        // on every LOGIN, a student a teacher had just unenrolled from an
+        // auto-enrol course was silently put back the next time they signed in.
+        // Back on the roster, back in the analytics, back in the case list. An
+        // unenrolment is a decision; a soft-deleted row is the record of it, and
+        // auto-enrolment must not overrule it. (Re-adding them by hand still works
+        // — upsertMember revives the row.)
         await dbRun(
             `INSERT INTO cohort_members (cohort_id, user_id)
              SELECT c.id, ?
                FROM cohorts c
               WHERE c.tenant_id = ?
-                AND c.name = 'Basic course'
+                AND c.auto_enroll = 1
                 AND c.deleted_at IS NULL
                 AND NOT EXISTS (
                     SELECT 1 FROM cohort_members m
-                     WHERE m.cohort_id = c.id AND m.user_id = ? AND m.deleted_at IS NULL)`,
+                     WHERE m.cohort_id = c.id AND m.user_id = ?)`,
             [userId, tenant_id, userId]
         );
     } catch (err) {
-        routesCasesLog.warn('ensureBasicCourseMembership failed', { user_id: userId, tenant_id, error: err.message });
+        routesCasesLog.warn('ensureAutoEnrollMemberships failed', { user_id: userId, tenant_id, error: err.message });
     }
+}
+
+/**
+ * Enrol one user into one class, idempotently and revive-aware.
+ *
+ * Lives here (rather than in users-routes.js, where it was born) because three
+ * separate paths now need it: the CSV import wizard, the admin roster, and
+ * invite redemption. A revived membership resets `status` and clears the
+ * enrolment window — without that, re-enrolling someone who was removed leaves
+ * them a member who still cannot see anything.
+ *
+ * @returns {Promise<'already'|'revived'|'enrolled'>}
+ */
+export async function enrollUserInCohort(cohortId, userId) {
+    const existing = await dbGet(
+        `SELECT id, deleted_at FROM cohort_members WHERE cohort_id = ? AND user_id = ?
+          ORDER BY (deleted_at IS NULL) DESC, id DESC LIMIT 1`,
+        [cohortId, userId]
+    );
+    if (existing && existing.deleted_at == null) return 'already';
+    if (existing) {
+        await dbRun(
+            `UPDATE cohort_members SET deleted_at = NULL, status = 'active', enrolled_from = NULL, enrolled_until = NULL WHERE id = ?`,
+            [existing.id]
+        );
+        return 'revived';
+    }
+    await dbRun(`INSERT INTO cohort_members (cohort_id, user_id) VALUES (?, ?)`, [cohortId, userId]);
+    return 'enrolled';
 }
 
 export const SOFT_DELETE_TABLES = [
@@ -732,9 +881,15 @@ export function verifySessionOwnership(sessionId, user, res, { requireSession = 
             }
             return resolve(true);
         }
-        if (hasRoleAtLeast(user, ROLE_RANKS.educator)) {
-            return resolve(true);
-        }
+        // Educators and above may reach any session — but only in their OWN
+        // tenant, and only one that exists. The old short-circuit returned true
+        // here without touching the DB, which meant an educator in tenant B
+        // passed the gate for a session id belonging to tenant A. Most callers
+        // re-scope their own queries by tenant and so degraded to an empty
+        // result, but the hand-rolled order routes did not — making this the
+        // hinge of a cross-tenant mutation. Rank widens WHOSE sessions you may
+        // touch; it never widens WHICH TENANT.
+        const staff = hasRoleAtLeast(user, ROLE_RANKS.educator);
         dbAdapter.get('SELECT user_id, tenant_id FROM sessions WHERE id = ? AND tenant_id = ?', [sessionId, user?.tenant_id || 1], (err, row) => {
             if (err) {
                 res.status(500).json({ error: err.message });
@@ -744,7 +899,7 @@ export function verifySessionOwnership(sessionId, user, res, { requireSession = 
                 res.status(404).json({ error: 'Session not found' });
                 return resolve(false);
             }
-            if (row.user_id !== user?.id) {
+            if (!staff && row.user_id !== user?.id) {
                 res.status(403).json({ error: 'Access denied: session not owned by user' });
                 return resolve(false);
             }

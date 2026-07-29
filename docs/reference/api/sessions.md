@@ -3,7 +3,7 @@
 > **Generated file — do not hand-edit.** Produced from `server/routes/*.js`
 > by `scripts/docs-gen/gen-api.mjs`. Regenerate with `npm run docs:gen:api`.
 
-7 endpoints. All paths are
+5 endpoints. All paths are
 relative to the `/api` base. See the [API index](./index.md) for the auth
 model.
 
@@ -14,5 +14,3 @@ model.
 | `PUT` | `/api/sessions/:id/end` | `authenticateToken` | `server/routes/sessions-routes.js:234` |
 | `GET` | `/api/sessions/:id/vitals` | `authenticateToken` | `server/routes/sessions-routes.js:306` |
 | `POST` | `/api/sessions/:id/vitals` | `authenticateToken` | `server/routes/sessions-routes.js:278` |
-| `GET` | `/api/sessions/:sessionId/vitals` | `authenticateToken` | `server/routes/sessions-routes.js:347` |
-| `POST` | `/api/sessions/:sessionId/vitals` | `authenticateToken` | `server/routes/sessions-routes.js:325` |
