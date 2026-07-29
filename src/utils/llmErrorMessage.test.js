@@ -28,27 +28,27 @@ describe('extractUpstreamDetail', () => {
 describe('friendlyLlmError', () => {
     it('maps "multiple models loaded" to the pick-a-model guidance', () => {
         const raw = `LLM API returned 400: { "error": { "message": "Multiple models are loaded. Please specify a model by providing a 'model' field." } }`;
-        expect(friendlyLlmError(raw, t)).toBe('err_llm_multiple_models');
+        expect(friendlyLlmError(raw, t)).toBe('authoring_config:err_llm_multiple_models');
     });
 
     it('maps an unknown-model error to the detect-and-pick guidance', () => {
-        expect(friendlyLlmError('returned 404: {"error":{"message":"The model `foo` does not exist"}}', t)).toBe('err_llm_model_not_found');
+        expect(friendlyLlmError('returned 404: {"error":{"message":"The model `foo` does not exist"}}', t)).toBe('authoring_config:err_llm_model_not_found');
     });
 
     it('maps insufficient_quota to the billing message', () => {
         const raw = `LLM API returned 429: { "error": { "message": "You exceeded your current quota", "type": "insufficient_quota" } }`;
-        expect(friendlyLlmError(raw, t)).toBe('err_llm_quota');
+        expect(friendlyLlmError(raw, t)).toBe('authoring_config:err_llm_quota');
     });
 
     it('maps an auth failure to the bad-key message', () => {
-        expect(friendlyLlmError('LLM API returned 401: {"error":{"message":"Invalid API key provided"}}', t)).toBe('err_llm_bad_key');
+        expect(friendlyLlmError('LLM API returned 401: {"error":{"message":"Invalid API key provided"}}', t)).toBe('authoring_config:err_llm_bad_key');
     });
 
     it('maps a network failure to the unreachable message', () => {
-        expect(friendlyLlmError('connect ECONNREFUSED 127.0.0.1:1234', t)).toBe('err_llm_unreachable');
+        expect(friendlyLlmError('connect ECONNREFUSED 127.0.0.1:1234', t)).toBe('authoring_config:err_llm_unreachable');
     });
 
     it('falls back to a wrapped detail for anything unrecognised', () => {
-        expect(friendlyLlmError('LLM API returned 500: {"error":{"message":"kernel panic"}}', t)).toBe('err_llm_generic:kernel panic');
+        expect(friendlyLlmError('LLM API returned 500: {"error":{"message":"kernel panic"}}', t)).toBe('authoring_config:err_llm_generic:kernel panic');
     });
 });

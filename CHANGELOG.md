@@ -9,6 +9,65 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.8.0] — 2026-07-29
+
+This is the first published release of the development line previously
+versioned as 2.6.x and 2.7.x. The detailed 2.7.x milestone entries remain
+below for traceability; they were not published as separate GitHub releases.
+
+### Added
+
+- **Courses, lessons, and surveys.** Educators can organise learners into
+  courses, author rich lessons, assign cases, collect surveys, and run the
+  student classroom experience from the same platform.
+- **Six-language experience.** German, Spanish, Italian, Finnish, and Swedish
+  join English across the learner and instructor UI, with language-aware cases,
+  voices, and local Piper voice packs.
+- **Voice 2.0.** Case-owned voice identity, multilingual Google TTS, improved
+  Kokoro and Piper routing, provider-aware settings, and clearer voice controls.
+- **First-run onboarding.** Administrators get a platform setup checklist;
+  learners and teachers get role-appropriate welcome flows and saved language,
+  microphone, voice, and consent choices.
+- **Registration governance.** Open, closed, invite-only, and
+  administrator-approval modes; email-domain rules; revocable invitation links
+  and codes; course auto-enrolment; and an approval queue that stores only
+  password hashes.
+- **Consent-bound affect routing.** When explicitly enabled, fresh local Oyon
+  affect signals can inform the AI patient's in-character response without
+  exposing raw camera data or claiming to measure emotion.
+
+### Changed
+
+- Redesigned LLM settings, consolidated top-bar controls, expanded course and
+  case browsing, immutable case languages and codes, and plain-text response
+  support.
+- Fresh installations default to closed registration while preserving a safe
+  first-admin claim or explicit `ROHY_ADMIN_*` provisioning path. Existing
+  installations retain their prior open behavior until configured.
+- Brought forward the verified 2.5 release pipeline: required Oyon asyncify and
+  MediaPipe assets are packaged and probed across Docker, air-gap, and
+  published-image installation paths.
+
+### Fixed
+
+- Corrected course co-teacher visibility, availability-window updates,
+  join-code normalisation, course case-move authorization, affect-setting error
+  logging, and a broken lesson survey response action.
+- Corrected account lockout timestamp handling east of UTC, refused suspended
+  accounts before token creation, and aligned client/server password rules.
+- Corrected LLM error-message namespace extraction so the i18n gate no longer
+  creates empty duplicate keys in the shared catalogue.
+- Added regression coverage for registration pathways, course administration,
+  first-run bootstrap, runtime assets, and session-running authorization.
+
+### Security
+
+- Closed session and order IDOR paths, enforced session ownership and tenant/case
+  binding for lab results, examinations, treatments, and staff access, and made
+  order administration atomic.
+- Enforced target-rank ceilings so administrators cannot edit, reset, or delete
+  peer administrators through direct API calls.
+
 ## [2.7.14] — 2026-07-15
 
 ### Changed
@@ -265,6 +324,43 @@ were present here too.
   emotions. Off by default, admin-configurable (signal type, confidence and
   freshness thresholds), and restricted to local AI providers unless
   explicitly widened. Nothing is routed without your capture consent.
+
+## [2.5.6] — 2026-07-19
+
+### Fixed
+
+- **Release verification now checks the real MediaPipe model path.** The
+  published image correctly ships
+  `standalone/models/mediapipe/face_landmarker.task`, but the release-only
+  probe omitted the `mediapipe/` directory and falsely reported a 404. The
+  published-image gate now mirrors the complete fresh-install asset list, and
+  a regression test keeps both workflows aligned.
+
+## [2.5.5] — 2026-07-19
+
+### Fixed
+
+- **Published-image release verification now reaches the Oyon probes.** The
+  verifier booted the production container without its required
+  `FRONTEND_URL`, so the entrypoint correctly stopped before `/api/health` and
+  the release workflow could not inspect the assets it had just published.
+  The verifier now supplies the same explicit localhost origin used by the
+  fresh-install Docker gate, with a regression assertion covering the boot
+  contract.
+
+## [2.5.4] — 2026-07-19
+
+### Fixed
+
+- **Oyon emotion capture now starts on fresh installs.** The browser-side
+  ONNX Runtime selects `ort-wasm-simd-threaded.asyncify.{mjs,wasm}` for the
+  classifier, but the 2.5.x installer copied only the plain SIMD/threaded
+  pair. Both asyncify companions are now provisioned from the installed
+  `onnxruntime-web` package in npm, Docker, local, bootstrap, and air-gap
+  installation paths.
+- Fresh-install, deployed-host, air-gap, and release-image checks now treat
+  both asyncify files as required assets, preventing the same 404 regression
+  from reaching another release.
 
 ## [2.5.2] — 2026-07-14
 
@@ -670,3 +766,7 @@ case editor, multi-tenant auth.
 [2.1.0]: https://github.com/mohsaqr/rohySimulator/releases/tag/v2.1.0
 [2.0.0]: https://github.com/mohsaqr/rohySimulator/releases/tag/v2.0.0
 [1.0.0]: https://github.com/mohsaqr/rohySimulator/releases/tag/v1.0.0
+[2.8.0]: https://github.com/mohsaqr/rohySimulator/releases/tag/v2.8.0
+[2.5.6]: https://github.com/mohsaqr/rohySimulator/releases/tag/v2.5.6
+[2.5.5]: https://github.com/mohsaqr/rohySimulator/releases/tag/v2.5.5
+[2.5.4]: https://github.com/mohsaqr/rohySimulator/releases/tag/v2.5.4

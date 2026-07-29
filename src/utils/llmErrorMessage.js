@@ -39,21 +39,21 @@ export function friendlyLlmError(raw, t) {
     const hay = `${raw || ''} ${detail}`.toLowerCase();
 
     if (/multiple models are loaded|specify a model|provide a 'model'|provide a "model"/.test(hay)) {
-        return t('err_llm_multiple_models');
+        return t('authoring_config:err_llm_multiple_models');
     }
     if (/model.*(not found|does not exist|unknown|not loaded)|model_not_found|no such model|invalid model/.test(hay)) {
-        return t('err_llm_model_not_found');
+        return t('authoring_config:err_llm_model_not_found');
     }
     if (/insufficient_quota|exceeded your current quota|out of credits?|billing|payment required|402/.test(hay)) {
-        return t('err_llm_quota');
+        return t('authoring_config:err_llm_quota');
     }
     if (/invalid.*api.*key|incorrect api key|invalid_api_key|unauthorized|authentication|401|403|permission/.test(hay)) {
-        return t('err_llm_bad_key');
+        return t('authoring_config:err_llm_bad_key');
     }
     if (/econnrefused|enotfound|failed to fetch|fetch failed|network ?error|timed? ?out|timeout|refused|unreachable|socket hang up/.test(hay)) {
-        return t('err_llm_unreachable');
+        return t('authoring_config:err_llm_unreachable');
     }
     // Unknown failure: keep the upstream detail so nothing is hidden, but wrap
     // it in a sentence instead of dumping raw JSON.
-    return t('err_llm_generic', { detail });
+    return t('authoring_config:err_llm_generic', { detail });
 }

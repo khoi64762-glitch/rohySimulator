@@ -46,7 +46,7 @@ Kokoro TTS (~330 MB) is downloaded automatically on first use and warmed up at b
 
 ### Going to production?
 
-**Latest release:** [`v1.0.0`](https://github.com/mohsaqr/rohySimulator/releases/tag/v1.0.0) — multi-arch Docker image at `ghcr.io/mohsaqr/rohy:v1.0.0`, plus self-contained source and Docker tarballs (sha256-verified, for air-gapped sites). The release workflow boots the published image and runs `tech-test.sh` against it before the tag finalises, so "tag exists" already means "verified to install."
+**Latest release:** [`v2.8.0`](https://github.com/mohsaqr/rohySimulator/releases/tag/v2.8.0) — multi-arch Docker image at `ghcr.io/mohsaqr/rohy:v2.8.0`, plus self-contained source and Docker tarballs (sha256-verified, for air-gapped sites). The release workflow boots the published image and runs `tech-test.sh` against it before the tag finalises, so "tag exists" already means "verified to install."
 
 Three sibling docs cover the operator lifecycle end-to-end:
 
@@ -60,7 +60,7 @@ Three sibling docs cover the operator lifecycle end-to-end:
 
 ```bash
 # Fastest: pull the published image
-docker pull ghcr.io/mohsaqr/rohy:v1.0.0
+docker pull ghcr.io/mohsaqr/rohy:v2.8.0
 docker compose -f deploy/docker/compose.yml up -d
 
 # OR — Linux + systemd from source, public DNS, auto-TLS via certbot

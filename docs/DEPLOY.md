@@ -31,7 +31,7 @@ source path. Switch to image-pull:
 services:
   rohy:
     # build: { context: ../.., dockerfile: deploy/docker/Dockerfile }
-    image: ghcr.io/mohsaqr/rohy:v1.0.0
+    image: ghcr.io/mohsaqr/rohy:v2.8.0
     # … rest of service config unchanged
 ```
 
