@@ -22,6 +22,9 @@ release before tagging.
 - Pinned Oyon updates to version 3.3.2 and narrowed runtime-asset preservation
   so future syncs refresh versioned source vendors without deleting downloaded
   MediaPipe, ONNX Runtime, or model assets.
+- Hardened fresh installs with atomic, checksummed model downloads and a
+  fail-fast verifier covering peer-version runtime copies, models, workers,
+  WASM, the multi-file element artifact, and Rohy's persistent sync overlays.
 - Rohy now sends the explicit `oyon-window-batch-v4` envelope and requests
   source-rate live sample events from the v3 web component.
 
