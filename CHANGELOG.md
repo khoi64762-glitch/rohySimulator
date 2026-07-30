@@ -9,6 +9,29 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.5] — 2026-07-30
+
+### Added
+
+- **Administrator control over Oyon's signal families.** Settings → Oyon now has
+  a Signals section with a switch per family: facial signals, eye/engagement,
+  gaze, illumination, learner heart rate, learner respiration, dynamical
+  features, body posture, and whether signals travel on one window or their own.
+  These signals were already being recorded by the capture component's own
+  defaults, and the platform previously had no way to switch any of them off —
+  this closes that gap, so the settings now reflect what actually runs.
+- Heart rate and respiration are labelled explicitly as camera-derived research
+  estimates about the **learner** — never clinical measurements, and unrelated to
+  the simulated patient's vital signs.
+
+### Changed
+
+- Body posture is **off by default**. Its pose model is not bundled with rohy, so
+  switching it on makes the browser download the model from an external CDN,
+  which breaks the guarantee that air-gapped installations never reach the
+  internet. The toggle is labelled accordingly and stays available for
+  administrators who accept that trade-off.
+
 ## [2.9.4] — 2026-07-30
 
 ### Added

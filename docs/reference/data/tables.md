@@ -1255,6 +1255,15 @@ Stores oyon settings records.
 | `smoothing_alpha` | REAL | NOT NULL DEFAULT 0.28 | `0012_oyon_settings_runtime.sql` |
 | `min_hold_ms` | INTEGER | NOT NULL DEFAULT 3000 | `0012_oyon_settings_runtime.sql` |
 | `min_switch_confidence` | REAL | NOT NULL DEFAULT 0.5 | `0012_oyon_settings_runtime.sql` |
+| `facial_signals_enabled` | INTEGER | NOT NULL DEFAULT 1 | `0040_oyon_signal_settings.sql` |
+| `heart_rate_enabled` | INTEGER | NOT NULL DEFAULT 1 | `0040_oyon_signal_settings.sql` |
+| `respiration_enabled` | INTEGER | NOT NULL DEFAULT 1 | `0040_oyon_signal_settings.sql` |
+| `illumination_enabled` | INTEGER | NOT NULL DEFAULT 1 | `0040_oyon_signal_settings.sql` |
+| `eye_tracking_enabled` | INTEGER | NOT NULL DEFAULT 1 | `0040_oyon_signal_settings.sql` |
+| `gaze_tracking_enabled` | INTEGER | NOT NULL DEFAULT 1 | `0040_oyon_signal_settings.sql` |
+| `enable_dynamics` | INTEGER | NOT NULL DEFAULT 1 | `0040_oyon_signal_settings.sql` |
+| `posture_tracking_enabled` | INTEGER | NOT NULL DEFAULT 0 | `0040_oyon_signal_settings.sql` |
+| `signal_window_share` | INTEGER | NOT NULL DEFAULT 1 | `0040_oyon_signal_settings.sql` |
 
 ## `oyon_signal_windows`
 

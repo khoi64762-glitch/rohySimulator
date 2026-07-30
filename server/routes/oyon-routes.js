@@ -95,6 +95,10 @@ router.put('/settings', authenticateToken, requireAdmin, async (req, res) => {
         smoothing_alpha: clampFloat(req.body?.smoothing_alpha, 0, 1, previousRuntime.smoothing_alpha),
         min_hold_ms: clampInt(req.body?.min_hold_ms, 0, 60_000, previousRuntime.min_hold_ms),
         min_switch_confidence: clampFloat(req.body?.min_switch_confidence, 0, 1, previousRuntime.min_switch_confidence),
+        // Oyon 3 signal flags (migration 0040). Key-presence merge: an absent
+        // field keeps its stored value, so a partial PUT from one settings
+        // section cannot silently disable a signal another section owns.
+        ...signalFlagsFromBody(req.body, previous),
     };
 
     await dbRun(
@@ -112,6 +116,15 @@ router.put('/settings', authenticateToken, requireAdmin, async (req, res) => {
              smoothing_alpha = ?,
              min_hold_ms = ?,
              min_switch_confidence = ?,
+             facial_signals_enabled = ?,
+             heart_rate_enabled = ?,
+             respiration_enabled = ?,
+             illumination_enabled = ?,
+             eye_tracking_enabled = ?,
+             gaze_tracking_enabled = ?,
+             enable_dynamics = ?,
+             posture_tracking_enabled = ?,
+             signal_window_share = ?,
              updated_at = CURRENT_TIMESTAMP
          WHERE tenant_id = ?`,
         [
@@ -128,6 +141,15 @@ router.put('/settings', authenticateToken, requireAdmin, async (req, res) => {
             next.smoothing_alpha,
             next.min_hold_ms,
             next.min_switch_confidence,
+            next.facial_signals_enabled,
+            next.heart_rate_enabled,
+            next.respiration_enabled,
+            next.illumination_enabled,
+            next.eye_tracking_enabled,
+            next.gaze_tracking_enabled,
+            next.enable_dynamics,
+            next.posture_tracking_enabled,
+            next.signal_window_share,
             String(currentTenant),
         ]
     );
@@ -1109,6 +1131,10 @@ function normalizeSettings(settings) {
         retention_days: settings.retention_days,
         consent_version: settings.consent_version || DEFAULT_CONSENT_VERSION,
         ...runtime,
+        // The single tenant switch behind runtime's per-modality
+        // `*_window_share` fan-out, so the admin form round-trips one control
+        // rather than seven derived ones.
+        signal_window_share: boolFrom(settings.signal_window_share, SIGNAL_SETTING_DEFAULTS.signal_window_share),
         updated_at: settings.updated_at,
     };
 }
@@ -1128,7 +1154,87 @@ function runtimeFromSettings(settings) {
         smoothing_alpha: numberOr(settings.smoothing_alpha, DEFAULT_RUNTIME.smoothing_alpha),
         min_hold_ms: numberOr(settings.min_hold_ms, DEFAULT_RUNTIME.min_hold_ms),
         min_switch_confidence: numberOr(settings.min_switch_confidence, DEFAULT_RUNTIME.min_switch_confidence),
+        ...signalFlagsFromSettings(settings),
     };
+}
+
+/*
+ * Oyon 3 signal flags (migration 0040) → the element's `settings` attribute.
+ *
+ * These are AUTHORITY over signals that already run: the element's own
+ * DEFAULT_SETTINGS turns gaze/eye/facial/posture/respiration/heart-rate on, and
+ * before 0040 Rohy forwarded no booleans at all, so a tenant could not switch
+ * any of them off. Forwarding them explicitly — rather than omitting a key and
+ * letting the element decide — is the point: an omitted key leaves the element's
+ * persisted store in charge, which is per-browser and invisible to the admin.
+ */
+function signalFlagsFromSettings(settings) {
+    const flag = (key) => boolFrom(settings?.[key], SIGNAL_SETTING_DEFAULTS[key]);
+    const share = flag('signal_window_share');
+    return {
+        facial_signals_enabled: flag('facial_signals_enabled'),
+        heart_rate_enabled: flag('heart_rate_enabled'),
+        respiration_enabled: flag('respiration_enabled'),
+        illumination_enabled: flag('illumination_enabled'),
+        eye_tracking_enabled: flag('eye_tracking_enabled'),
+        gaze_tracking_enabled: flag('gaze_tracking_enabled'),
+        enable_dynamics: flag('enable_dynamics'),
+        posture_tracking_enabled: flag('posture_tracking_enabled'),
+        // One tenant switch drives every modality's window_share, so signals
+        // cannot end up split across shapes for reasons an admin can't see.
+        facial_signals_window_share: share,
+        posture_window_share: share,
+        heart_rate_window_share: share,
+        respiration_window_share: share,
+        illumination_window_share: share,
+        engagement_window_share: share,
+        gaze_window_share: share,
+    };
+}
+
+function boolFrom(value, fallback) {
+    if (value === null || value === undefined) return fallback;
+    return Boolean(Number(value));
+}
+
+/*
+ * The tenant-editable signal columns of migration 0040, with the SAME defaults
+ * the migration writes. One map so the SQL defaults, the runtime projection and
+ * the PUT merge can never disagree — a mismatch would show up as a signal that
+ * silently flips state on an unrelated settings save.
+ */
+const SIGNAL_SETTING_DEFAULTS = Object.freeze({
+    facial_signals_enabled: true,
+    heart_rate_enabled: true,
+    respiration_enabled: true,
+    illumination_enabled: true,
+    eye_tracking_enabled: true,
+    gaze_tracking_enabled: true,
+    enable_dynamics: true,
+    // Off — the pose model cannot be served same-origin. See migration 0040.
+    posture_tracking_enabled: false,
+    signal_window_share: true,
+});
+
+/*
+ * PUT /settings body → the signal columns, as a KEY-PRESENCE MERGE.
+ *
+ * Deliberately not a full replace. `PUT /addons/oyon/settings` is shared by
+ * every Oyon settings section, and a full replace here would mean the capture-
+ * engine form silently zeroing every signal flag it does not render — the exact
+ * partial-update trap CLAUDE.md records for this endpoint's boolean flags. An
+ * absent field keeps the STORED value, read from the settings row rather than
+ * the runtime projection (which renames window_share per modality).
+ */
+function signalFlagsFromBody(body, previousSettings) {
+    const out = {};
+    for (const [key, fallback] of Object.entries(SIGNAL_SETTING_DEFAULTS)) {
+        const supplied = body != null && Object.prototype.hasOwnProperty.call(body, key);
+        out[key] = supplied
+            ? (boolToInt(body[key]) ? 1 : 0)
+            : (boolFrom(previousSettings?.[key], fallback) ? 1 : 0);
+    }
+    return out;
 }
 
 function pickModelProfile(value, fallback) {

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Camera, BarChart3, ShieldCheck, Loader2, Save, LineChart, Cpu, AlertTriangle } from 'lucide-react';
+import { Camera, BarChart3, ShieldCheck, Loader2, Save, LineChart, Cpu, AlertTriangle, Activity } from 'lucide-react';
 import { apiFetch, ApiError } from '../../services/apiClient';
 import { useAuth } from '../../contexts/AuthContext';
 import { VALENCE_GRAPH_PREF_KEY, CONSENT_PREF_KEY } from '../oyon/OyonCaptureWidget';
@@ -102,6 +102,19 @@ export default function OyonSettingsTab({ onOpenAnalytics } = {}) {
                smoothing_alpha: settings.smoothing_alpha,
                min_hold_ms: settings.min_hold_ms,
                min_switch_confidence: settings.min_switch_confidence,
+               // Oyon 3 signal flags (migration 0040). Sent explicitly because
+               // this body is a whitelist — an omitted key would leave the
+               // toggle above unsaveable. The server merges by key presence, so
+               // sending them here cannot disturb anything it doesn't name.
+               facial_signals_enabled: settings.facial_signals_enabled,
+               eye_tracking_enabled: settings.eye_tracking_enabled,
+               gaze_tracking_enabled: settings.gaze_tracking_enabled,
+               illumination_enabled: settings.illumination_enabled,
+               heart_rate_enabled: settings.heart_rate_enabled,
+               respiration_enabled: settings.respiration_enabled,
+               enable_dynamics: settings.enable_dynamics,
+               posture_tracking_enabled: settings.posture_tracking_enabled,
+               signal_window_share: settings.signal_window_share,
             },
          });
          setSettings(res?.settings || settings);
@@ -388,6 +401,80 @@ export default function OyonSettingsTab({ onOpenAnalytics } = {}) {
                               step={0.01}
                               float
                               onChange={v => updateSetting({ min_switch_confidence: v })}
+                           />
+                        </div>
+                     </div>
+                     {/* Oyon 3 signals (migration 0040). Appended as its own
+                         section — nothing above changes. These are AUTHORITY
+                         over signals that already run: the capture element
+                         enables them by its own defaults, so before these
+                         existed a tenant could not switch any of them off. */}
+                     <div className="md:col-span-2 border-t border-neutral-800 pt-3">
+                        <div className="flex items-center gap-2 mb-3">
+                           <Activity className="w-4 h-4 text-purple-400" />
+                           <span className="text-xs font-bold uppercase tracking-wide text-purple-300">Signals</span>
+                        </div>
+                        <p className="text-xs text-neutral-500 mb-3">
+                           Which signal families the capture element records alongside emotion. All are
+                           aggregates only — no frames, images or landmarks ever leave the browser.
+                           Heart rate and respiration are camera-derived research estimates about the
+                           <span className="text-neutral-300"> learner</span>, never clinical measurements
+                           and unrelated to the simulated patient&apos;s vitals.
+                        </p>
+                        <div className="grid gap-3 md:grid-cols-2">
+                           <ToggleRow
+                              label="Facial signals"
+                              hint="Head pose + action units. No extra model — derived from the face the emotion pipeline already detects."
+                              checked={!!settings.facial_signals_enabled}
+                              onChange={v => updateSetting({ facial_signals_enabled: v })}
+                           />
+                           <ToggleRow
+                              label="Eye / engagement"
+                              hint="Blink rate, eye openness, on-task aggregates."
+                              checked={!!settings.eye_tracking_enabled}
+                              onChange={v => updateSetting({ eye_tracking_enabled: v })}
+                           />
+                           <ToggleRow
+                              label="Gaze"
+                              hint="Screen-zone shares and AOI dwell. Training-free mediapipe engine; aggregates, never a raw point stream."
+                              checked={!!settings.gaze_tracking_enabled}
+                              onChange={v => updateSetting({ gaze_tracking_enabled: v })}
+                           />
+                           <ToggleRow
+                              label="Illumination"
+                              hint="Ambient light level — the quality covariate for every other signal."
+                              checked={!!settings.illumination_enabled}
+                              onChange={v => updateSetting({ illumination_enabled: v })}
+                           />
+                           <ToggleRow
+                              label="Heart rate (learner, research-grade)"
+                              hint="Camera-derived rPPG estimate of the LEARNER. Not clinical, not the patient's vitals."
+                              checked={!!settings.heart_rate_enabled}
+                              onChange={v => updateSetting({ heart_rate_enabled: v })}
+                           />
+                           <ToggleRow
+                              label="Respiration (learner, research-grade)"
+                              hint="Breathing rate from the same colour stream. Not diagnostic."
+                              checked={!!settings.respiration_enabled}
+                              onChange={v => updateSetting({ respiration_enabled: v })}
+                           />
+                           <ToggleRow
+                              label="Dynamical features"
+                              hint="Cross-window change metrics over whatever blocks a window carries."
+                              checked={!!settings.enable_dynamics}
+                              onChange={v => updateSetting({ enable_dynamics: v })}
+                           />
+                           <ToggleRow
+                              label="Body posture — needs internet"
+                              hint="OFF by default: the pose model is not bundled, so enabling this makes the browser download it from a Google CDN. Leave off on air-gapped installs."
+                              checked={!!settings.posture_tracking_enabled}
+                              onChange={v => updateSetting({ posture_tracking_enabled: v })}
+                           />
+                           <ToggleRow
+                              label="Keep signals on one window"
+                              hint="On: signals ride the emotion window. Off: each arrives as its own window. Both are stored either way."
+                              checked={!!settings.signal_window_share}
+                              onChange={v => updateSetting({ signal_window_share: v })}
                            />
                         </div>
                      </div>
