@@ -5,10 +5,23 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROHY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 OYON_SOURCE="${OYON_SOURCE:-$(cd "$ROHY_ROOT/.." && pwd)/Oyon}"
 OYON_TARGET="$ROHY_ROOT/OyonR"
+OYON_EXPECTED_VERSION="${OYON_EXPECTED_VERSION:-3.3.2}"
 
 if [[ ! -d "$OYON_SOURCE" ]]; then
   echo "Oyon source not found: $OYON_SOURCE" >&2
   echo "Set OYON_SOURCE=/path/to/Oyon and rerun." >&2
+  exit 1
+fi
+
+if [[ ! -f "$OYON_SOURCE/package.json" ]]; then
+  echo "Oyon package metadata not found: $OYON_SOURCE/package.json" >&2
+  exit 1
+fi
+
+OYON_SOURCE_VERSION="$(node -p "require(process.argv[1]).version" "$OYON_SOURCE/package.json")"
+if [[ "$OYON_SOURCE_VERSION" != "$OYON_EXPECTED_VERSION" ]]; then
+  echo "Refusing to sync Oyon $OYON_SOURCE_VERSION; release/2.9 expects $OYON_EXPECTED_VERSION." >&2
+  echo "Check out/tag the intended source, or explicitly set OYON_EXPECTED_VERSION." >&2
   exit 1
 fi
 
@@ -17,14 +30,15 @@ mkdir -p "$OYON_TARGET"
 # rsync notes:
 #   --delete drops files that no longer exist upstream — keeps the vendored
 #     tree honest.
-#   --exclude /standalone/vendor protects the MediaPipe + ONNX bundles we
-#     add ourselves. Upstream Oyon doesn't ship them; without this exclude,
-#     --delete would erase them on every sync.
+#   Preserve only the large, re-downloadable runtime assets. Other vendored
+#   source is versioned by Oyon and must be refreshed during a major sync.
 rsync -a --delete \
   --exclude .git \
   --exclude node_modules \
   --exclude .playwright-mcp \
-  --exclude /standalone/vendor \
+  --exclude /standalone/models \
+  --exclude /standalone/vendor/mediapipe \
+  --exclude /standalone/vendor/onnxruntime-web \
   "$OYON_SOURCE/" \
   "$OYON_TARGET/"
 

@@ -23,7 +23,7 @@ import { cn } from '@/lib/cn';
  * chrome. Standalone keeps all of those (AnalyzeLayout renders its PageHeader +
  * subtabs only when NOT embedded).
  *
- * One row:  [◐ Oyon] [Calibrate]  Emotion dynamics · …   Sessions▾   ⚙ Settings
+ * One row:  [◐ Oyon] [Calibrate]  Affect · Affect dynamics · …   Sessions▾   ⚙ Settings
  *
  * The Calibrate button sits right beside the logo and only appears when capture
  * is live (runtime constructed) AND gaze is not yet calibrated — a clear,
@@ -45,6 +45,10 @@ export function EmbedHeader() {
   // mirrors the gaze KPI's "Not calibrated".
   const { runtime, start } = useRuntime();
   const chromeMode = useBridge((s) => s.chromeMode);
+  // Host-fed viewer (el.setWindows): a read-only lens over the host's server
+  // pool. Capture-session affordances (the Settings page is runtime/capture
+  // config) don't apply — hide the gear.
+  const hostFed = useBridge((s) => s.hostWindows) != null;
   const calibration = useSessionContext((s) => s.calibration);
   const setSessionContext = useSessionContext((s) => s.setContext);
   const gazeCalibrated = calibration.status === 'ok';
@@ -148,20 +152,22 @@ export function EmbedHeader() {
 
       <div className="ml-auto flex flex-wrap items-center gap-2">
         {onAnalyze ? <FilterControls compact /> : null}
-        <Link
-          to="/settings"
-          aria-label="Settings"
-          aria-current={onSettings ? 'page' : undefined}
-          className={cn(
-            'inline-flex items-center gap-1.5 rounded px-2 py-1 text-sm transition-colors',
-            onSettings
-              ? 'bg-status-info-dim font-medium text-status-info'
-              : 'text-ink-2 hover:bg-surface-2 hover:text-ink-0',
-          )}
-        >
-          <Settings className="size-4" aria-hidden="true" />
-          <span className="sr-only sm:not-sr-only">Settings</span>
-        </Link>
+        {hostFed ? null : (
+          <Link
+            to="/settings"
+            aria-label="Settings"
+            aria-current={onSettings ? 'page' : undefined}
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded px-2 py-1 text-sm transition-colors',
+              onSettings
+                ? 'bg-status-info-dim font-medium text-status-info'
+                : 'text-ink-2 hover:bg-surface-2 hover:text-ink-0',
+            )}
+          >
+            <Settings className="size-4" aria-hidden="true" />
+            <span className="sr-only sm:not-sr-only">Settings</span>
+          </Link>
+        )}
       </div>
 
       {/* Full-screen calibration overlay — mounted always so the imperative ref

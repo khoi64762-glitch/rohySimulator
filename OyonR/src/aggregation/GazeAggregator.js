@@ -20,6 +20,10 @@
 
 const MODEL_VERSION_DEFAULT = 'webeyetrack-0.0.2';
 const SCREEN_HALF = 0.5;
+const DEFAULT_FIXATION_MIN_DURATION_MS = 150;
+const DEFAULT_FIXATION_DISPERSION_THRESHOLD = 0.08;
+const DEFAULT_MIN_FIXATION_SAMPLE_RATE_HZ = 8;
+const DEFAULT_MAX_SAMPLE_GAP_MS = 250;
 
 export class GazeAggregator {
   /**
@@ -41,6 +45,15 @@ export class GazeAggregator {
       aois: [],
       dropOffScreen: true,
       modelVersion: MODEL_VERSION_DEFAULT,
+      // Coarse webcam fixation detection. These values deliberately target
+      // AOI-scale behaviour, not research-eye-tracker microsaccades.
+      fixationMinDurationMs: DEFAULT_FIXATION_MIN_DURATION_MS,
+      fixationDispersionThreshold: DEFAULT_FIXATION_DISPERSION_THRESHOLD,
+      minFixationSampleRateHz: DEFAULT_MIN_FIXATION_SAMPLE_RATE_HZ,
+      // A decoded-frame pause longer than this (or 4x the observed median
+      // interval, whichever is larger) breaks a fixation/AOI sequence instead
+      // of silently turning missing data into dwell time.
+      maxSampleGapMs: DEFAULT_MAX_SAMPLE_GAP_MS,
       ...options,
     };
     if (!Number.isInteger(this.options.zoneGrid) || this.options.zoneGrid < 1) {
@@ -118,7 +131,13 @@ export class GazeAggregator {
 
     const totalFrames = frames.length;
     const durationMs = Math.max(0, end - (windowStart ?? end));
-    const validFrames = frames.filter(f => f.valid && f.smoothed);
+    const timing = addFrameTiming(
+      frames,
+      this.options.sampleIntervalMs,
+      this.options.maxSampleGapMs,
+    );
+    const timedFrames = timing.frames;
+    const validFrames = timedFrames.filter(f => f.valid && f.smoothed);
     const onScreenValid = this.options.dropOffScreen
       ? validFrames.filter(f => !f.off_screen)
       : validFrames;
@@ -152,7 +171,15 @@ export class GazeAggregator {
     }
 
     const zoneProportions = computeZoneProportions(onScreenValid, this.options.zoneGrid);
-    const aoiDwell = computeAoiDwell(onScreenValid, this.options.aois, this.options.sampleIntervalMs);
+    const aoi = computeAoiMetrics(timedFrames, this.options.aois, windowStart ?? end);
+    const samplingAdequate = Number.isFinite(timing.observedSampleRateHz)
+      && timing.observedSampleRateHz >= this.options.minFixationSampleRateHz;
+    const fixation = samplingAdequate
+      ? computeFixationMetrics(timedFrames, {
+          minDurationMs: this.options.fixationMinDurationMs,
+          dispersionThreshold: this.options.fixationDispersionThreshold,
+        })
+      : null;
 
     return {
       window_start: new Date(windowStart ?? end).toISOString(),
@@ -163,7 +190,30 @@ export class GazeAggregator {
       centroid,
       dispersion,
       zone_proportions: zoneProportions,
-      aoi_dwell_ms: aoiDwell,
+      // Existing field, now time-weighted from the samples' real timestamps.
+      // `sampleIntervalMs` remains the fallback when timestamps are absent.
+      aoi_dwell_ms: aoi?.dwell ?? null,
+      aoi_entries: aoi?.entries ?? null,
+      aoi_revisits: aoi?.revisits ?? null,
+      aoi_time_to_first_ms: aoi?.timeToFirst ?? null,
+      aoi_transitions: aoi?.transitions ?? null,
+      aoi_transition_count: aoi?.transitionCount ?? null,
+      aoi_transition_entropy: aoi?.transitionEntropy ?? null,
+      fixation_count: fixation?.count ?? null,
+      fixation_duration_ms_total: fixation?.durationTotal ?? null,
+      fixation_duration_ms_mean: fixation?.durationMean ?? null,
+      fixation_duration_ms_median: fixation?.durationMedian ?? null,
+      fixation_duration_ms_max: fixation?.durationMax ?? null,
+      scanpath_length: fixation?.scanpathLength ?? null,
+      fixation_sampling_adequate: samplingAdequate,
+      fixation_algorithm: 'idt-coarse-v1',
+      fixation_min_duration_ms: this.options.fixationMinDurationMs,
+      fixation_dispersion_threshold: this.options.fixationDispersionThreshold,
+      observed_sample_interval_ms: timing.observedSampleIntervalMs,
+      observed_sample_rate_hz: timing.observedSampleRateHz,
+      max_observed_sample_gap_ms: timing.maxObservedSampleGapMs,
+      timing_source: timing.source,
+      off_screen_episode_count: countOffScreenEpisodes(timedFrames),
       calibration_age_ms: Number.isFinite(calibrationMeta?.calibrationAgeMs)
         ? calibrationMeta.calibrationAgeMs
         : null,
@@ -229,28 +279,240 @@ function quantizeBin(value, N) {
   return bin;
 }
 
-function computeAoiDwell(frames, aois, sampleIntervalMs) {
-  if (!Array.isArray(aois) || aois.length === 0) return null;
+function addFrameTiming(frames, fallbackIntervalMs, minimumGapLimitMs) {
+  const deltas = [];
+  for (let i = 0; i + 1 < frames.length; i += 1) {
+    const a = frames[i].ts_ms;
+    const b = frames[i + 1].ts_ms;
+    if (Number.isFinite(a) && Number.isFinite(b) && b > a) deltas.push(b - a);
+  }
+  const observedSampleIntervalMs = median(deltas);
+  const fallback = positive(fallbackIntervalMs, 33);
+  const representative = positive(observedSampleIntervalMs, fallback);
+  const gapLimit = Math.max(positive(minimumGapLimitMs, DEFAULT_MAX_SAMPLE_GAP_MS), representative * 4);
+  const maxObservedSampleGapMs = deltas.length > 0 ? Math.max(...deltas) : null;
+
+  const timed = frames.map((frame, index) => {
+    const next = frames[index + 1];
+    const rawDelta = next && Number.isFinite(frame.ts_ms) && Number.isFinite(next.ts_ms)
+      ? next.ts_ms - frame.ts_ms
+      : null;
+    const gapAfter = Number.isFinite(rawDelta) && rawDelta > gapLimit;
+    // The final sample represents one typical interval, never the entire tail
+    // until a later forced flush. This prevents stop/transport latency from
+    // becoming fictitious gaze dwell.
+    const durationMs = Number.isFinite(rawDelta) && rawDelta > 0 && !gapAfter
+      ? rawDelta
+      : representative;
+    return { ...frame, duration_ms: durationMs, gap_after: gapAfter, sequence_index: index };
+  });
+
+  return {
+    frames: timed,
+    observedSampleIntervalMs,
+    observedSampleRateHz: observedSampleIntervalMs == null ? null : 1000 / observedSampleIntervalMs,
+    maxObservedSampleGapMs,
+    source: deltas.length > 0 ? 'timestamps' : 'fallback',
+  };
+}
+
+function computeAoiMetrics(frames, aois, windowStart) {
+  const validAois = Array.isArray(aois)
+    ? aois.filter(a => validAoi(a))
+    : [];
+  if (validAois.length === 0) return null;
+
   const dwell = {};
-  for (const a of aois) {
-    if (a && typeof a.id === 'string') dwell[a.id] = 0;
+  const entries = {};
+  const timeToFirst = {};
+  const transitions = {};
+  for (const a of validAois) {
+    dwell[a.id] = 0;
+    entries[a.id] = 0;
+    timeToFirst[a.id] = null;
   }
 
-  for (const f of frames) {
-    if (!Number.isFinite(f.x) || !Number.isFinite(f.y)) continue;
-    for (const a of aois) {
-      if (!a || typeof a.id !== 'string') continue;
-      if (!Number.isFinite(a.x) || !Number.isFinite(a.y)) continue;
-      if (!Number.isFinite(a.width) || !Number.isFinite(a.height)) continue;
-      const inside =
-        f.x >= a.x && f.x < a.x + a.width &&
-        f.y >= a.y && f.y < a.y + a.height;
-      if (inside) {
-        dwell[a.id] += sampleIntervalMs;
-        break; // first match wins — AOIs do not double-count.
+  let activeAoi = null;
+  let transitionCount = 0;
+  for (const frame of frames) {
+    const usable = frame.valid && frame.smoothed && !frame.off_screen
+      && Number.isFinite(frame.x) && Number.isFinite(frame.y);
+    const aoiId = usable ? matchingAoiId(frame, validAois) : null;
+    if (aoiId == null) {
+      activeAoi = null;
+      continue;
+    }
+
+    dwell[aoiId] += positive(frame.duration_ms, 0);
+    if (timeToFirst[aoiId] == null && Number.isFinite(frame.ts_ms)) {
+      timeToFirst[aoiId] = Math.max(0, frame.ts_ms - windowStart);
+    }
+    if (aoiId !== activeAoi) {
+      entries[aoiId] += 1;
+      if (activeAoi != null) {
+        const key = `${activeAoi}→${aoiId}`;
+        transitions[key] = (transitions[key] || 0) + 1;
+        transitionCount += 1;
+      }
+      activeAoi = aoiId;
+    }
+    if (frame.gap_after) activeAoi = null;
+  }
+
+  const revisits = {};
+  for (const id of Object.keys(entries)) revisits[id] = Math.max(0, entries[id] - 1);
+  return {
+    dwell,
+    entries,
+    revisits,
+    timeToFirst,
+    transitions,
+    transitionCount,
+    transitionEntropy: normalizedCountEntropy(Object.values(transitions)),
+  };
+}
+
+function computeFixationMetrics(frames, { minDurationMs, dispersionThreshold }) {
+  const segments = [];
+  let segment = [];
+  for (const frame of frames) {
+    const usable = frame.valid && frame.smoothed && !frame.off_screen
+      && Number.isFinite(frame.x) && Number.isFinite(frame.y);
+    if (!usable) {
+      if (segment.length > 0) segments.push(segment);
+      segment = [];
+      continue;
+    }
+    segment.push(frame);
+    if (frame.gap_after) {
+      segments.push(segment);
+      segment = [];
+    }
+  }
+  if (segment.length > 0) segments.push(segment);
+
+  const fixations = [];
+  for (const points of segments) {
+    let start = 0;
+    while (start < points.length) {
+      let end = start;
+      while (
+        end + 1 < points.length
+        && fixationDispersion(points, start, end + 1) <= dispersionThreshold
+      ) {
+        end += 1;
+      }
+      const duration = sumDuration(points, start, end);
+      if (duration >= minDurationMs) {
+        fixations.push(summarizeFixation(points, start, end, duration));
+        start = end + 1;
+      } else {
+        start += 1;
       }
     }
   }
 
-  return dwell;
+  const durations = fixations.map(f => f.duration);
+  let scanpathLength = 0;
+  for (let i = 1; i < fixations.length; i += 1) {
+    const dx = fixations[i].x - fixations[i - 1].x;
+    const dy = fixations[i].y - fixations[i - 1].y;
+    scanpathLength += Math.sqrt(dx * dx + dy * dy);
+  }
+  return {
+    count: fixations.length,
+    durationTotal: durations.reduce((sum, value) => sum + value, 0),
+    durationMean: mean(durations),
+    durationMedian: median(durations),
+    durationMax: durations.length > 0 ? Math.max(...durations) : null,
+    scanpathLength,
+  };
+}
+
+function fixationDispersion(points, start, end) {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (let i = start; i <= end; i += 1) {
+    minX = Math.min(minX, points[i].x);
+    maxX = Math.max(maxX, points[i].x);
+    minY = Math.min(minY, points[i].y);
+    maxY = Math.max(maxY, points[i].y);
+  }
+  return (maxX - minX) + (maxY - minY);
+}
+
+function sumDuration(points, start, end) {
+  let total = 0;
+  for (let i = start; i <= end; i += 1) total += positive(points[i].duration_ms, 0);
+  return total;
+}
+
+function summarizeFixation(points, start, end, duration) {
+  let weightedX = 0;
+  let weightedY = 0;
+  let weight = 0;
+  for (let i = start; i <= end; i += 1) {
+    const w = positive(points[i].duration_ms, 1);
+    weightedX += points[i].x * w;
+    weightedY += points[i].y * w;
+    weight += w;
+  }
+  return { x: weightedX / weight, y: weightedY / weight, duration };
+}
+
+function countOffScreenEpisodes(frames) {
+  let count = 0;
+  let active = false;
+  for (const frame of frames) {
+    const offScreen = frame.valid && frame.smoothed && frame.off_screen;
+    if (offScreen && !active) count += 1;
+    active = offScreen && !frame.gap_after;
+  }
+  return count;
+}
+
+function validAoi(a) {
+  return a && typeof a.id === 'string'
+    && Number.isFinite(a.x) && Number.isFinite(a.y)
+    && Number.isFinite(a.width) && Number.isFinite(a.height);
+}
+
+function matchingAoiId(frame, aois) {
+  for (const a of aois) {
+    if (
+      frame.x >= a.x && frame.x < a.x + a.width
+      && frame.y >= a.y && frame.y < a.y + a.height
+    ) return a.id;
+  }
+  return null;
+}
+
+function normalizedCountEntropy(counts) {
+  const positiveCounts = counts.filter(v => Number.isFinite(v) && v > 0);
+  if (positiveCounts.length <= 1) return 0;
+  const total = positiveCounts.reduce((sum, value) => sum + value, 0);
+  let entropy = 0;
+  for (const value of positiveCounts) {
+    const p = value / total;
+    entropy -= p * Math.log2(p);
+  }
+  return entropy / Math.log2(positiveCounts.length);
+}
+
+function mean(values) {
+  if (values.length === 0) return null;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function median(values) {
+  if (values.length === 0) return null;
+  const sorted = values.slice().sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+function positive(value, fallback) {
+  return Number.isFinite(value) && value > 0 ? value : fallback;
 }

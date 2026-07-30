@@ -1,6 +1,6 @@
 {
   "name": "oyon",
-  "version": "2.2.0",
+  "version": "3.3.2",
   "description": "Local facial-expression analytics for browser-based learning simulations. Camera-side inference with MediaPipe + ONNX Runtime Web; only aggregate windows leave the device. Runs standalone or attaches to a host app.",
   "type": "module",
   "sideEffects": [
@@ -30,6 +30,11 @@
       "import": "./src/react/EmotionCapturePanel.js",
       "default": "./src/react/EmotionCapturePanel.js"
     },
+    "./react/capture": {
+      "types": "./types/react-capture.d.ts",
+      "import": "./src/react/OyonCapture.js",
+      "default": "./src/react/OyonCapture.js"
+    },
     "./attach": {
       "types": "./types/attach.d.ts",
       "import": "./src/adapters/oyonAttach.js",
@@ -49,6 +54,16 @@
       "types": "./types/validation.d.ts",
       "import": "./src/validation/validateEmotionPayload.js",
       "default": "./src/validation/validateEmotionPayload.js"
+    },
+    "./server": {
+      "types": "./types/server.d.ts",
+      "import": "./src/server/index.js",
+      "default": "./src/server/index.js"
+    },
+    "./server/express": {
+      "types": "./types/server.d.ts",
+      "import": "./src/server/express.js",
+      "default": "./src/server/express.js"
     },
     "./settings": {
       "types": "./types/settings.d.ts",
@@ -70,10 +85,65 @@
       "import": "./src/aggregation/EngagementAggregator.js",
       "default": "./src/aggregation/EngagementAggregator.js"
     },
+    "./engagement/eye-features": {
+      "types": "./types/engagement.d.ts",
+      "import": "./src/inference/EyeFeatureExtractor.js",
+      "default": "./src/inference/EyeFeatureExtractor.js"
+    },
+    "./engagement/smoother": {
+      "types": "./types/engagement.d.ts",
+      "import": "./src/smoothing/EyeSmoother.js",
+      "default": "./src/smoothing/EyeSmoother.js"
+    },
     "./gaze": {
       "types": "./types/gaze.d.ts",
       "import": "./src/aggregation/GazeAggregator.js",
       "default": "./src/aggregation/GazeAggregator.js"
+    },
+    "./gaze/smoother": {
+      "types": "./types/gaze.d.ts",
+      "import": "./src/smoothing/GazeSmoother.js",
+      "default": "./src/smoothing/GazeSmoother.js"
+    },
+    "./typing": {
+      "types": "./types/typing.d.ts",
+      "import": "./src/aggregation/TypingAggregator.js",
+      "default": "./src/aggregation/TypingAggregator.js"
+    },
+    "./typing/adapter": {
+      "types": "./types/typing.d.ts",
+      "import": "./src/capture/TypingComposerAdapter.js",
+      "default": "./src/capture/TypingComposerAdapter.js"
+    },
+    "./ai-assist": {
+      "types": "./types/ai-assist.d.ts",
+      "import": "./src/aggregation/AiAssistAggregator.js",
+      "default": "./src/aggregation/AiAssistAggregator.js"
+    },
+    "./ai-assist/tracker": {
+      "types": "./types/ai-assist.d.ts",
+      "import": "./src/capture/AiAssistTracker.js",
+      "default": "./src/capture/AiAssistTracker.js"
+    },
+    "./interaction": {
+      "types": "./types/interaction.d.ts",
+      "import": "./src/aggregation/InteractionAggregator.js",
+      "default": "./src/aggregation/InteractionAggregator.js"
+    },
+    "./interaction/tracker": {
+      "types": "./types/interaction.d.ts",
+      "import": "./src/capture/InteractionTracker.js",
+      "default": "./src/capture/InteractionTracker.js"
+    },
+    "./discourse": {
+      "types": "./types/discourse.d.ts",
+      "import": "./src/aggregation/DiscourseAggregator.js",
+      "default": "./src/aggregation/DiscourseAggregator.js"
+    },
+    "./text": {
+      "types": "./types/discourse.d.ts",
+      "import": "./src/analytics/TextAnalyzer.js",
+      "default": "./src/analytics/TextAnalyzer.js"
     },
     "./gaze/adapter": {
       "types": "./types/gaze.d.ts",
@@ -95,6 +165,16 @@
       "import": "./src/inference/GazeAdapterFactory.js",
       "default": "./src/inference/GazeAdapterFactory.js"
     },
+    "./gaze/aoi": {
+      "types": "./types/gaze-aoi.d.ts",
+      "import": "./src/gaze/domAoi.js",
+      "default": "./src/gaze/domAoi.js"
+    },
+    "./version": {
+      "types": "./types/version.d.ts",
+      "import": "./src/version.js",
+      "default": "./src/version.js"
+    },
     "./ui/gaze-calibration": {
       "types": "./types/gaze.d.ts",
       "import": "./src/ui/GazeCalibrationOverlay.js",
@@ -106,7 +186,7 @@
       "default": "./src/ui/GazeCalibrationDriver.js"
     },
     "./react/gaze-calibration": {
-      "types": "./types/gaze.d.ts",
+      "types": "./types/react-gaze-calibration.d.ts",
       "import": "./src/react/GazeCalibrationPanel.js",
       "default": "./src/react/GazeCalibrationPanel.js"
     },
@@ -115,12 +195,43 @@
       "import": "./src/storage/IndexedDbOyonStore.js",
       "default": "./src/storage/IndexedDbOyonStore.js"
     },
+    "./voice": {
+      "types": "./types/voice.d.ts",
+      "import": "./src/aggregation/VoiceTurnAggregator.js",
+      "default": "./src/aggregation/VoiceTurnAggregator.js"
+    },
+    "./voice/controller": {
+      "types": "./types/voice.d.ts",
+      "import": "./src/capture/VoiceTurnController.js",
+      "default": "./src/capture/VoiceTurnController.js"
+    },
+    "./voice-features": {
+      "types": "./types/voice.d.ts",
+      "import": "./src/analytics/voiceFeatures.js",
+      "default": "./src/analytics/voiceFeatures.js"
+    },
+    "./voice/worker": {
+      "types": "./types/voice.d.ts",
+      "import": "./src/inference/WorkerVoiceAnalyzer.js",
+      "default": "./src/inference/WorkerVoiceAnalyzer.js"
+    },
+    "./signal-events": {
+      "types": "./types/signal-events.d.ts",
+      "import": "./src/logging/SignalEventLog.js",
+      "default": "./src/logging/SignalEventLog.js"
+    },
+    "./signal-capture": {
+      "types": "./types/signal-capture.d.ts",
+      "import": "./src/core/SignalCapture.js",
+      "default": "./src/core/SignalCapture.js"
+    },
     "./bundle": {
       "types": "./types/index.d.ts",
       "import": "./dist/oyon.esm.js",
       "default": "./dist/oyon.esm.js"
     },
     "./app-element": {
+      "types": "./types/app-element.d.ts",
       "import": "./standalone/app/dist-element/oyon-app.element.js",
       "default": "./standalone/app/dist-element/oyon-app.element.js"
     },
@@ -134,11 +245,15 @@
     "bin",
     "dist",
     "standalone/app/dist-element",
+    "vendor",
     "types",
     "scripts/download-models.sh",
     "scripts/README.md",
+    "RELEASING.md",
+    "MIGRATING_V2_TO_V3.md",
     "README.md",
     "INSTALL.md",
+    "licenses",
     "LICENSE",
     "NOTICE.md",
     "CHANGELOG.md"
@@ -151,31 +266,49 @@
     "app:build": "npm --prefix standalone/app run build",
     "app:build:element": "npm --prefix standalone/app run build:element",
     "app:typecheck": "npm --prefix standalone/app run typecheck",
-    "build": "rollup -c rollup.config.mjs",
+    "build": "npm run license:sync && rollup -c rollup.config.mjs",
+    "vendor:webeyetrack": "node scripts/vendor-webeyetrack.mjs",
+    "prepare": "npm run vendor:webeyetrack",
     "build:clean": "rm -rf dist && npm run build",
     "check": "find src standalone -name '*.js' -not -path '*/node_modules/*' -not -path '*/vendor/*' -print0 | xargs -0 -n1 node --check",
-    "test": "node tests/aggregation.test.js && node tests/wasm-paths.test.js && node tests/face-tracker-output.test.js && node tests/eye-features.test.js && node tests/eye-smoother.test.js && node tests/engagement-aggregator.test.js && node tests/runtime-engagement.test.js && node tests/validation.test.js && node tests/local-transport.test.js && node tests/http-transport.test.js && node tests/fallback-transport.test.js && node tests/rohy-addon.test.js && node tests/oyon-attach.test.js && node tests/oyon-addon.test.js && node tests/settings.test.js && node tests/logging.test.js && node tests/metrics.test.js && node tests/dynamics.test.js && node tests/runtime-settings.test.js && node tests/transition-network.test.js && node tests/web-eye-track-adapter.test.js && node tests/webgazer-adapter.test.js && node tests/gaze-engine-switch.test.js && node tests/mediapipe-gaze-adapter.test.js && node tests/gaze-smoother.test.js && node tests/gaze-aggregator.test.js && node tests/runtime-gaze.test.js && node tests/runtime-mediapipe-gaze.test.js && node tests/gaze-calibration-overlay.test.js && node tests/standalone-preview-data.test.js && node tests/app-runtime-contracts.test.js && node tests/app-filter-windows.test.js && node tests/app-tna-pooling.test.js && node tests/app-embed-contracts.test.js && node tests/exports-map.test.js",
+    "pretest": "node tests/version-contract.test.js && node tests/app-about-contracts.test.js && node tests/dom-aoi.test.js && node tests/host-check.test.js && node tests/runtime-capture-quality.test.js && node tests/sensing-diagnostics-screen.test.js && node tests/attention-analytics.test.js && node tests/analytics-summary-layout.test.js && node tests/cli-assets.test.js && node tests/dependency-security.test.js",
+    "test": "node tests/aggregation.test.js && node tests/camera-controller.test.js && node tests/wasm-paths.test.js && node tests/face-tracker-output.test.js && node tests/eye-features.test.js && node tests/eye-smoother.test.js && node tests/engagement-aggregator.test.js && node tests/typing-aggregator.test.js && node tests/typing-adapter.test.js && node tests/signal-event-log.test.js && node tests/signal-event-tna.test.js && node tests/signal-event-store.test.js && node tests/signal-capture.test.js && node tests/runtime-engagement.test.js && node tests/facial-signals.test.js && node tests/runtime-facial.test.js && node tests/posture.test.js && node tests/runtime-posture.test.js && node tests/heart-rate.test.js && node tests/heart-rate-robust.test.js && node tests/heart-rate-sampling.test.js && node tests/runtime-heart-rate.test.js && node tests/respiration.test.js && node tests/runtime-respiration.test.js && node tests/validation.test.js && node tests/local-transport.test.js && node tests/http-transport.test.js && node tests/fallback-transport.test.js && node tests/rohy-addon.test.js && node tests/oyon-attach.test.js && node tests/oyon-addon.test.js && node tests/server-batch.test.js && node tests/settings.test.js && node tests/logging.test.js && node tests/metrics.test.js && node tests/dynamics.test.js && node tests/runtime-settings.test.js && node tests/transition-network.test.js && node tests/web-eye-track-adapter.test.js && node tests/webgazer-adapter.test.js && node tests/gaze-engine-switch.test.js && node tests/mediapipe-gaze-adapter.test.js && node tests/gaze-smoother.test.js && node tests/gaze-aggregator.test.js && node tests/runtime-gaze.test.js && node tests/runtime-mediapipe-gaze.test.js && node tests/gaze-calibration-overlay.test.js && node tests/standalone-preview-data.test.js && node tests/app-runtime-contracts.test.js && node tests/settings-nav.test.js && node tests/centrality-sizing.test.js && node tests/position-layout.test.js && node tests/emotion-timeline-slots.test.js && node tests/app-filter-windows.test.js && node tests/app-tna-pooling.test.js && node tests/app-embed-contracts.test.js && node tests/app-analyze-typing.test.js && node tests/app-typing-charts.test.js && node tests/app-voice-charts.test.js && node tests/app-analyze-voice.test.js && node tests/ai-assist.test.js && node tests/interaction-tracker.test.js && node tests/interaction-aggregator.test.js && node tests/text-analyzer.test.js && node tests/discourse-aggregator.test.js && node tests/voice-features.test.js && node tests/pitch.test.js && node tests/voice-turn-controller.test.js && node tests/vad-adapter.test.js && node tests/voice-aggregator.test.js && node tests/voice-worker.test.js && node tests/license-contract.test.js && node tests/exports-map.test.js",
     "test:e2e": "playwright test",
     "test:all": "npm run check && npm test && npm run app:typecheck && npm run test:e2e",
     "download-models": "bash scripts/download-models.sh",
-    "prepublishOnly": "npm run check && npm test && npm run build:clean && npm run app:build:element"
+    "bench:voice-worker": "node scripts/bench-voice-worker.mjs",
+    "verify:package-tarball": "node scripts/verify-package-tarball.mjs",
+    "verify:release-package": "node scripts/verify-release-package.mjs",
+    "prepublishOnly": "npm run vendor:webeyetrack && npm run license:verify && npm run check && npm test && npm run build:clean && npm run app:build:element && npm run verify:package-tarball",
+    "license:sync": "node scripts/sync-licenses.mjs",
+    "license:verify": "node scripts/sync-licenses.mjs --strict && node tests/license-contract.test.js",
+    "license:latest": "node scripts/check-license-version.mjs"
   },
   "peerDependencies": {
     "@mediapipe/tasks-vision": "^0.10.22",
     "onnxruntime-web": "^1.20.0",
-    "react": ">=18.0.0"
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0",
+    "webgazer": "^3.5.3"
   },
   "peerDependenciesMeta": {
     "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    },
+    "webgazer": {
       "optional": true
     }
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
     "@rollup/plugin-node-resolve": "^15.2.3",
-    "@rollup/plugin-terser": "^0.4.4",
     "rollup": "^4.20.0",
-    "vite": "^7.0.0"
+    "terser": "^5.47.1",
+    "vite": "^7.0.0",
+    "webeyetrack": "^0.0.2"
   },
   "engines": {
     "node": ">=18"
@@ -192,7 +325,7 @@
     "learning-analytics"
   ],
   "author": "Mohammed Saqr",
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "homepage": "https://github.com/mohsaqr/Oyon#readme",
   "bugs": {
     "url": "https://github.com/mohsaqr/Oyon/issues"
@@ -204,8 +337,9 @@
   "publishConfig": {
     "access": "public"
   },
-  "dependencies": {
-    "webeyetrack": "^0.0.2",
-    "webgazer": "^3.5.3"
+  "overrides": {
+    "webeyetrack": {
+      "mathjs": "15.2.0"
+    }
   }
 }

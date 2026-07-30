@@ -28,6 +28,13 @@ export default defineConfig({
     // there is no bundler to substitute it.
     'process.env.NODE_ENV': JSON.stringify('production'),
   },
+  worker: {
+    // Same as vite.config.ts: the voice analysis worker's module graph
+    // (onnxruntime-web dynamic imports) needs a code-splitting-capable
+    // worker format; Vite's default 'iife' cannot host it. The worker is
+    // emitted as a sibling file next to oyon-app.element.js.
+    format: 'es',
+  },
   build: {
     // NOT lib mode: Vite lib mode force-inlines every asset as base64,
     // which would embed ~49 MB of ORT wasm into the JS. A regular build

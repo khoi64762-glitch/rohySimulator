@@ -30,12 +30,16 @@ import { pickLandingCase } from './services/landingCase';
 import { X, StopCircle, AlertTriangle } from 'lucide-react';
 import BodyMapDebug from './components/examination/BodyMapDebug';
 import TnaDashboard from './components/analytics/tna/TnaDashboardV2';
+import OyonDashboardRoom from './components/oyon/OyonDashboardRoom';
+import OyonConsentUpdate from './components/oyon/OyonConsentUpdate';
 import DiscussionScreen from './components/discussion/DiscussionScreen';
 import PhysicalExamScreen from './components/exam/PhysicalExamScreen';
 import InvestigationsScreen from './components/investigations/InvestigationsScreen';
 import RoomNavigator from './components/common/RoomNavigator';
 import AgentPersonaEditor from './components/settings/AgentPersonaEditor';
 import OyonCaptureWidget from './components/oyon/OyonCaptureWidget';
+import { useSignalCapture } from './components/oyon/useSignalCapture';
+import { useOyonSignalGate } from './components/oyon/useOyonSignalGate';
 import AoiRegion from './components/oyon/AoiRegion';
 import { HelpCenter, OnboardingTour } from './help';
 import FirstRunGate, { useSetup } from './components/setup/FirstRunGate';
@@ -58,6 +62,12 @@ function MainApp() {
    // own Analyze dashboards (Emotion dynamics / Engagement / Affect / Gaze),
    // one click from the top bar instead of buried under Settings → Oyon tab.
    const [showOyonAnalytics, setShowOyonAnalytics] = useState(false);
+   // The named Oyon dashboard — OYON's own Analyze dashboards over server data
+   // (<oyon-app chrome="none">), as opposed to showOyonAnalytics above which is
+   // Rohy's own TnaDashboard preset to the emotion source. Deliberately a
+   // SEPARATE surface: new modalities surface here without touching any
+   // existing Rohy tab.
+   const [showOyonDashboard, setShowOyonDashboard] = useState(false);
    // Agent persona editor full-page route. null = closed; 'new' = create;
    // <number> = edit by template id. Setting this hides ConfigPanel so the
    // editor gets the entire viewport. On close we reopen ConfigPanel with
@@ -278,6 +288,7 @@ function MainApp() {
       else if (showLessonsRoom)         view = 'lessons';
       else if (showTnaAnalytics)        view = 'tna';
       else if (showOyonAnalytics)       view = 'oyon';
+      else if (showOyonDashboard)       view = 'oyon-dashboard';
       // 'view' tracks full-page surfaces above the in-session UI; the
       // bottom-nav room is orthogonal and persisted separately so hard
       // refresh inside Exam/Lab/Rad lands back in the same room, not chat.
@@ -292,7 +303,8 @@ function MainApp() {
       };
    }, [
       personaEditorTarget, personaEditorReturn,
-      showFullPageSettings, showLessonsRoom, showTnaAnalytics, showOyonAnalytics, currentRoom, showUserProfile,
+      showFullPageSettings, showLessonsRoom, showTnaAnalytics, showOyonAnalytics, showOyonDashboard,
+      currentRoom, showUserProfile,
       settingsInitialTab, settingsInitialStep,
    ]);
    const applyView = (saved) => {
@@ -321,6 +333,7 @@ function MainApp() {
          case 'settings':    setShowFullPageSettings(true); break;
          case 'tna':         setShowTnaAnalytics(true); break;
          case 'oyon':        setShowOyonAnalytics(true); break;
+         case 'oyon-dashboard': setShowOyonDashboard(true); break;
          case 'home':
          case 'discussion':  // handled by the currentRoom restore above
          default: /* no-op — case view */ break;
@@ -623,6 +636,21 @@ function MainApp() {
       : showLessonsRoom ? 'lessons'
       : currentRoom;
 
+   // Host-driven signal capture (typing today; interaction/discourse next).
+   // Mounted here for the same reason the pill is: App outlives every screen
+   // switch, so a typing episode is not abandoned when the learner moves
+   // between rooms. `room`/`caseId` are read at flush time by the transport,
+   // so changing them does not restart capture.
+   const signalGate = useOyonSignalGate(sessionId);
+   const { capture: signalCapture } = useSignalCapture({
+      enabled: signalGate.enabled,
+      persist: signalGate.persist,
+      runtimeConfig: signalGate.runtimeConfig,
+      sessionId,
+      caseId: activeCase?.id,
+      room: oyonRoom,
+   });
+
    // Publish the pill's live width as --oyon-pill-w on <html> so headers it
    // floats over (PatientMonitor's) can reserve a real layout slot for it
    // instead of letting their content slide underneath. The width is dynamic
@@ -656,6 +684,11 @@ function MainApp() {
    // reserves a matching slot via --oyon-pill-w. Everywhere else it keeps
    // the historical viewport top-center spot.
    const oyonDockedOverMonitor = oyonRoom === 'chat';
+   // Re-consent prompt for a widened Oyon contract. Rendered beside the capture
+   // pill so it reaches every surface, and self-suppressing — it returns null
+   // unless this learner previously accepted an older contract.
+   const oyonConsentUpdate = user ? <OyonConsentUpdate /> : null;
+
    const oyonPill = user ? (
       // Rendered whenever a user is signed in, session or not: without a
       // session the pill still captures locally; persistence starts once
@@ -691,6 +724,7 @@ function MainApp() {
          onOpenSettings={handleOpenSettings}
          onOpenHelp={() => setShowHelpCenter(true)}
          onOpenEmotionAnalytics={() => setShowOyonAnalytics(true)}
+         onOpenOyonDashboard={() => setShowOyonDashboard(true)}
          onOpenCaseAnalytics={() => setShowTnaAnalytics(true)}
          onOpenSetup={isAdminUser ? openSetupWizard : undefined}
          onLogout={() => {
@@ -708,6 +742,7 @@ function MainApp() {
       return (
          <>
          {oyonPill}
+         {oyonConsentUpdate}
          <AgentPersonaEditor
             templateId={personaEditorTarget}
             onClose={handleClosePersonaEditor}
@@ -722,6 +757,7 @@ function MainApp() {
       return (
          <>
          {oyonPill}
+         {oyonConsentUpdate}
          <div className="h-screen w-screen rohy-offwhite-bg overflow-hidden">
             <Suspense fallback={<div className="p-8 text-sm text-neutral-500">Loading…</div>}>
                <LessonsRoomContainer
@@ -742,6 +778,7 @@ function MainApp() {
       return (
          <>
          {oyonPill}
+         {oyonConsentUpdate}
          <div className="h-screen w-screen rohy-offwhite-bg overflow-hidden">
             <ConfigPanel
                key={settingsNavNonce}
@@ -772,6 +809,7 @@ function MainApp() {
       return (
          <>
          {oyonPill}
+         {oyonConsentUpdate}
          <div className="h-screen w-screen overflow-hidden">
             <TnaDashboard onClose={() => setShowTnaAnalytics(false)} />
          </div>
@@ -788,9 +826,24 @@ function MainApp() {
       return (
          <>
          {oyonPill}
+         {oyonConsentUpdate}
          <div className="h-screen w-screen overflow-hidden">
             <TnaDashboard onClose={() => setShowOyonAnalytics(false)} defaultSource="emotions" defaultEmotionDimension="raw" />
          </div>
+         </>
+      );
+   }
+
+   // The named Oyon dashboard — OYON's own Analyze dashboards over server rows.
+   // A sibling of the surface above, never a replacement: both routes coexist,
+   // and the element mounted here is a chrome="none" viewer, so it owns no
+   // camera and coexists with the capture pill.
+   if (showOyonDashboard) {
+      return (
+         <>
+         {oyonPill}
+         {oyonConsentUpdate}
+         <OyonDashboardRoom onClose={() => setShowOyonDashboard(false)} />
          </>
       );
    }
@@ -949,6 +1002,7 @@ function MainApp() {
                      onSessionStart={setSessionId}
                      restoredSessionId={sessionId}
                      personaRefreshCounter={personaRefreshCounter}
+                     signalCapture={signalCapture}
                   />
                )}
             </AoiRegion>

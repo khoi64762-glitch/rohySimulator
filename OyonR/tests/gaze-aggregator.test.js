@@ -238,4 +238,83 @@ function sgs(overrides = {}) {
   assert.equal(out.valid_frame_ratio, 0.5);
 }
 
+// R — AOI dwell follows real timestamps rather than multiplying by the
+// runtime's unrelated slow emotion interval. Irregular gaze callbacks remain
+// honest and expose their observed cadence for audit.
+{
+  const aois = [
+    { id: 'content', x: -0.5, y: -0.5, width: 1, height: 1 },
+  ];
+  const agg = new GazeAggregator({ windowMs: 1000, aois, sampleIntervalMs: 1000 });
+  for (const ts of [0, 40, 95, 130]) {
+    agg.consumeFrame(sgs({ x: 0, y: 0, ts_ms: ts }), ts);
+  }
+  const out = agg.flush(180);
+  // 40 + 55 + 35 + median(40) = 170, not 4 * 1000.
+  assert.equal(out.aoi_dwell_ms.content, 170);
+  assert.equal(out.timing_source, 'timestamps');
+  assert.equal(out.observed_sample_interval_ms, 40);
+  assert.equal(out.observed_sample_rate_hz, 25);
+}
+
+// S — Stable high-rate gaze becomes one coarse fixation. A direct AOI switch
+// produces entries, a transition, and time-to-first without leaking points.
+{
+  const aois = [
+    { id: 'text', x: -0.5, y: -0.5, width: 0.5, height: 1 },
+    { id: 'chart', x: 0, y: -0.5, width: 0.5, height: 1 },
+  ];
+  const agg = new GazeAggregator({
+    windowMs: 2000,
+    aois,
+    fixationMinDurationMs: 150,
+    fixationDispersionThreshold: 0.08,
+  });
+  for (let i = 0; i < 6; i += 1) {
+    agg.consumeFrame(sgs({ x: -0.2 + (i % 2) * 0.005, y: 0, ts_ms: i * 40 }), i * 40);
+  }
+  for (let i = 6; i < 12; i += 1) {
+    agg.consumeFrame(sgs({ x: 0.2 + (i % 2) * 0.005, y: 0, ts_ms: i * 40 }), i * 40);
+  }
+  const out = agg.flush(520);
+  assert.equal(out.fixation_sampling_adequate, true);
+  assert.equal(out.fixation_count, 2);
+  assert.ok(out.fixation_duration_ms_total >= 400);
+  assert.ok(out.scanpath_length > 0.3);
+  assert.equal(out.aoi_entries.text, 1);
+  assert.equal(out.aoi_entries.chart, 1);
+  assert.equal(out.aoi_revisits.text, 0);
+  assert.equal(out.aoi_time_to_first_ms.text, 0);
+  assert.equal(out.aoi_time_to_first_ms.chart, 240);
+  assert.equal(out.aoi_transitions['text→chart'], 1);
+  assert.equal(out.aoi_transition_count, 1);
+  assert.equal(out.aoi_transition_entropy, 0);
+}
+
+// T — A long callback dropout breaks sequences and is not charged as dwell.
+// The dynamic gap threshold follows the normal 40 ms cadence, not the outlier.
+{
+  const aois = [{ id: 'a', x: -0.5, y: -0.5, width: 1, height: 1 }];
+  const agg = new GazeAggregator({ windowMs: 5000, aois, maxSampleGapMs: 250 });
+  for (const ts of [0, 40, 80, 2000, 2040, 2080]) {
+    agg.consumeFrame(sgs({ x: 0, y: 0, ts_ms: ts }), ts);
+  }
+  const out = agg.flush(2120);
+  assert.equal(out.max_observed_sample_gap_ms, 1920);
+  assert.ok(out.aoi_dwell_ms.a < 500, `dropout became dwell: ${out.aoi_dwell_ms.a}`);
+  assert.equal(out.aoi_entries.a, 2, 'the dropout starts a new AOI visit');
+}
+
+// U — One-Hz screen points can still support coarse dwell, but the payload is
+// explicit that they cannot support fixation detection.
+{
+  const agg = new GazeAggregator({ windowMs: 4000, sampleIntervalMs: 1000 });
+  for (const ts of [0, 1000, 2000]) agg.consumeFrame(sgs({ ts_ms: ts }), ts);
+  const out = agg.flush(3000);
+  assert.equal(out.observed_sample_rate_hz, 1);
+  assert.equal(out.fixation_sampling_adequate, false);
+  assert.equal(out.fixation_count, null);
+  assert.equal(out.fixation_duration_ms_total, null);
+}
+
 console.log('gaze-aggregator.test.js — all cases passed');

@@ -1,4 +1,4 @@
-name: Publish to npm
+name: Release Oyon
 
 on:
   push:
@@ -6,10 +6,12 @@ on:
       - 'v*'
 
 jobs:
-  publish:
+  release:
     runs-on: ubuntu-latest
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     permissions:
-      contents: read
+      contents: write
       id-token: write
     steps:
       - uses: actions/checkout@v4
@@ -17,8 +19,10 @@ jobs:
         with:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
-      - name: Install
-        run: npm install --no-audit --no-fund
+      - name: Install library dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Install app build dependencies
+        run: npm --prefix standalone/app ci --no-audit --no-fund
       - name: Verify version matches tag
         run: |
           PKG=$(node -p "require('./package.json').version")
@@ -27,13 +31,32 @@ jobs:
             echo "package.json version ($PKG) does not match tag ($TAG)" >&2
             exit 1
           fi
-      - name: Syntax check
-        run: npm run check
-      - name: Tests
-        run: npm test
-      - name: Build
-        run: npm run build:clean
-      - name: Publish (with provenance)
-        run: npm publish --provenance --access public
+      - name: Verify publish gate
+        run: npm run prepublishOnly
+      - name: Build immutable release package
+        run: |
+          mkdir -p release
+          npm pack --ignore-scripts --pack-destination release --silent
+          (cd release && sha256sum *.tgz > SHA256SUMS)
+      - name: Verify isolated consumer installation
+        run: npm run verify:release-package -- release/*.tgz
+      - name: Publish GitHub Release
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release/*.tgz release/SHA256SUMS --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" release/*.tgz release/SHA256SUMS \
+              --verify-tag --generate-notes --title "Oyon $GITHUB_REF_NAME"
+          fi
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+      - name: Publish the verified package to npm (with provenance)
+        if: env.NPM_TOKEN != ''
+        # prepublishOnly ran explicitly above; publish the exact tarball that
+        # was verified and attached to the GitHub Release.
+        run: npm publish ./release/*.tgz --ignore-scripts --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
+      - name: Report skipped npm publication
+        if: env.NPM_TOKEN == ''
+        run: echo "::notice::NPM_TOKEN is not configured; the verified GitHub Release is the canonical package."

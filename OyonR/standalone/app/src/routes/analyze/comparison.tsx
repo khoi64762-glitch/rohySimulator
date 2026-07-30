@@ -5,6 +5,7 @@ import type { EmotionWindow } from 'oyon';
 import { Section } from '@/components/ui/Section';
 import { Card, CardHeader, CardTitle, CardContent, CardMeta } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { Metric } from '@/components/ui/Metric';
 import { Button } from '@/components/ui/Button';
 import { useEnrichedWindows } from '@/lib/useEnrichedWindows';
 import { summarizeSessions, type SessionSummary } from '@/lib/sessions';
@@ -136,26 +137,35 @@ export function ComparisonView() {
     downloadMultiSessionBundle(bundle);
   }
 
+  const totalWindows = groups.reduce((total, group) => total + group.windows.length, 0);
+  const weighted = (read: (summary: SessionSummary) => number | null) => {
+    let sum = 0;
+    let weight = 0;
+    for (const group of groups) {
+      const value = read(group.summary);
+      if (value == null) continue;
+      sum += value * group.windows.length;
+      weight += group.windows.length;
+    }
+    return weight ? sum / weight : null;
+  };
+  const meanFocus = weighted((summary) => summary.meanFocus);
+  const meanConfidence = weighted((summary) => summary.meanConfidence);
+  const meanValid = weighted((summary) => summary.meanValidFrameRatio);
+  const dominantStates = new Set(groups.flatMap((group) => (
+    group.summary.dominantEmotion ? [group.summary.dominantEmotion] : []
+  ))).size;
+
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="text-xs text-ink-2">
-          {isMulti ? (
-            <>
-              {idList.length >= 2 ? 'Comparing selected' : 'Auto-comparing latest'}{' '}
-              <span className="font-medium text-ink-0">{groups.length}</span>{' '}
-              session{groups.length === 1 ? '' : 's'}
-            </>
-          ) : (
-            <>
-              Single session — split into{' '}
-              <span className="font-medium text-ink-0">{groups.length}</span> time slice
-              {groups.length === 1 ? '' : 's'}
-            </>
-          )}{' '}
-          · {groups.reduce((acc, g) => acc + g.windows.length, 0)} windows total
-        </div>
-        <div className="flex items-center gap-2">
+      <Section
+        id="cmp-overview"
+        title="Comparison overview"
+        description={isMulti
+          ? idList.length >= 2 ? 'Comparing selected sessions.' : 'Auto-comparing the latest sessions.'
+          : 'One session divided into consecutive time slices.'}
+        actions={
+          <>
           {!isMulti ? (
             <label className="flex items-center gap-1.5 text-xs text-ink-2">
               Slices
@@ -176,8 +186,18 @@ export function ComparisonView() {
             <Download className="size-3.5" aria-hidden="true" />
             Export
           </Button>
+          </>
+        }
+      >
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+          <Metric label={isMulti ? 'Sessions' : 'Slices'} value={groups.length} tone="info" />
+          <Metric label="Windows" value={totalWindows} tone="info" />
+          <Metric label="Dominant states" value={dominantStates} tone="info" />
+          <Metric label="Mean focus" value={meanFocus == null ? null : `${(meanFocus * 100).toFixed(0)}%`} tone="info" />
+          <Metric label="Mean confidence" value={meanConfidence == null ? null : `${(meanConfidence * 100).toFixed(0)}%`} tone="info" />
+          <Metric label="Valid frames" value={meanValid == null ? null : `${(meanValid * 100).toFixed(0)}%`} tone="info" />
         </div>
-      </div>
+      </Section>
 
       <Section id="cmp-timelines" title="Capture timelines" description="Dominant emotion per window, per group.">
         <div className="flex flex-col gap-3">
@@ -200,7 +220,7 @@ export function ComparisonView() {
       </Section>
 
       <Section id="cmp-distribution" title="Emotion distribution" description="Per-group dominant-emotion counts.">
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="flex flex-col gap-4">
           {groups.map((g) => (
             <Card key={`dist-${g.id}`}>
               <CardHeader>

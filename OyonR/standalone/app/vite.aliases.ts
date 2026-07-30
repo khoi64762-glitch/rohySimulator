@@ -27,6 +27,10 @@ export function makeAliases(appDir: string, repoRoot: string) {
       replacement: path.resolve(repoRoot, 'standalone/vendor/dynajs/index.js'),
     },
     {
+      find: 'legacy-tnaj',
+      replacement: path.resolve(repoRoot, 'standalone/vendor/tnaj/index.js'),
+    },
+    {
       find: /^legacy-tna\/(.*)$/,
       replacement: path.resolve(repoRoot, 'standalone/vendor/rohy-tna') + '/$1',
     },

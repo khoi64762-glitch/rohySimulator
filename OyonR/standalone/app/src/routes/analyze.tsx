@@ -1,86 +1,40 @@
-import {
-  createRoute,
-  Link,
-  Outlet,
-  redirect,
-  useRouterState,
-} from '@tanstack/react-router';
+import { createRoute, Outlet, redirect } from '@tanstack/react-router';
 import { rootRoute } from './root';
-import { PageHeader } from '@/components/shell/PageHeader';
-import { cn } from '@/lib/cn';
 import { analyzeSubTabs } from '@/lib/analyzeTabs';
-import { useBridge } from '@/lib/hostBridge';
 import { AffectView } from './analyze/affect';
 import { EngagementView } from './analyze/engagement';
 import { GazeView } from './analyze/gaze';
+import { PositionView } from './analyze/sensing';
+import { HeartRateView } from './analyze/heartRate';
+import { LogsView } from './analyze/logs';
+import { PatternsView } from './analyze/patterns';
 import { SequenceView } from './analyze/sequence';
+import { TypingView } from './analyze/typing';
+import { VoiceView } from './analyze/voice';
 import { ComparisonView } from './analyze/comparison';
 
 /*
- * Analyze — parent route with sub-tabs for Affect, Engagement, Gaze,
- * Sequence, Comparison. Each sub-view is in its own file under
- * src/routes/analyze/ so this stays a thin layout.
+ * Analyze — parent route. Each domain view lives in its own file under
+ * src/routes/analyze/, so this is now purely a route container.
  *
- * Embedded (<oyon-app chrome="none" | "capture-analytics">) the navigation and
- * domain tabs live in the unified EmbedHeader instead, so this layout renders
- * ONLY the active domain view — no PageHeader block, no second subtab row. The
- * standalone app renders both, unchanged.
+ * It used to render a PageHeader block plus a row of nine domain tabs. Both
+ * are gone: the domains are reachable from the single top bar's Analyze menu,
+ * standalone and embedded alike, so the layout renders only the active view.
  */
-function AnalyzeLayout() {
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const embedded = useBridge((s) => s.embedded);
-
-  if (embedded) return <Outlet />;
-
-  return (
-    <>
-      <PageHeader
-        eyebrow="Workflow · Step 4"
-        title="Analyze"
-        description="Retrospective research views. Pick a domain below; each follows the same Summary → Trend → Structure → Drill-down rhythm."
-      />
-      <div
-        className="mb-5 flex gap-1 border-b border-line"
-        role="tablist"
-        aria-label="Analyze domains"
-      >
-        {analyzeSubTabs.map((tab) => {
-          const active = pathname === tab.to;
-          return (
-            <Link
-              key={tab.to}
-              to={tab.to}
-              role="tab"
-              aria-selected={active}
-              className={cn(
-                '-mb-px border-b-2 px-3 py-2 text-sm transition-colors',
-                active
-                  ? 'border-status-info text-status-info'
-                  : 'border-transparent text-ink-2 hover:text-ink-0',
-              )}
-            >
-              {tab.label}
-            </Link>
-          );
-        })}
-      </div>
-      <Outlet />
-    </>
-  );
-}
-
 export const analyzeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/analyze',
-  component: AnalyzeLayout,
+  component: Outlet,
 });
 
 export const analyzeIndexRoute = createRoute({
   getParentRoute: () => analyzeRoute,
   path: '/',
   beforeLoad: () => {
-    // Land on the first/default domain — Emotion dynamics (route id /sequence).
-    throw redirect({ to: '/analyze/sequence' as never });
+    // Land on the first/default domain — Affect. Must track the leading entry
+    // in analyzeSubTabs: when the order changed, a stale redirect here would
+    // silently drop the user on the SECOND tab.
+    throw redirect({ to: analyzeSubTabs[0].to as never });
   },
 });
 
@@ -94,15 +48,63 @@ export const analyzeEngagementRoute = createRoute({
   path: '/engagement',
   component: EngagementView,
 });
+export const analyzeAttentionExperimentalRoute = createRoute({
+  getParentRoute: () => analyzeRoute,
+  path: '/attention-experimental',
+  beforeLoad: () => {
+    // Compatibility for saved links: attention and engagement now share one
+    // evidence screen instead of competing destinations.
+    throw redirect({ to: '/analyze/engagement' });
+  },
+});
 export const analyzeGazeRoute = createRoute({
   getParentRoute: () => analyzeRoute,
   path: '/gaze',
   component: GazeView,
 });
+// Route id kept as '/sensing' (stable deep-link) — labelled "Position".
+export const analyzeSensingRoute = createRoute({
+  getParentRoute: () => analyzeRoute,
+  path: '/sensing',
+  component: PositionView,
+});
+export const analyzeHeartRateRoute = createRoute({
+  getParentRoute: () => analyzeRoute,
+  path: '/heart-rate',
+  component: HeartRateView,
+});
+export const analyzeMonitorRoute = createRoute({
+  getParentRoute: () => analyzeRoute,
+  path: '/monitor',
+  beforeLoad: () => {
+    // Compatibility for saved links: the monitor now leads the Gaze page.
+    throw redirect({ to: '/analyze/gaze' });
+  },
+});
+export const analyzeLogsRoute = createRoute({
+  getParentRoute: () => analyzeRoute,
+  path: '/logs',
+  component: LogsView,
+});
+export const analyzePatternsRoute = createRoute({
+  getParentRoute: () => analyzeRoute,
+  path: '/patterns',
+  component: PatternsView,
+});
 export const analyzeSequenceRoute = createRoute({
   getParentRoute: () => analyzeRoute,
   path: '/sequence',
   component: SequenceView,
+});
+export const analyzeTypingRoute = createRoute({
+  getParentRoute: () => analyzeRoute,
+  path: '/typing',
+  component: TypingView,
+});
+export const analyzeVoiceRoute = createRoute({
+  getParentRoute: () => analyzeRoute,
+  path: '/voice',
+  component: VoiceView,
 });
 export const analyzeComparisonRoute = createRoute({
   getParentRoute: () => analyzeRoute,

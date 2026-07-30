@@ -89,6 +89,34 @@ export interface GazeWindow {
   zone_proportions: Record<string, number> | null;
   /** Only populated when `gaze_aois` is non-empty; otherwise null. */
   aoi_dwell_ms: Record<string, number> | null;
+  /** Number of contiguous visits to each configured AOI. */
+  aoi_entries: Record<string, number> | null;
+  /** AOI entries after the first visit. */
+  aoi_revisits: Record<string, number> | null;
+  /** Milliseconds from window start until each AOI was first reached. */
+  aoi_time_to_first_ms: Record<string, number | null> | null;
+  /** Direct contiguous transitions, keyed as `from→to`. */
+  aoi_transitions: Record<string, number> | null;
+  aoi_transition_count: number | null;
+  /** Normalized Shannon entropy of observed AOI transition types, [0, 1]. */
+  aoi_transition_entropy: number | null;
+  /** Coarse I-DT fixation metrics; null when observed sampling is below the gate. */
+  fixation_count: number | null;
+  fixation_duration_ms_total: number | null;
+  fixation_duration_ms_mean: number | null;
+  fixation_duration_ms_median: number | null;
+  fixation_duration_ms_max: number | null;
+  /** Sum of distances between consecutive coarse fixation centroids. */
+  scanpath_length: number | null;
+  fixation_sampling_adequate: boolean;
+  fixation_algorithm: 'idt-coarse-v1';
+  fixation_min_duration_ms: number;
+  fixation_dispersion_threshold: number;
+  observed_sample_interval_ms: number | null;
+  observed_sample_rate_hz: number | null;
+  max_observed_sample_gap_ms: number | null;
+  timing_source: 'timestamps' | 'fallback';
+  off_screen_episode_count: number;
   calibration_age_ms: number | null;
   calibration_quality: number | null;
   /**
@@ -119,7 +147,7 @@ export class GazeSmoother {
 export interface GazeAggregatorOptions {
   /** Window duration in ms. Default 10000. */
   windowMs?: number;
-  /** ms credited per in-AOI sample for `aoi_dwell_ms`. Default 33. */
+  /** Fallback dwell interval when timestamps are unavailable. Default 33. */
   sampleIntervalMs?: number;
   /** 3 (named 9 zones) or ≥4 (indexed r<n>c<n>). Default 3. */
   zoneGrid?: number;
@@ -129,6 +157,14 @@ export interface GazeAggregatorOptions {
   dropOffScreen?: boolean;
   /** Model version string emitted in the window payload. */
   modelVersion?: string;
+  /** Coarse fixation minimum duration. Default 150 ms. */
+  fixationMinDurationMs?: number;
+  /** I-DT bounding-box dispersion threshold in normalized screen units. Default 0.08. */
+  fixationDispersionThreshold?: number;
+  /** Below this observed cadence fixation metrics are null. Default 8 Hz. */
+  minFixationSampleRateHz?: number;
+  /** Minimum callback-gap threshold that breaks sequences. Default 250 ms. */
+  maxSampleGapMs?: number;
 }
 
 export interface GazeCalibrationMeta {

@@ -1,0 +1,130 @@
+// Gate contract: when host-driven signal capture may run, and when it must
+// not. Both directions matter — a gate stuck closed loses data silently, a
+// gate stuck open sends windows the server will drop as consent_blocked.
+
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { renderHook, waitFor, act } from '@testing-library/react';
+
+const apiFetch = vi.fn();
+vi.mock('../../services/apiClient', () => ({ apiFetch: (...a) => apiFetch(...a) }));
+vi.mock('./clientLogger', () => ({ oyonClientLog: vi.fn() }));
+
+const { useOyonSignalGate } = await import('./useOyonSignalGate.js');
+const { resetSessionConsentCache } = await import('./ensureSessionConsent.js');
+
+const RUNTIME = { typing_enabled: true, interaction_enabled: false, discourse_enabled: false, ai_assist_enabled: false };
+
+function mockApi({
+    enabled = true,
+    consentVersion = 'oyon-consent-v2',
+    runtime = RUNTIME,
+    onboarding = { oyon_consent: true, oyon_consent_version: 'oyon-consent-v2' },
+    consentPost = () => Promise.resolve({}),
+} = {}) {
+    apiFetch.mockImplementation((url, opts) => {
+        if (url === '/addons/oyon/config') return Promise.resolve({ enabled, consent_version: consentVersion, runtime });
+        if (url === '/users/preferences') return Promise.resolve({ onboarding_settings: onboarding });
+        if (url === '/addons/oyon/consent' && opts?.method === 'POST') return consentPost();
+        return Promise.resolve({});
+    });
+}
+
+const consentPosts = () => apiFetch.mock.calls.filter(([u, o]) => u === '/addons/oyon/consent' && o?.method === 'POST');
+
+beforeEach(() => {
+    apiFetch.mockReset();
+    resetSessionConsentCache();
+});
+
+describe('useOyonSignalGate', () => {
+    it('opens once the tenant, the consent and the session all agree', async () => {
+        mockApi();
+        const { result } = renderHook(() => useOyonSignalGate('s1'));
+        await waitFor(() => expect(result.current.persist).toBe(true));
+        expect(result.current.enabled).toBe(true);
+        expect(result.current.runtimeConfig).toEqual(RUNTIME);
+        expect(consentPosts()).toHaveLength(1);
+    });
+
+    // v1 was camera-only. A learner still on it consented to affect capture,
+    // not to keystroke dynamics.
+    it('stays shut for a learner still on the camera-only contract', async () => {
+        mockApi({ onboarding: { oyon_consent: true, oyon_consent_version: 'oyon-consent-v1' } });
+        const { result } = renderHook(() => useOyonSignalGate('s1'));
+        await waitFor(() => expect(apiFetch).toHaveBeenCalled());
+        await act(async () => {});
+        expect(result.current.enabled).toBe(false);
+        expect(consentPosts()).toHaveLength(0);
+    });
+
+    it.each([
+        ['the tenant runs no Oyon', { enabled: false }],
+        ['the learner declined', { onboarding: { oyon_consent: false } }],
+        ['no modality is enabled', { runtime: { typing_enabled: false } }],
+    ])('stays shut when %s', async (_label, override) => {
+        mockApi(override);
+        const { result } = renderHook(() => useOyonSignalGate('s1'));
+        await waitFor(() => expect(apiFetch).toHaveBeenCalled());
+        await act(async () => {});
+        expect(result.current.enabled).toBe(false);
+    });
+
+    // Regression lock: the server gates ingest on the consent ROW. A failed
+    // POST must read as "do not send", never as "fine" — otherwise every
+    // window is silently dropped server-side with no client symptom.
+    it('does not persist when the consent POST fails', async () => {
+        mockApi({ consentPost: () => Promise.reject(new Error('offline')) });
+        const { result } = renderHook(() => useOyonSignalGate('s1'));
+        await waitFor(() => expect(result.current.enabled).toBe(true));
+        await act(async () => {});
+        expect(result.current.persist).toBe(false);
+    });
+
+    it('re-confirms the row for a new session', async () => {
+        mockApi();
+        const { result, rerender } = renderHook(sid => useOyonSignalGate(sid), { initialProps: 's1' });
+        await waitFor(() => expect(result.current.persist).toBe(true));
+
+        rerender('s2');
+        // Not yet confirmed for s2 — the old session's row must not carry over.
+        expect(result.current.persist).toBe(false);
+        await waitFor(() => expect(result.current.persist).toBe(true));
+        expect(consentPosts()).toHaveLength(2);
+    });
+
+    it('survives a config probe that fails', async () => {
+        apiFetch.mockRejectedValue(new Error('offline'));
+        const { result } = renderHook(() => useOyonSignalGate('s1'));
+        await waitFor(() => expect(apiFetch).toHaveBeenCalled());
+        expect(result.current.enabled).toBe(false);
+        expect(result.current.runtimeConfig).toBeNull();
+    });
+});
+
+describe('ensureSessionConsent', () => {
+    // POST /addons/oyon/consent is a plain INSERT, so two callers racing on
+    // mount would write two audit rows for one session.
+    it('posts once per session however many callers ask', async () => {
+        mockApi();
+        const a = renderHook(() => useOyonSignalGate('s1'));
+        const b = renderHook(() => useOyonSignalGate('s1'));
+        await waitFor(() => expect(a.result.current.persist).toBe(true));
+        await waitFor(() => expect(b.result.current.persist).toBe(true));
+        expect(consentPosts()).toHaveLength(1);
+    });
+
+    // A cached rejection would strand the session with no row forever.
+    it('lets a later caller retry after a failure', async () => {
+        let attempt = 0;
+        mockApi({ consentPost: () => (++attempt === 1 ? Promise.reject(new Error('offline')) : Promise.resolve({})) });
+
+        const first = renderHook(() => useOyonSignalGate('s1'));
+        await waitFor(() => expect(consentPosts()).toHaveLength(1));
+        await act(async () => {});
+        expect(first.result.current.persist).toBe(false);
+
+        const second = renderHook(() => useOyonSignalGate('s1'));
+        await waitFor(() => expect(second.result.current.persist).toBe(true));
+        expect(consentPosts()).toHaveLength(2);
+    });
+});

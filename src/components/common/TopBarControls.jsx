@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { Settings, ChevronDown, User, LogOut, Activity, HelpCircle, Check, BookOpen, Stethoscope, ListChecks } from 'lucide-react';
+import { Settings, ChevronDown, User, LogOut, Activity, HelpCircle, Check, BookOpen, Stethoscope, ListChecks, ScanEye } from 'lucide-react';
 import { LANGUAGES } from '../../i18n/languages';
 
 // The single persistent top-bar menu: ONE trigger (gear + current-language
@@ -46,6 +46,7 @@ export default function TopBarControls({
    onOpenHelp,
    onOpenLessons,
    onOpenEmotionAnalytics,
+   onOpenOyonDashboard,
    onOpenCaseAnalytics,
    onOpenSetup,
    onLogout,
@@ -189,6 +190,21 @@ export default function TopBarControls({
                            >
                               <Activity className="w-4 h-4" />
                               {t('emotion_analytics')}
+                           </button>
+                        )}
+                        {/* The named Oyon dashboard: Oyon's OWN Analyze
+                            dashboards over server data. Sits beside Emotion
+                            Analytics (Rohy's own dashboard) rather than
+                            replacing it, and shares its educator+ gate. */}
+                        {canSeeOyonAnalytics && (
+                           <button
+                              type="button"
+                              onClick={() => { onOpenOyonDashboard?.(); closeAll(); }}
+                              role="menuitem"
+                              className="rohy-topbar-menu-item"
+                           >
+                              <ScanEye className="w-4 h-4" />
+                              {t('oyon_dashboard')}
                            </button>
                         )}
                         {isAdminUser && (

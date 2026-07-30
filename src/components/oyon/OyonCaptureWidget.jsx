@@ -8,6 +8,7 @@ import { elementSettings, persistBody, OYON_ASSET_BASE } from './captureBridge';
 import { getAois, onAois } from './screenAois';
 import { publishAffectSample, publishAffectWindows, clearAffect } from '../../utils/latestAffect';
 import { parseOnboardingSettings } from '../../utils/onboardingSettings';
+import { ensureSessionConsent } from './ensureSessionConsent';
 
 export const VALENCE_GRAPH_PREF_KEY = 'oyon.showValenceGraph';
 export const CONSENT_PREF_KEY = 'oyon.defaultConsent';
@@ -95,22 +96,13 @@ export default function OyonCaptureWidget({ sessionId, caseId, room, onOpenAnaly
          persistGateRef.current = true;
          return;
       }
-      try {
-         await apiFetch('/addons/oyon/consent', {
-            method: 'POST',
-            json: { session_id: sid, consent_granted: true, source_page: window.location.pathname },
-         });
-         consentSessionRef.current = sid;
-         persistGateRef.current = true;
-         setPersistOk(true);
-         oyonClientLog('info', 'consent recorded', { session_id: sid });
-      } catch (e) {
-         persistGateRef.current = false;
-         setPersistOk(false);
-         oyonClientLog('warn', 'consent POST failed; capture will not persist', {
-            session_id: sid, error: e?.message || String(e),
-         });
-      }
+      // Shared with the host-driven signal capture, which needs the same row
+      // and must not depend on the camera having started. The helper posts at
+      // most once per session, so both callers can ask freely.
+      const recorded = await ensureSessionConsent(sid, { sourcePage: window.location.pathname });
+      if (recorded) consentSessionRef.current = sid;
+      persistGateRef.current = recorded;
+      setPersistOk(recorded);
    }, []);
 
    useEffect(() => {
@@ -229,6 +221,10 @@ export default function OyonCaptureWidget({ sessionId, caseId, room, onOpenAnaly
             if (!host || host.querySelector('oyon-app')) return;
             const el = document.createElement('oyon-app');
             el.setAttribute('chrome', 'capture');
+            // Preserve Rohy's live-affect feed at the camera source cadence.
+            // Oyon v3 also supports throttled/off; source is the v2-compatible
+            // behavior this host intentionally depends on.
+            el.setAttribute('sample-events', 'source');
             // Training-free geometric gaze — Rohy only consumes zone/AOI
             // aggregates, so the click-calibrated WebGazer default (which
             // emits NOTHING until trained) would read as "gaze is broken".

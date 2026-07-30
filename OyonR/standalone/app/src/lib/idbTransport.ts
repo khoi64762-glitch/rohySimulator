@@ -17,7 +17,7 @@ import { isEmotionWindowLike, normalizeEmotionWindow } from './windowTime';
  * site stays clean while the upstream `.d.ts` catches up.
  */
 
-interface IdbStoreRuntime {
+export interface IdbStoreRuntime {
   bulkAdd(storeName: string, records: unknown[]): Promise<unknown>;
   getAll(storeName: string, options?: { limit?: number }): Promise<unknown[]>;
   clear(storeName: string): Promise<unknown>;

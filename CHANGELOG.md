@@ -9,6 +9,222 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.11] — 2026-07-30
+
+### Fixed
+
+- **The Oyon dashboard no longer goes blank after a page refresh.** It used to
+  render on the way in and then show "No stored windows yet" on reload. The
+  embedded Oyon viewer only ever displays one session at a time — a deliberate
+  privacy boundary — and with no session selected it shows nothing at all. The
+  dashboard now names the session it is showing and offers a picker for the
+  others, so a refresh lands on real data instead of an empty panel.
+- The same fault meant only the live session was ever reachable; every earlier
+  session in the fetched pool was invisible. All of them can now be opened.
+
+## [2.9.10] — 2026-07-30
+
+### Added
+
+- An end-to-end test covering the whole signal path — real capture engine, real
+  window shapes, real validation — so a break in the joins between capture and
+  storage is caught before it reaches a learner.
+
+## [2.9.9] — 2026-07-30
+
+### Added
+
+- **Typing rhythm is now actually recorded** for tenants that enabled it: pauses,
+  bursts, revisions and whether a message was sent or abandoned — never the
+  words themselves. Consented learners only.
+- Interaction signals (pointer, scroll, focus, idle) record alongside it.
+
+### Fixed
+
+- Signal capture no longer depends on the camera being switched on. Consent for a
+  session is registered once and shared, so a tenant running Oyon without the
+  camera gets typing analytics instead of silence.
+
+## [2.9.8] — 2026-07-30
+
+### Added
+
+- The plumbing that carries the new Oyon signals to the server, loaded only when
+  a tenant has enabled them and the learner has consented.
+
+### Changed
+
+- The Oyon signal engine is loaded on demand, keeping it out of the main
+  application bundle: startup is unchanged for everyone.
+- Excluded an unused inference runtime from the browser bundle, cutting about
+  48 MB from the shipped build and the container image. Nothing that runs in the
+  browser needed it — the same runtime is already served alongside Oyon's models.
+
+## [2.9.7] — 2026-07-30
+
+### Added
+
+- **A consent prompt for the widened capture scope.** Learners who previously
+  agreed to camera-based emotion capture are now asked once, plainly, about the
+  additional signals: typing rhythm (pauses and bursts, never the words),
+  on-screen interaction, and the style of the messages they send. Saying no
+  leaves their existing emotion-capture choice untouched, and either choice can
+  be changed later under Settings → Oyon.
+- The consent version a learner actually saw is recorded when they answer, so a
+  future change of scope asks again rather than assuming.
+
+### Changed
+
+- Learners who declined are not asked again, and learners who have never
+  answered continue to see the first-run consent card rather than this prompt.
+
+## [2.9.6] — 2026-07-30
+
+### Added
+
+- **Consent version 2, covering the non-camera signals.** Typing dynamics,
+  interaction telemetry, discourse analytics and AI-assistance cycles are new
+  categories of personal data rather than more camera-derived affect, so they
+  are not covered by the original consent. Rohy now records **which consent
+  version each learner actually accepted**, and refuses to store any of the new
+  signals for a learner whose accepted version predates it. Camera-derived
+  signals are unaffected and continue to work under the original consent.
+- Administrators get switches for typing, interaction, discourse and
+  AI-assistance under Settings → Oyon → Signals. They stay dormant until a
+  learner accepts the new consent, whatever the switches say.
+
+### Changed
+
+- Tenants still using the original default consent version are moved to the new
+  one. An administrator who set a custom consent version keeps it.
+
+### Security
+
+- The consent check runs on the server at ingest, not only as a prompt in the
+  browser, so an out-of-date client cannot record signals a learner never agreed
+  to. A client that does not state which consent version it displayed is treated
+  as having shown the original one, and so cannot grant itself the new scope.
+
+## [2.9.5] — 2026-07-30
+
+### Added
+
+- **Administrator control over Oyon's signal families.** Settings → Oyon now has
+  a Signals section with a switch per family: facial signals, eye/engagement,
+  gaze, illumination, learner heart rate, learner respiration, dynamical
+  features, body posture, and whether signals travel on one window or their own.
+  These signals were already being recorded by the capture component's own
+  defaults, and the platform previously had no way to switch any of them off —
+  this closes that gap, so the settings now reflect what actually runs.
+- Heart rate and respiration are labelled explicitly as camera-derived research
+  estimates about the **learner** — never clinical measurements, and unrelated to
+  the simulated patient's vital signs.
+
+### Changed
+
+- Body posture is **off by default**. Its pose model is not bundled with rohy, so
+  switching it on makes the browser download the model from an external CDN,
+  which breaks the guarantee that air-gapped installations never reach the
+  internet. The toggle is labelled accordingly and stays available for
+  administrators who accept that trade-off.
+
+## [2.9.4] — 2026-07-30
+
+### Added
+
+- **A named Oyon dashboard for educators and administrators.** A new full-page
+  surface, reachable from the top-bar menu, that renders Oyon's own Analyze
+  dashboards over the platform's stored windows. It sits beside the existing
+  Emotion Analytics view rather than replacing it: Emotion Analytics remains
+  Rohy's own dashboard, while this surface shows the engine's, so newly enabled
+  signals appear here as the engine gains support for them. Access uses the
+  existing Oyon permission — educator or administrator, subject to the
+  per-role tenant setting — and all authorisation stays on the server.
+- Window-shared signal blocks captured under Oyon 3 (facial, posture, heart
+  rate, respiration, illumination, capture quality) are now passed through to
+  the dashboards, so the new signals can be displayed as they start arriving.
+
+### Changed
+
+- The German, Spanish, Italian, Finnish and Swedish strings for the new
+  dashboard are provisional and awaiting native review.
+
+## [2.9.3] — 2026-07-30
+
+### Fixed
+
+- Regenerated the `en-XA` pseudo-locale for `authoring_config`, which had been
+  stale since the 2.7.x registration/approval-queue work: 25 keys existed in
+  `src/locales/en/authoring_config.json` with no pseudo counterpart, so
+  `?pseudo=1` rendered them as plain English and could not flag them as
+  translated-but-unverified or catch truncation.
+
+## [2.9.2] — 2026-07-30
+
+### Added
+
+- **Storage and a read API for Oyon 3's new signal modalities** — the groundwork
+  that makes enabling them safe, landed before any capture flag is turned on.
+  Migration `0039` adds an `oyon_signal_windows` table for standalone
+  modality-only windows and host-bounded episodes (typing, voice, interaction,
+  discourse, ai-assist), plus six nullable columns on `oyon_emotion_records` for
+  the blocks that ride on the emotion window. New `GET /addons/oyon/
+  signal-windows` sits behind the existing Oyon read policy (role + per-role
+  tenant flag, tenant scoping, redaction) and reports which modalities hold data.
+
+### Fixed
+
+- **Oyon 3 window blocks were discarded on ingest.** Every `*_window_share`
+  setting defaults on, so `facial`, `posture`, `heart_rate`, `respiration`,
+  `illumination` and `capture_quality` arrive as extra keys on the ordinary
+  emotion window — and `insertEmotionRecord` had no columns for them, so they
+  were dropped without a trace. This is the same defect migration `0028` records
+  about v1 discarding `gaze` and `engagement`, repeated for the v3 signals.
+- **A standalone modality window failed its whole batch.** With
+  `*_window_share` off (and on stop/flush) Oyon emits `facial_only` /
+  `posture_only` / `heart_rate_only` events that carry no emotion data and keep
+  `valid_frames` inside the modality block. Routed into `oyon_emotion_records`
+  that bound NULL into a NOT NULL column, so the insert threw and the entire
+  batch was rejected — losing the emotion windows travelling with it.
+
+### Changed
+
+- Ingest now splits on Oyon's own `isModalityOnlyEvent` seam, so emotion windows
+  keep their existing path unchanged. `inserted` / `skipped` still count emotion
+  records only; new modality counts are reported separately as
+  `signals_inserted` / `signals_skipped`. Existing dashboards, queries and
+  response shapes are untouched — the new rows live in a separate table that
+  legacy SQL cannot address.
+
+## [2.9.1] — 2026-07-30
+
+### Fixed
+
+- Regenerated `docs/reference/cli/index.md`, which had drifted since 2.9.0: the
+  release added `scripts/verify-oyon-install.mjs` and the `verify:oyon` script
+  (and chained it into `setup:oyon`) without regenerating the CLI reference, so
+  `npm run docs:check` failed on a clean 2.9.0 checkout. No workflow runs on
+  release branches, so nothing caught it.
+
+## [2.9.0] — 2026-07-29
+
+### Changed
+
+- Upgraded the isolated 2.9 release line from vendored Oyon 2.2.0 to the
+  immutable Oyon 3.3.2 release, retaining Rohy's existing capture, consent,
+  same-origin asset, session identity, and database integration contracts.
+- Added Oyon v3's sensing, typing, voice, interaction, discourse, and analytics
+  modules and its versioned `tnaj` bundle without enabling new capture
+  modalities by default.
+- Pinned Oyon updates to version 3.3.2 and narrowed runtime-asset preservation
+  so future syncs refresh versioned source vendors without deleting downloaded
+  MediaPipe, ONNX Runtime, or model assets.
+- Hardened fresh installs with atomic, checksummed model downloads and a
+  fail-fast verifier covering peer-version runtime copies, models, workers,
+  WASM, the multi-file element artifact, and Rohy's persistent sync overlays.
+- Rohy now sends the explicit `oyon-window-batch-v4` envelope and requests
+  source-rate live sample events from the v3 web component.
+
 ## [2.8.0] — 2026-07-29
 
 This is the first published release of the development line previously

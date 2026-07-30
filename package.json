@@ -1,7 +1,7 @@
 {
   "name": "rohy",
   "private": true,
-  "version": "2.8.0",
+  "version": "2.9.11",
   "description": "Virtual Patient Simulation Platform for Medical Education",
   "author": {
     "name": "Mohammed Saqr",
@@ -15,9 +15,11 @@
     "client": "vite",
     "server": "node --watch server/server.js",
     "oyon:update": "bash scripts/update-oyonr.sh",
-    "setup:oyon": "bash OyonR/scripts/download-models.sh",
+    "setup:oyon": "bash OyonR/scripts/download-models.sh && npm run verify:oyon",
+    "verify:oyon": "node scripts/verify-oyon-install.mjs",
     "install:piper": "bash server/scripts/install-piper.sh",
-    "postinstall": "bash OyonR/scripts/download-models.sh 2>/dev/null || echo '[oyon] model bundles not downloaded — run: npm run setup:oyon (needs curl + network)'",
+    "postinstall": "npm run setup:oyon",
+    "prebuild": "npm run verify:oyon",
     "production": "NODE_ENV=production node server/server.js",
     "build": "{ npm run docs:build || echo '[build] docs:build failed — continuing without the docs site'; } && vite build --base=/rohy/ && rm -rf frontend && mkdir -p frontend && cp -rf dist/. frontend/",
     "lint": "eslint .",

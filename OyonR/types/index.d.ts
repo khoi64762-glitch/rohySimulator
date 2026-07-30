@@ -66,6 +66,64 @@ export {
   normalizeWebGazerPrediction,
 } from './gaze';
 
+export type { DomRectLike, ScreenGeometry, DomAoiOptions } from './gaze-aoi';
+export { domRectToGazeAoi, elementToGazeAoi } from './gaze-aoi';
+
+export type {
+  TypingCompositionState,
+  TypingRecordEvent,
+  TypingPauseHistogram,
+  TypingMetrics,
+  TypingQualityThresholds,
+  TypingQuality,
+  TypingTarget,
+  TypingWindow,
+  TypingAggregatorOptions,
+  TypingStartArgs,
+  TypingFinalizeArgs,
+  TypingComposerElement,
+  TypingAggregatorLike,
+  TypingGraphemeSegmenter,
+  TypingComposerAdapterOptions,
+  TypingGraphemeMode,
+  TypingComposerAdapter,
+} from './typing';
+
+export { TypingAggregator, createTypingComposerAdapter } from './typing';
+
+export type {
+  SignalEventSource,
+  SignalEventModality,
+  SignalEventTarget,
+  SignalEventContext,
+  SignalEventInput,
+  SignalEvent,
+  SignalEventLongRow,
+  SignalEventLongFormatOptions,
+  SignalEventSequenceOptions,
+  SignalEventLogOptions,
+} from './signal-events';
+
+export { SignalEventLog } from './signal-events';
+
+export type {
+  SignalCaptureModality,
+  SignalCaptureContext,
+  SignalCaptureStore,
+  SignalCaptureTransport,
+  SignalWindowRow,
+  SignalCaptureStats,
+  SignalCaptureTypingHandle,
+  SignalCaptureVoiceHandle,
+  SignalCaptureInteractionHandle,
+  SignalCaptureDiscourseHandle,
+  SignalCaptureAiAssistHandle,
+  SignalCaptureOptions,
+  SignalCapture,
+} from './signal-capture';
+
+export { createSignalCapture } from './signal-capture';
+
 import type {
   GazeWindow as _GazeWindow,
   GazeSmoother as _GazeSmoother,
@@ -79,6 +137,8 @@ export interface OyonSettings {
   aggregate_window_ms: number;
   min_valid_frames: number;
   capture_mode: CaptureMode;
+  capture_quality_enabled?: boolean;
+  capture_quality_window_share?: boolean;
   smoothing_alpha?: number;
 
   // Eye-tracking / engagement settings (added in 0.3.0).
@@ -101,12 +161,93 @@ export interface OyonSettings {
   gaze_zone_grid?: number;
   gaze_aois?: Array<{ id: string; x: number; y: number; width: number; height: number }>;
   gaze_drop_off_screen?: boolean;
+  gaze_fixation_min_duration_ms?: number;
+  gaze_fixation_dispersion_threshold?: number;
+  gaze_fixation_min_sample_rate_hz?: number;
+  gaze_max_sample_gap_ms?: number;
+
+  // Facial signals — head pose + action units (added in 3.0.0). Free-rides on
+  // the face result; no extra model.
+  facial_signals_enabled?: boolean;
+  facial_signals_window_share?: boolean;
+  facial_frontal_half_angle_deg?: number;
+
+  // Body posture — MediaPipe PoseLandmarker (added in 3.0.0).
+  posture_tracking_enabled?: boolean;
+  posture_window_share?: boolean;
+  posture_model?: 'lite' | 'full' | 'heavy';
+
+  // Remote heart rate — rPPG (added in 3.0.0). Research-grade trend, not clinical.
+  /** Breathing rate from the 0.1-0.5 Hz band of the same ROI colour stream.
+   *  Keeps the ROI sampler alive even when heart_rate_enabled is false. */
+  respiration_enabled?: boolean;
+  respiration_window_share?: boolean;
+  respiration_buffer_seconds?: number;
+  respiration_min_window_seconds?: number;
+  respiration_min_confidence?: number;
+  respiration_rgb_corroboration?: boolean;
+  respiration_require_rgb_corroboration?: boolean;
+  respiration_min_sample_rate_hz?: number;
+  respiration_max_sample_gap_ms?: number;
+  /** Ambient lighting quality — the covariate for every other signal. On by default. */
+  illumination_enabled?: boolean;
+  illumination_window_share?: boolean;
+  heart_rate_enabled?: boolean;
+  heart_rate_window_share?: boolean;
+  heart_rate_buffer_seconds?: number;
+  heart_rate_min_window_seconds?: number;
+  heart_rate_roi?: 'forehead' | 'cheeks' | 'face';
+  heart_rate_method?: 'pos' | 'green';
+  heart_rate_target_fps?: number;
+  heart_rate_min_confidence?: number;
+  heart_rate_max_head_movement_deg?: number;
+  heart_rate_anomaly_filter?: boolean;
+  heart_rate_harmonic_fold?: boolean;
+  heart_rate_fold_tolerance?: number;
+  heart_rate_mad_h?: number;
+  heart_rate_mad_floor_bpm?: number;
+  heart_rate_confidence_weighted?: boolean;
+  heart_rate_min_weight?: number;
+  heart_rate_max_slew_bpm_per_s?: number;
+  heart_rate_tracker_windows?: number;
+  heart_rate_tracker_min_estimates?: number;
+  heart_rate_tracker_reset_bpm?: number;
+  heart_rate_tracker_reset_windows?: number;
+  heart_rate_plausible_min_bpm?: number;
+  heart_rate_plausible_max_bpm?: number;
+  heart_rate_implausible_corroboration?: number;
+
+  // Typing / composer analytics — keystroke timing on a host-registered
+  // composer element (added in 3.1.0). Off by default like the other
+  // opt-in modalities above: cost and host opt-in, not privacy.
+  typing_enabled?: boolean;
+  typing_pause_buckets?: number[];
+  typing_burst_threshold_ms?: number;
+  typing_max_intervals?: number;
+
+  // Non-camera signal modalities orchestrated by `createSignalCapture`
+  // (added in 3.1.0). Off by default: cost and host opt-in, not privacy.
+  /** Page-wide pointer/click/scroll/selection/focus analytics. */
+  interaction_enabled?: boolean;
+  /** Per-sentence speech acts + text metrics on host-supplied message text. */
+  discourse_enabled?: boolean;
+  /** Host-reported AI suggestion cycle (request/shown/accept/reject/dismiss). */
+  ai_assist_enabled?: boolean;
+  /** Voice-turn analytics; condition 1 of the microphone activation gate. */
+  voice_enabled?: boolean;
 
   [key: string]: unknown;
 }
 
 export const OYON_DEFAULT_SETTINGS: OyonSettings;
 export const OYON_SETTINGS_PROFILES: Record<string, OyonSettings>;
+
+export {
+  OYON_VERSION,
+  OYON_HOST_CONTRACT_VERSION,
+  OYON_WINDOW_BATCH_SCHEMA_VERSION,
+  OYON_SUPPORTED_WINDOW_BATCH_SCHEMA_VERSIONS,
+} from './version';
 
 export function createOyonSettings(input?: Partial<OyonSettings>): OyonSettings;
 export function normalizeOyonSettings(input?: Partial<OyonSettings>): OyonSettings;
@@ -136,7 +277,122 @@ export interface EmotionWindow {
   /** Optional screen-point gaze block; present only when `gaze_tracking_enabled` is set
    *  AND calibration completed (when `gaze_calibration_required` is true). */
   gaze?: _GazeWindow | null;
+  /** Optional facial-signals block (head pose + action units); present only
+   *  when `facial_signals_enabled` is set. */
+  facial?: FacialSignalWindow | null;
+  /** Optional body-posture block; present only when `posture_tracking_enabled` is set. */
+  posture?: PostureWindow | null;
+  /** Optional respiration block; present only when `respiration_enabled` is set. */
+  respiration?: Record<string, unknown>;
+  /** Optional lighting-quality block; present unless `illumination_enabled` is false. */
+  illumination?: Record<string, unknown>;
+  /** Optional rPPG heart-rate block; present only when `heart_rate_enabled` is set. */
+  heart_rate?: HeartRateWindow | null;
+  /** Privacy-safe actual camera settings and decoded-frame timing. */
+  capture_quality?: CameraDiagnostics | null;
   [key: string]: unknown;
+}
+
+export interface HeadPose {
+  pitch_deg: number;
+  yaw_deg: number;
+  roll_deg: number;
+  /** Row-major 3×3 rotation entries [r00,r01,r02,r10,r11,r12,r20,r21,r22]. */
+  rotation: number[];
+}
+
+export interface FacialSignals {
+  head_pose: HeadPose | null;
+  facing_screen: boolean | null;
+  action_units: Record<string, number>;
+  blendshapes: Record<string, number>;
+  valid: boolean;
+  ts_ms: number;
+}
+
+export interface FacialSignalWindow {
+  window_start: string;
+  window_end: string;
+  duration_ms: number;
+  total_frames: number;
+  valid_frames: number;
+  valid_frame_ratio: number;
+  head_pose_mean: { pitch_deg: number; yaw_deg: number; roll_deg: number } | null;
+  head_pose_std: { pitch_deg: number; yaw_deg: number; roll_deg: number } | null;
+  head_movement_deg: number | null;
+  facing_screen_ratio: number | null;
+  action_units_mean: Record<string, number> | null;
+  blendshapes_mean: Record<string, number> | null;
+  model_version: string;
+}
+
+export interface PostureFeatures {
+  shoulder_tilt_deg: number | null;
+  torso_lean_deg: number | null;
+  head_lateral_norm: number | null;
+  head_above_norm: number | null;
+  shoulder_width_norm: number | null;
+  upper_visibility: number | null;
+  valid: boolean;
+  ts_ms: number;
+}
+
+export interface PostureWindow {
+  window_start: string;
+  window_end: string;
+  duration_ms: number;
+  total_frames: number;
+  valid_frames: number;
+  valid_frame_ratio: number;
+  postural_sway_deg: number | null;
+  model_version: string;
+  [metricMeanOrStd: string]: number | string | null;
+}
+
+export interface HeartRateEstimate {
+  bpm: number;
+  snr: number | null;
+  confidence: number;
+  fs: number;
+  n_samples: number;
+  /** Seconds of signal this BPM integrates over — it is not instantaneous. */
+  window_seconds: number;
+  method: 'pos' | 'green';
+}
+
+export interface HeartRateWindow {
+  window_start: string;
+  window_end: string;
+  duration_ms: number;
+  total_frames: number;
+  valid_frames: number;
+  valid_frame_ratio: number;
+  bpm_mean: number | null;
+  bpm_median: number | null;
+  /** Anomaly-filtered central BPM within this window (fold octaves → Hampel/MAD → weighted mean). */
+  bpm_robust: number | null;
+  /** Cross-window slew-limited HR — the stable number to display. */
+  bpm_tracked: number | null;
+  /** True when the slew limit clamped this window's move (implausible inter-window flip). */
+  slew_clamped?: boolean;
+  bpm_std: number | null;
+  bpm_last: number | null;
+  /** Anomaly-filter accounting for bpm_robust. */
+  anomaly?: {
+    folded: number;
+    dropped: number;
+    kept: number;
+    total: number;
+    corrected_fraction: number;
+  };
+  snr_mean: number | null;
+  confidence_mean: number | null;
+  /** Integration window (s) of the last estimate — distinct from the emotion window. */
+  analysis_window_seconds: number | null;
+  /** How many independent (~1 Hz throttled) BPM estimates the mean averages. */
+  distinct_estimates: number;
+  method: 'pos' | 'green' | null;
+  model_version: string;
 }
 
 export interface EyeSampleSnapshot {
@@ -150,6 +406,14 @@ export interface EyeSampleSnapshot {
   ts_ms: number;
 }
 
+export interface HeartRateStatus {
+  ready: boolean;
+  progress: number;
+  buffered_seconds: number;
+  sample_rate_hz: number;
+  reason: 'insufficient_samples' | 'insufficient_window' | 'low_sample_rate' | 'no_stable_rate' | null;
+}
+
 export interface EmotionRuntimeEvents {
   status: (payload: { state: string }) => void;
   error: (err: unknown) => void;
@@ -158,6 +422,13 @@ export interface EmotionRuntimeEvents {
     face?: unknown;
     prediction?: unknown;
     eye?: EyeSampleSnapshot | null;
+    facial?: FacialSignals | null;
+    posture?: PostureFeatures | null;
+    heart_rate?: HeartRateEstimate | null;
+    heart_rate_status?: HeartRateStatus | null;
+    respiration?: RespirationEstimate | null;
+    respiration_status?: ReturnType<RespirationEstimator['status']> | null;
+    illumination?: unknown;
     durationMs?: number;
   }) => void;
 }
@@ -192,6 +463,15 @@ export interface EmotionRuntimeOptions {
   engagementAggregator?: _EngagementAggregator;
   gazeSmoother?: _GazeSmoother;
   gazeAggregator?: _GazeAggregator;
+  facialExtractor?: { extract(face: unknown): FacialSignals | null };
+  facialAggregator?: FacialSignalAggregator;
+  poseTracker?: MediaPipePoseTracker;
+  pose?: Record<string, unknown>;
+  postureExtractor?: { extract(pose: unknown): PostureFeatures | null };
+  postureAggregator?: PostureAggregator;
+  roiSampler?: (video: unknown, face: unknown) => { r: number; g: number; b: number } | null;
+  heartRateEstimator?: HeartRateEstimator;
+  heartRateAggregator?: HeartRateAggregator;
 }
 
 export class EmotionRuntime {
@@ -204,6 +484,9 @@ export class EmotionRuntime {
   eyeEnabled: boolean;
   gazeEnabled: boolean;
   gazeCalibrated: boolean;
+  facialEnabled: boolean;
+  postureEnabled: boolean;
+  heartRateEnabled: boolean;
   on<K extends keyof EmotionRuntimeEvents>(type: K, handler: EmotionRuntimeEvents[K]): () => void;
   init(): Promise<void>;
   start(): Promise<void>;
@@ -226,6 +509,42 @@ export class CameraController {
   start(): Promise<HTMLVideoElement>;
   stop(): void;
   getStream(): MediaStream | null;
+  getVideoTrack(): MediaStreamTrack | null;
+  getSettings(): Record<string, unknown> | null;
+  getCapabilities(): Record<string, unknown> | null;
+  getConstraints(): Record<string, unknown> | null;
+  applyVideoConstraints(constraints?: MediaTrackConstraints): Promise<Record<string, unknown> | null>;
+  getDiagnostics(options?: { resetWindow?: boolean }): CameraDiagnostics;
+}
+
+export interface CameraTimingSummary {
+  frames_observed: number;
+  estimated_dropped_frames: number;
+  drop_ratio: number;
+  /** selected_frame_rate is the bounded default; presented_frames is fallback. */
+  drop_estimate_source: 'selected_frame_rate' | 'presented_frames';
+  observed_fps: number | null;
+  frame_interval_ms_mean: number | null;
+  frame_interval_ms_std: number | null;
+  max_frame_gap_ms: number | null;
+  span_ms: number;
+}
+
+export interface CameraDiagnostics {
+  available: boolean;
+  settings: Record<string, unknown> | null;
+  constraints: Record<string, unknown> | null;
+  capabilities: Record<string, unknown> | null;
+  timing: {
+    source: 'requestVideoFrameCallback' | 'unavailable';
+    window: CameraTimingSummary;
+    lifetime: CameraTimingSummary;
+    callback_age_ms: number | null;
+    media_time_ms: number | null;
+    presented_frames: number | null;
+    frame_width: number | null;
+    frame_height: number | null;
+  };
 }
 
 export class MediaPipeFaceTracker {
@@ -264,6 +583,19 @@ export class PredictionSmoother {
 
 export interface EmotionTransport {
   send(windows: EmotionWindow[], ctx?: Record<string, unknown>): Promise<unknown>;
+}
+
+export interface EmotionBatchPayload {
+  /** Optional for v2/legacy hosts; emitted by Oyon v3.0.3+ transports. */
+  schema_version?: string;
+  events: EmotionWindow[];
+}
+
+export interface EmotionBatchValidationResult {
+  ok: boolean;
+  errors: string[];
+  /** Null means a legacy/unversioned payload. */
+  schemaVersion: string | null;
 }
 
 export class HttpEmotionTransport implements EmotionTransport {
@@ -483,11 +815,246 @@ export function createNoopOyonAddon(reason?: string): RohyOyonAddon;
 export function createStandaloneFerAttachment(options?: Record<string, unknown>): RohyFerAttachment;
 
 export const ALLOWED_EMOTIONS: readonly string[];
-export function validateEmotionBatch(payload: unknown): { ok: boolean; errors: string[] };
+export function validateEmotionBatch(
+  payload: unknown,
+  options?: { maxBatchEvents?: number; [key: string]: unknown },
+): EmotionBatchValidationResult;
+
+// ── Facial signals (head pose + action units) ───────────────────────
+export function extractFacialSignals(faceResult: unknown, settings?: Partial<OyonSettings>): FacialSignals | null;
+export function headPoseFromMatrix(matrix: Float32Array | number[]): HeadPose | null;
+export function actionUnitsFromBlendshapes(
+  blendshapes: Array<{ categoryName?: string; score?: number }>,
+): { blendshapes: Record<string, number>; action_units: Record<string, number> };
+export const ACTION_UNIT_MAP: Readonly<Record<string, string[]>>;
+
+export class FacialSignalAggregator {
+  constructor(options?: { windowMs?: number; sampleIntervalMs?: number });
+  consumeFrame(sample: FacialSignals | null, timestamp?: number): FacialSignalWindow | null;
+  flush(end?: number): FacialSignalWindow | null;
+}
+
+// ── Body posture ────────────────────────────────────────────────────
+export class MediaPipePoseTracker {
+  constructor(options?: Record<string, unknown>);
+  init(): Promise<void>;
+  analyze(video: HTMLVideoElement, timestampMs: number): Promise<unknown>;
+}
+export function extractPostureFeatures(poseResult: unknown, settings?: Partial<OyonSettings>): PostureFeatures | null;
+export class PostureAggregator {
+  constructor(options?: { windowMs?: number; sampleIntervalMs?: number });
+  consumeFrame(sample: PostureFeatures | null, timestamp?: number): PostureWindow | null;
+  flush(end?: number): PostureWindow | null;
+}
+export class MockPoseTracker {
+  constructor(options?: { mockLandmarks?: unknown[]; posePresent?: boolean });
+  setLandmarks(landmarks: unknown[] | null): void;
+  init(): Promise<void>;
+  analyze(): Promise<unknown>;
+}
+export function buildPoseLandmarks(overrides?: Record<number, unknown>): unknown[];
+
+// ── Remote heart rate (rPPG) ────────────────────────────────────────
+export class HeartRateEstimator {
+  constructor(options?: {
+    bufferSeconds?: number;
+    method?: 'pos' | 'green';
+    minBpm?: number;
+    maxBpm?: number;
+    minSamples?: number;
+    /** Hard floor below which aliased BPMs are rejected (default 8 Hz). */
+    minSampleRateHz?: number;
+    /** Minimum seconds of buffered signal before any BPM is emitted (default 8). */
+    minWindowSeconds?: number;
+    /** Minimum ms between recomputes; HR is throttled to ~this cadence (default 1000). */
+    updateIntervalMs?: number;
+    /** Drop estimates whose confidence is below this (default 0 = keep all). */
+    minConfidence?: number;
+  });
+  reset(): void;
+  addSample(rgb: { r: number; g: number; b: number }, ts?: number): void;
+  /** Estimate over the rolling window, or null while acquiring / between throttled updates. */
+  estimate(): HeartRateEstimate | null;
+  /** Acquisition status without forcing a recompute. */
+  status(): {
+    ready: boolean;
+    span_seconds: number;
+    n_samples: number;
+    progress: number;
+    sample_rate_hz: number;
+    minimum_sample_rate_hz: number;
+    reason: 'insufficient_samples' | 'insufficient_window' | 'low_sample_rate' | null;
+  };
+}
+export interface RobustBpmOptions {
+  enabled?: boolean;
+  fold?: boolean;
+  foldTol?: number;
+  madH?: number;
+  madFloor?: number;
+  weighted?: boolean;
+  minWeight?: number;
+  priorBpm?: number | null;
+  maxJump?: number;
+}
+export interface RobustBpmResult {
+  bpm: number | null;
+  centre: number | null;
+  folded: number;
+  dropped: number;
+  kept: number;
+  total: number;
+  corrected_fraction: number;
+}
+/** Anomaly-filtered central BPM (harmonic fold → Hampel/MAD gate → confidence-weighted mean). */
+export function robustBpm(items: Array<{ bpm: number; weight?: number }>, options?: RobustBpmOptions): RobustBpmResult;
+
+export class HeartRateAggregator {
+  constructor(options?: { windowMs?: number; sampleIntervalMs?: number; robust?: RobustBpmOptions; maxSlewBpmPerS?: number; trackerWindows?: number; minEstimatesForAnchor?: number; resetBpm?: number; resetWindows?: number; plausibleMinBpm?: number; plausibleMaxBpm?: number; implausibleCorroboration?: number });
+  consumeFrame(estimate: HeartRateEstimate | null, timestamp?: number): HeartRateWindow | null;
+  flush(end?: number): HeartRateWindow | null;
+}
+export function sampleFaceRoiRgb(video: unknown, face: unknown, roi?: 'forehead' | 'cheeks' | 'face'): { r: number; g: number; b: number } | null;
+export function faceRoiRect(bbox: { x: number; y: number; width: number; height: number }, roi: 'forehead' | 'cheeks' | 'face'): { x: number; y: number; w: number; h: number } | null;
+export function posSignal(r: number[], g: number[], b: number[]): number[];
+export function detrend(x: number[]): number[];
+export function movingAverageHighPass(x: number[], win: number): number[];
+export function resampleUniform(times: number[], values: number[]): number[];
+export function fftRadix2(re: Float64Array, im: Float64Array): void;
+export function powerSpectrum(signal: ArrayLike<number>): Float64Array;
+export function nextPow2(n: number): number;
+
+/** Shares the ROI colour stream between consumers (heart rate + respiration)
+ *  so the per-frame canvas read happens exactly once. */
+export class HeartRateRoiSampler {
+  constructor(options?: {
+    getVideo?: () => unknown;
+    sampleRoi?: (video: unknown, face: unknown) => { r: number; g: number; b: number } | null;
+    estimator?: { addSample(rgb: { r: number; g: number; b: number }, ts?: number): void } | null;
+    /** Additional consumers of the same samples. */
+    estimators?: Array<{ addSample(rgb: { r: number; g: number; b: number }, ts?: number): void }>;
+    targetFps?: number;
+    maxFaceAgeMs?: number;
+    onError?: (err: unknown) => void;
+  });
+  start(): void;
+  stop(): void;
+  updateFace(face: unknown, timestamp?: number): void;
+  sampleOnce(timestamp?: number): boolean;
+}
+
+// ── Respiration (rPPG low band) ─────────────────────────────────────
+export interface RespirationEstimate {
+  brpm: number;
+  snr: number | null;
+  confidence: number;
+  window_seconds: number;
+  n_samples: number;
+  fs: number;
+  method: string;
+  sampling_quality: {
+    sample_rate_hz: number;
+    median_sample_interval_ms: number | null;
+    max_sample_gap_ms: number | null;
+    adequate: boolean;
+  };
+  rgb_corroboration: {
+    enabled: boolean;
+    required: boolean;
+    available: boolean;
+    brpm: number | null;
+    snr: number | null;
+    confidence: number;
+    delta_brpm: number | null;
+    agrees: boolean;
+    method: 'green-share-lowband';
+  };
+}
+export class RespirationEstimator {
+  constructor(options?: {
+    /** Analysis window. Long by necessity: resolution is 1/T (default 45). */
+    bufferSeconds?: number;
+    /** Buffered signal required before any rate is emitted (default 25). */
+    minWindowSeconds?: number;
+    /** Minimum ms between recomputes (default 5000). */
+    updateIntervalMs?: number;
+    workingHz?: number;
+    minConfidence?: number;
+    rgbCorroboration?: boolean;
+    requireRgbCorroboration?: boolean;
+    rgbAgreementToleranceBrpm?: number;
+    minimumSampleRateHz?: number;
+    maxSampleGapMs?: number;
+  });
+  addSample(rgb: { r: number; g: number; b: number }, ts?: number): void;
+  estimate(now?: number): RespirationEstimate | null;
+  status(now?: number): {
+    buffered_seconds: number;
+    min_window_seconds: number;
+    progress: number;
+    ready: boolean;
+    reason: 'acquiring' | 'ready' | 'low_sample_rate' | 'sample_gap';
+    n_samples: number;
+    sample_rate_hz: number;
+    minimum_sample_rate_hz: number;
+    median_sample_interval_ms: number | null;
+    max_sample_gap_ms: number | null;
+    maximum_sample_gap_ms: number;
+    sampling_adequate: boolean;
+    last_update_ms: number | null;
+  };
+  spanSeconds(): number;
+  sampleRateHz(): number;
+  reset(): void;
+}
+export class RespirationAggregator {
+  constructor(options?: { windowMs?: number; sampleIntervalMs?: number });
+  consumeFrame(estimate: RespirationEstimate | null, timestamp?: number): Record<string, unknown> | null;
+  flush(end?: number): Record<string, unknown> | null;
+}
+export function meanDecimate(values: number[], factor: number): number[];
+export const MIN_BRPM: number;
+export const MAX_BRPM: number;
+
+// ── Ambient illumination (signal-quality covariate) ──────────────────
+export interface LumaStats {
+  mean_luma: number;
+  luma_std: number;
+  clipped_low: number;
+  clipped_high: number;
+}
+export type IlluminationAssessment = 'good' | 'dim' | 'bright' | 'backlit' | 'unstable';
+export class IlluminationEstimator {
+  constructor(options?: { sampler?: ((video: unknown) => LumaStats | null) | null });
+  estimate(video: unknown): (LumaStats & {
+    luma_delta: number;
+    quality: number;
+    assessment: IlluminationAssessment;
+    valid: boolean;
+    ts_ms: number;
+  }) | null;
+  reset(): void;
+}
+export class IlluminationAggregator {
+  constructor(options?: { windowMs?: number; sampleIntervalMs?: number; deltaFloor?: number });
+  consumeFrame(sample: unknown, timestamp?: number): Record<string, unknown> | null;
+  flush(end?: number): Record<string, unknown> | null;
+}
+export function lumaStats(rgba: ArrayLike<number>): LumaStats | null;
+export function illuminationQuality(stats: Pick<LumaStats, 'mean_luma' | 'clipped_low' | 'clipped_high'>): number;
+export function illuminationAssessment(
+  stats: Pick<LumaStats, 'mean_luma' | 'clipped_low' | 'clipped_high'>,
+  stability?: number,
+): IlluminationAssessment;
+export function sampleFrameLuma(video: unknown, canvas?: unknown): LumaStats | null;
 
 export const ONNX_RUNTIME_WASM_CDN: string;
 export const MEDIAPIPE_TASKS_WASM_CDN: string;
 export const MEDIAPIPE_FACE_LANDMARKER_URL: string;
+export const MEDIAPIPE_POSE_LANDMARKER_LITE_URL: string;
+export const MEDIAPIPE_POSE_LANDMARKER_FULL_URL: string;
+export const MEDIAPIPE_POSE_LANDMARKER_HEAVY_URL: string;
+export function poseLandmarkerUrlForModel(model: 'lite' | 'full' | 'heavy'): string;
 export const EMOTION_MODEL_HSE_B0_URL: string;
 export const EMOTION_MODEL_MOBILEVIT_MTL_URL: string;
 export const EMOTION_MODEL_MOBILEFACENET_MTL_URL: string;

@@ -4,8 +4,9 @@ import { Section } from '@/components/ui/Section';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Metric } from '@/components/ui/Metric';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { AttentionMonitor, type MonitorPoint } from '@/components/charts/AttentionMonitor';
 import { useFilteredWindows } from '@/lib/useFilteredWindows';
-import { LegacyCanvas, LegacyContainer, LegacyTable } from '@/legacy/LegacyCanvas';
+import { LegacyCanvas, LegacyContainer } from '@/legacy/LegacyCanvas';
 import {
   summarizeGazeKpis,
   renderGazeHeatmap,
@@ -14,7 +15,6 @@ import {
   renderGazeQuality,
   renderGazeAoi,
   renderGazeCalibration,
-  renderGazeTable,
 } from '@/legacy/dashboard.js';
 
 type GazePayload = {
@@ -53,6 +53,51 @@ function isUsableGazePayload(value: unknown): value is GazePayload {
   return hasSamples || hasSummary || hasZones || hasCentroid;
 }
 
+function monitorPointsOf(windows: EmotionWindow[]): MonitorPoint[] {
+  const out: MonitorPoint[] = [];
+  windows.forEach((window, index) => {
+    const win = window as Record<string, unknown>;
+    const gaze = win.gaze as {
+      centroid?: { x?: number; y?: number };
+      n_points?: number;
+    } | undefined;
+    const centroid = gaze?.centroid;
+    const emotion = typeof win.dominant_emotion === 'string' ? win.dominant_emotion : null;
+    if (!centroid || !finiteNumber(centroid.x) || !finiteNumber(centroid.y) || !emotion) return;
+
+    const heartRate = win.heart_rate as {
+      bpm_tracked?: number | null;
+      bpm_robust?: number | null;
+      bpm_mean?: number | null;
+    } | undefined;
+    const bpm = [heartRate?.bpm_tracked, heartRate?.bpm_robust, heartRate?.bpm_mean]
+      .find((value): value is number => finiteNumber(value) && value > 0) ?? null;
+
+    out.push({
+      x: centroid.x,
+      y: centroid.y,
+      emotion,
+      n: finiteNumber(gaze?.n_points) && gaze.n_points > 0 ? gaze.n_points : 1,
+      bpm,
+      at: String(win.window_end ?? win.timestamp ?? ''),
+      index,
+    });
+  });
+  return out.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+}
+
+/** Pooled std of centroid position — one number for how widely gaze roamed. */
+function spreadOf(points: MonitorPoint[]): number | null {
+  if (points.length < 2) return null;
+  const mx = points.reduce((sum, point) => sum + point.x, 0) / points.length;
+  const my = points.reduce((sum, point) => sum + point.y, 0) / points.length;
+  const variance = points.reduce(
+    (sum, point) => sum + (point.x - mx) ** 2 + (point.y - my) ** 2,
+    0,
+  );
+  return Math.sqrt(variance / points.length);
+}
+
 export function GazeView() {
   const { filtered: enriched, isLoading } = useFilteredWindows();
   const gazeWindows = useMemo(
@@ -80,6 +125,12 @@ export function GazeView() {
     ? gazeWindows
     : lastNonEmptyGazeWindowsRef.current ?? [];
   const kpis = useMemo(() => summarizeGazeKpis(displayGazeWindows), [displayGazeWindows]);
+  const monitorPoints = useMemo(() => monitorPointsOf(displayGazeWindows), [displayGazeWindows]);
+  const heartRatePoints = useMemo(
+    () => monitorPoints.filter((point) => finiteNumber(point.bpm)),
+    [monitorPoints],
+  );
+  const monitorSpread = useMemo(() => spreadOf(monitorPoints), [monitorPoints]);
 
   const [nodeMetric, setNodeMetric] = useState<'instrength' | 'outstrength' | 'visits'>('instrength');
   const [edgeMetric, setEdgeMetric] = useState<'counts' | 'probabilities'>('counts');
@@ -100,19 +151,58 @@ export function GazeView() {
   return (
     <div className="flex flex-col gap-6">
       <Section id="gaze-kpis" title="Summary">
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
-          <Metric label="Gaze windows" value={kpis.windows} tone="info" />
-          <Metric label="Mean σ" value={kpis.meanSigma} tone="info" />
-          <Metric label="Mean valid" value={kpis.meanValid} tone="info" />
-          <Metric label="Off-screen" value={kpis.offScreen} tone="info" />
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <Metric label="Gaze windows" value={kpis.windows} />
+          <Metric label="Samples" value={kpis.samples} />
+          <Metric label="Mean dispersion" value={kpis.meanSigma} />
+          <Metric label="Mean valid" value={kpis.meanValid} />
+          <Metric label="Off-screen" value={kpis.offScreen} />
           <Metric
             label="Calibration"
             value={kpis.calibration}
             hint={kpis.calibrationDetail ?? undefined}
-            tone="info"
           />
-          <Metric label="Samples" value={kpis.samples} tone="info" />
+          <Metric
+            label="Gaze spread"
+            value={monitorSpread == null ? '—' : monitorSpread.toFixed(3)}
+            hint="0 = fixed stare; higher = more roaming"
+          />
+          <Metric
+            label="Distinct emotions"
+            value={String(new Set(monitorPoints.map((point) => point.emotion)).size)}
+          />
         </div>
+      </Section>
+
+      <Section
+        id="gaze-attention-monitor"
+        title="Attention monitor"
+        description="Aggregate gaze centroids coloured by emotion. Dot area shows gaze samples; heart area shows heart rate around the 72 BPM reference."
+      >
+        {monitorPoints.length > 0 ? (
+          <div className="grid items-stretch gap-4 lg:grid-cols-2">
+              <Card className="h-full">
+                <CardHeader>
+                  <CardTitle>Gaze sample density</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <AttentionMonitor points={monitorPoints} sizeBy="gazeSamples" />
+                </CardContent>
+              </Card>
+              <Card className="h-full">
+                <CardHeader>
+                  <CardTitle>Heart rate at gaze centroid</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <AttentionMonitor points={heartRatePoints} sizeBy="heartRate" />
+                </CardContent>
+              </Card>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-line bg-surface-1 px-4 py-6 text-sm text-ink-2">
+            Attention monitoring needs a gaze centroid and dominant emotion in the same window.
+          </div>
+        )}
       </Section>
 
       <Section id="gaze-structure" title="Coverage and transitions">
@@ -232,26 +322,6 @@ export function GazeView() {
             </CardContent>
           </Card>
         </div>
-      </Section>
-
-      <Section id="gaze-table" title="Gaze windows">
-        <Card>
-          <CardContent className="p-0">
-            <LegacyTable
-              render={(tbody) => renderGazeTable(tbody, displayGazeWindows)}
-              deps={[displayGazeWindows]}
-              headers={[
-                { label: 'Window end', width: '138px' },
-                { label: 'n_points', width: '70px' },
-                { label: 'σ', width: '90px' },
-                { label: 'centroid (x, y)', width: '110px' },
-                { label: 'valid', width: '80px' },
-                { label: 'off-screen', width: '80px' },
-                { label: 'calibration' },
-              ]}
-            />
-          </CardContent>
-        </Card>
       </Section>
     </div>
   );

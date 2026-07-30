@@ -17,6 +17,12 @@ import { DEFAULT_MODEL_PROFILE } from './modelProfiles';
  */
 
 export type GazeEngineSetting = 'webgazer' | 'webeyetrack' | 'mediapipe';
+export type PostureModelSetting = 'lite' | 'full' | 'heavy';
+export type HeartRateRoiSetting = 'forehead' | 'cheeks' | 'face';
+export type HeartRateMethodSetting = 'pos' | 'green';
+/** Silero is the only production VAD engine (the library normalizes unknown
+ *  values back to it — see normalizeVoiceEngineSetting in OyonSettings.js). */
+export type VoiceEngineSetting = 'silero';
 
 export interface EditableSettings {
   // Capture
@@ -41,6 +47,58 @@ export interface EditableSettings {
 
   // Engagement
   eye_tracking_enabled: boolean;
+
+  // Sensing (v3): facial signals (head pose + action units), body posture, rPPG heart rate
+  facial_signals_enabled: boolean;
+  /** Half-angle (deg) within which the head counts as "facing the screen". */
+  facial_frontal_half_angle_deg: number;
+
+  posture_tracking_enabled: boolean;
+  posture_model: PostureModelSetting;
+
+  respiration_enabled: boolean;
+  /** Require illumination-resistant RGB-share evidence to agree with green. */
+  respiration_require_rgb_corroboration: boolean;
+
+  /** Ambient lighting quality — the covariate for every other signal. */
+  illumination_enabled: boolean;
+
+  heart_rate_enabled: boolean;
+  // Acquisition
+  heart_rate_method: HeartRateMethodSetting;
+  heart_rate_roi: HeartRateRoiSetting;
+  /** ROI sampling rate. The rate the PULSE is sampled at — independent of
+   *  sample_interval_ms, which paces the emotion/landmark pipeline. */
+  heart_rate_target_fps: number;
+  heart_rate_buffer_seconds: number;
+  // Quality gates — drop unsure/motion-corrupted frames rather than emitting
+  // a low-trust number (see docs/HEART_RATE.md).
+  heart_rate_min_confidence: number;
+  heart_rate_max_head_movement_deg: number;
+  // Cross-window tracker
+  heart_rate_max_slew_bpm_per_s: number;
+  heart_rate_tracker_windows: number;
+  heart_rate_plausible_min_bpm: number;
+  heart_rate_plausible_max_bpm: number;
+  heart_rate_implausible_corroboration: number;
+
+  // Voice (turn-based; the modal's Start button is the per-turn user action).
+  // `voice_enabled` is condition 1 of the library's three-part ACTIVATION
+  // gate on microphone hardware — off by default, and never flipped
+  // implicitly. It gates hardware access and compute cost, NOT recorded
+  // signal (consent is handled outside the app; see docs/VOICE.md).
+  voice_enabled: boolean;
+  /** Run VAD + per-frame DSP in a dedicated Worker (visible fallback). */
+  voice_worker_enabled: boolean;
+  /** Frame duration, ms. Silero v5 requires 32 (512 samples at 16 kHz). */
+  voice_frame_ms: number;
+  voice_vad_threshold: number;
+  voice_min_speech_ms: number;
+  voice_min_silence_ms: number;
+  voice_pause_threshold_ms: number;
+  /** Request autoGainControl:false so loudness is a measurement, not an AGC artifact. */
+  voice_request_agc_off: boolean;
+  voice_engine: VoiceEngineSetting;
 }
 
 export const DEFAULT_SETTINGS: EditableSettings = {
@@ -61,6 +119,40 @@ export const DEFAULT_SETTINGS: EditableSettings = {
   gaze_min_quality_score: 0.3,
 
   eye_tracking_enabled: true,
+
+  facial_signals_enabled: true,
+  facial_frontal_half_angle_deg: 20,
+
+  posture_tracking_enabled: true,
+  posture_model: 'lite',
+
+  respiration_enabled: true,
+  respiration_require_rgb_corroboration: false,
+  illumination_enabled: true,
+
+  heart_rate_enabled: true,
+  heart_rate_method: 'pos',
+  heart_rate_roi: 'forehead',
+  heart_rate_target_fps: 16,
+  heart_rate_buffer_seconds: 12,
+  heart_rate_min_confidence: 0.5,
+  heart_rate_max_head_movement_deg: 3,
+  heart_rate_max_slew_bpm_per_s: 1.5,
+  heart_rate_tracker_windows: 9,
+  heart_rate_plausible_min_bpm: 60,
+  heart_rate_plausible_max_bpm: 100,
+  heart_rate_implausible_corroboration: 3,
+
+  // Voice — defaults mirror src/settings/OyonSettings.js exactly.
+  voice_enabled: false,
+  voice_worker_enabled: true,
+  voice_frame_ms: 32,
+  voice_vad_threshold: 0.5,
+  voice_min_speech_ms: 100,
+  voice_min_silence_ms: 300,
+  voice_pause_threshold_ms: 500,
+  voice_request_agc_off: true,
+  voice_engine: 'silero',
 };
 
 export interface SettingsState extends EditableSettings {
@@ -133,36 +225,22 @@ export const useSettings = create<SettingsState>()(
   ),
 );
 
-/** Pull only the editable values (no actions, no hash) for snapshotting. */
+/**
+ * Pull only the editable values (no actions, no hash) for snapshotting.
+ *
+ * Keyed off DEFAULT_SETTINGS rather than an explicit destructure: the old
+ * hand-listed version had to be edited in two places for every new setting,
+ * and a forgotten entry silently dropped that setting from saved profiles
+ * with no type error. Driving it from the defaults object makes the key set
+ * impossible to get out of sync.
+ */
 export function snapshotSettings(s: SettingsState): EditableSettings {
-  const {
-    sample_interval_ms,
-    aggregate_window_ms,
-    min_valid_frames,
-    model_profile,
-    gaze_engine,
-    smoothing_alpha,
-    min_hold_ms,
-    switch_confidence,
-    gaze_tracking_enabled,
-    gaze_calibration_required,
-    gaze_zone_grid,
-    gaze_min_quality_score,
-    eye_tracking_enabled,
-  } = s;
-  return {
-    sample_interval_ms,
-    aggregate_window_ms,
-    min_valid_frames,
-    model_profile,
-    gaze_engine,
-    smoothing_alpha,
-    min_hold_ms,
-    switch_confidence,
-    gaze_tracking_enabled,
-    gaze_calibration_required,
-    gaze_zone_grid,
-    gaze_min_quality_score,
-    eye_tracking_enabled,
-  };
+  const out = {} as EditableSettings;
+  for (const key of Object.keys(DEFAULT_SETTINGS) as Array<keyof EditableSettings>) {
+    // Widened through unknown: the per-key value types are heterogeneous, and
+    // the loop cannot express "assign K's value to K" without a mapped-type
+    // helper that buys nothing here.
+    (out as unknown as Record<string, unknown>)[key] = s[key] as unknown;
+  }
+  return out;
 }

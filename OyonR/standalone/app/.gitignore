@@ -3,3 +3,8 @@ dist
 .vite
 *.tsbuildinfo
 dist-element
+
+# Rohy vendors the built custom element. Oyon v3 emits workers and WASM
+# alongside the entry point, so the complete artifact must be versioned.
+!dist-element/
+!dist-element/**

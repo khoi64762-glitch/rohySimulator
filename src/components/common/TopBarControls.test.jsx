@@ -69,3 +69,32 @@ describe('TopBarControls (consolidated menu)', () => {
         expect(screen.queryByText('menu_cases')).not.toBeInTheDocument();
     });
 });
+
+// The named Oyon dashboard is an ADDITION beside Emotion Analytics, not a
+// replacement for it. Both entries must coexist under the same educator+ gate.
+describe('TopBarControls — named Oyon dashboard entry', () => {
+    it('renders the Oyon dashboard entry alongside Emotion Analytics for educator+', () => {
+        setup({ canSeeOyonAnalytics: true });
+        openMenu();
+        const menu = screen.getByRole('menu');
+        // Regression lock: the pre-existing entry must survive the addition.
+        expect(within(menu).getByText('emotion_analytics')).toBeInTheDocument();
+        expect(within(menu).getByText('oyon_dashboard')).toBeInTheDocument();
+    });
+
+    it('invokes onOpenOyonDashboard, leaving the emotion-analytics handler alone', () => {
+        const onOpenOyonDashboard = vi.fn();
+        const onOpenEmotionAnalytics = vi.fn();
+        setup({ canSeeOyonAnalytics: true, onOpenOyonDashboard, onOpenEmotionAnalytics });
+        openMenu();
+        fireEvent.click(screen.getByText('oyon_dashboard'));
+        expect(onOpenOyonDashboard).toHaveBeenCalledTimes(1);
+        expect(onOpenEmotionAnalytics).not.toHaveBeenCalled();
+    });
+
+    it('hides the Oyon dashboard entry from users without Oyon read access', () => {
+        setup({ canSeeOyonAnalytics: false });
+        openMenu();
+        expect(screen.queryByText('oyon_dashboard')).not.toBeInTheDocument();
+    });
+});

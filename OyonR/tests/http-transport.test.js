@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { HttpEmotionTransport } from '../src/transport/HttpEmotionTransport.js';
+import { OYON_WINDOW_BATCH_SCHEMA_VERSION } from '../src/version.js';
 
 function validWindow(overrides = {}) {
   return {
@@ -41,7 +42,9 @@ function validWindow(overrides = {}) {
   await transport.send([validWindow()], { session_id: 's1' });
   assert.equal(request.url, 'https://example.test/api/sessions/s1/emotions/batch');
   assert.equal(request.init.headers.Authorization, 'Bearer token-1');
-  assert.deepEqual(JSON.parse(request.init.body).events[0].probabilities.neutral, 0.65);
+  const body = JSON.parse(request.init.body);
+  assert.equal(body.schema_version, OYON_WINDOW_BATCH_SCHEMA_VERSION);
+  assert.deepEqual(body.events[0].probabilities.neutral, 0.65);
 }
 
 {

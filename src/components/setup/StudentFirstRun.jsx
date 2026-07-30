@@ -15,6 +15,7 @@ import { useTranslation } from 'react-i18next';
 import {
     BookOpen, Check, Languages, Loader2, Mic, ScanFace, Stethoscope, Volume2
 } from 'lucide-react';
+import { acceptableVersion, OYON_CONSENT_VERSION_LS_KEY } from '../../utils/oyonConsent';
 import { apiFetch, apiPut } from '../../services/apiClient';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
@@ -91,7 +92,14 @@ export default function StudentFirstRun({ onDone }) {
                 onboarding_settings: {
                     first_run_done: FIRST_RUN_VERSION,
                     voice_mode: wantsVoice,
-                    oyon_consent: oyonConsent
+                    oyon_consent: oyonConsent,
+                    // Record WHICH contract was displayed and accepted, not
+                    // whatever the tenant advertises later. Without this a
+                    // future scope increase would silently re-label this
+                    // consent as covering data never described here.
+                    oyon_consent_version: oyonConsent
+                        ? acceptableVersion(oyonConfig?.consent_version)
+                        : null,
                 }
             });
         } catch (err) {
@@ -99,7 +107,14 @@ export default function StudentFirstRun({ onDone }) {
             // right failure mode for "the preference didn't stick".
             console.error('[FirstRun] could not save preferences:', err);
         }
-        try { localStorage.setItem(OYON_CONSENT_LS_KEY, oyonConsent ? '1' : '0'); } catch { /* private mode */ }
+        try {
+            localStorage.setItem(OYON_CONSENT_LS_KEY, oyonConsent ? '1' : '0');
+            if (oyonConsent) {
+                localStorage.setItem(OYON_CONSENT_VERSION_LS_KEY, acceptableVersion(oyonConfig?.consent_version));
+            } else {
+                localStorage.removeItem(OYON_CONSENT_VERSION_LS_KEY);
+            }
+        } catch { /* private mode */ }
         setSaving(false);
         onDone();
     };

@@ -40,7 +40,7 @@ export function FilterBar() {
 }
 
 export function FilterControls({ compact = false }: { compact?: boolean }) {
-  const { allWindows, filtered, currentSessionId } = useFilteredWindows();
+  const { allWindows, filtered, currentSessionId, sessionLocked } = useFilteredWindows();
   const scope = useFilterStore((s) => s.scope);
   const sessionIds = useFilterStore((s) => s.sessionIds);
   const userIds = useFilterStore((s) => s.userIds);
@@ -66,17 +66,38 @@ export function FilterControls({ compact = false }: { compact?: boolean }) {
 
   const filtersActive = scope !== 'all' || sessionIds !== null || userIds !== null;
 
-  // The Current/Past/All scope only means something while a capture session is
+  // The standalone Current/Past/All scope only means something while a capture session is
   // live: "Current" matches that session, "Past" excludes it. With no live
   // session (a retrospective viewer, or standalone between captures) the control
   // degenerates — "Current" filters to nothing and "Past" is identical to "All"
   // — so we hide it. Reset any stale current/past selection (left over from a
   // capture that has since ended) back to All first, so the dashboards can't get
   // stuck on an empty or redundant scope with no visible control to fix it.
-  const showScope = Boolean(currentSessionId);
+  // Embedded analytics never take this fallback: they are locked to the active
+  // session, and no active session deliberately means no visible records.
+  const showScope = !sessionLocked && Boolean(currentSessionId);
   useEffect(() => {
-    if (!currentSessionId && scope !== 'all') setScope('all');
-  }, [currentSessionId, scope, setScope]);
+    if (!sessionLocked && !currentSessionId && scope !== 'all') setScope('all');
+  }, [currentSessionId, scope, sessionLocked, setScope]);
+
+  if (sessionLocked) {
+    return (
+      <>
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-3">
+          Session
+        </span>
+        <span
+          className="max-w-72 truncate rounded-md border border-line bg-surface-0 px-2 py-1 text-xs text-ink-1"
+          title={currentSessionId ?? 'No active capture session'}
+        >
+          {currentSessionId ?? 'No active session'}
+        </span>
+        <span className={cn('text-[11px] tabular-nums text-ink-3', !compact && 'ml-auto')}>
+          {filtered.length} windows
+        </span>
+      </>
+    );
+  }
 
   return (
     <>

@@ -1,0 +1,24 @@
+// Additive Prisma model for Oyon window batches. Append to LAILA's existing
+// schema.prisma and run `prisma migrate dev` — it adds one table and touches
+// nothing you already have. One row per aggregate window; the full window
+// payload is kept as JSON (research-grade: record everything, expose everything).
+//
+// Idempotency: the @@unique on (sessionId, recordId) is what makes retried
+// batches free — `createMany({ skipDuplicates: true })` in server.ts relies on it.
+
+model OyonWindow {
+  id          String   @id @default(cuid())
+  sessionId   String
+  recordId    String
+  userId      String?
+  courseId    String?
+  windowStart DateTime
+  windowEnd   DateTime
+  payload     Json
+  createdAt   DateTime @default(now())
+
+  @@unique([sessionId, recordId])
+  @@index([sessionId])
+  @@index([userId])
+  @@index([courseId])
+}

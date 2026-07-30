@@ -8,6 +8,7 @@ import type {
   GazeCalibrationPanelHandle,
 } from 'oyon/react/gaze-calibration';
 import { useRuntime } from '@/lib/RuntimeProvider';
+import { useBridge } from '@/lib/hostBridge';
 import { useSessionContext } from '@/lib/sessionContext';
 
 /*
@@ -24,8 +25,9 @@ import { useSessionContext } from '@/lib/sessionContext';
  * are verbatim. Differences from the original, all intentional:
  *   - data source is Oyon's REAL `useRuntime()` (NOT the chrome="none" viewer
  *     stub), not chatoyon's `useSensingStore`/`useAppStore`;
- *   - the ↗ routes to the in-element Analyze view (`<Link to="/analyze">`),
- *     not a static dashboard tab;
+ *   - the ↗ routes to the in-element Analyze view when analytics are present,
+ *     or emits `oyon:open-analytics` in pill-only mode so the host can open a
+ *     current-session viewer;
  *   - gaze calibration is wired through `GazeCalibrationPanel` here, where the
  *     original deferred to a separate modal;
  *   - the original's "Off" / `disabled` headline is dropped — Oyon's
@@ -61,6 +63,7 @@ export function CapturePill() {
     gazeSampleCount,
     gazeDiag,
     runtime,
+    sessionId,
     start,
     pause,
     resume,
@@ -71,6 +74,9 @@ export function CapturePill() {
   // vs. "calibrate" exactly like chatoyon's gazeCalibrated flag.
   const calibration = useSessionContext((s) => s.calibration);
   const setSessionContext = useSessionContext((s) => s.setContext);
+  const chromeMode = useBridge((s) => s.chromeMode);
+  const userId = useBridge((s) => s.userId);
+  const emitHostEvent = useBridge((s) => s.emitHostEvent);
   const gazeCalibrated = calibration.status === 'ok';
 
   // Full-screen calibration overlay — always mounted so the imperative ref is
@@ -123,6 +129,11 @@ export function CapturePill() {
       calibration:
         quality != null ? { status: 'ok', quality, ageMs: 0 } : { status: 'never' },
     });
+  }
+
+  function handleOpenAnalytics() {
+    if (!sessionId) return;
+    emitHostEvent?.('oyon:open-analytics', { sessionId, userId });
   }
 
   // captureControls — verbatim shape from Rohy: a Start button when not
@@ -196,15 +207,28 @@ export function CapturePill() {
           )}
         </IconBtn>
       )}
-      {/* The ↗ in chatoyon opened a static dashboard tab; in-element we route
-          to the embedded Analyze view instead (host-reachable via `page`). */}
-      <Link
-        to="/analyze"
-        title="Open Oyon analytics for this session"
-        className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-cyan-100/80 hover:bg-white/10"
-      >
-        <ExternalLink className="h-4 w-4" />
-      </Link>
+      {/* Pill-only mode has no analytics outlet, so ask the host to open one
+          and include the exact active session. Combined/full modes navigate
+          internally; their dashboards are session-locked in embed mode. */}
+      {chromeMode === 'capture' ? (
+        <IconBtn
+          onClick={handleOpenAnalytics}
+          disabled={!sessionId}
+          title={sessionId
+            ? 'Open Oyon analytics for this session'
+            : 'Start capture before opening session analytics'}
+        >
+          <ExternalLink className="h-4 w-4" />
+        </IconBtn>
+      ) : (
+        <Link
+          to="/analyze"
+          title="Open Oyon analytics for this session"
+          className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-cyan-100/80 hover:bg-white/10"
+        >
+          <ExternalLink className="h-4 w-4" />
+        </Link>
+      )}
       {/* Full-screen overlay panel — mounted always so the imperative ref is
           available the moment the crosshair is pressed. */}
       <GazeCalibrationPanel

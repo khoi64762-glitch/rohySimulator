@@ -71,20 +71,23 @@ const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
 
   // The participant UI must read/write the SAME identity source the runtime
   // stamps from. In an embed that is the per-instance bridge, NOT the module
-  // useIdentity store — otherwise the TopBar pill shows 'standalone-user' and
-  // edits silently never reach the stamped windows. TopBar goes through
+  // useIdentity store — otherwise the participant field shows 'standalone-user'
+  // and edits silently never reach the stamped windows. The editor goes through
   // useResolvedIdentity (bridge when embedded, module store standalone).
+  //
+  // It lives in SessionContextPanel since the permanent TopBar strip was folded
+  // into the single top bar's Session popover; the contract is unchanged.
   const identityStore = read('standalone/app/src/lib/identityStore.ts');
   assert.ok(/export function useResolvedIdentity\(/.test(identityStore),
     'identityStore must expose useResolvedIdentity (embed-aware participant identity)');
   const resolved = identityStore.slice(identityStore.indexOf('export function useResolvedIdentity('));
   assert.ok(/if\s*\(\s*embedded\s*\)/.test(resolved) && resolved.includes('bridgeStore.getState().setBridge'),
     'useResolvedIdentity must read/WRITE the bridge when embedded (edits must reach stamped windows)');
-  const topbar = read('standalone/app/src/components/shell/TopBar.tsx');
-  assert.ok(topbar.includes('useResolvedIdentity'),
-    'TopBar ParticipantPill must use useResolvedIdentity, not the module store directly');
-  assert.ok(!/=\s*useIdentity\(\)/.test(topbar),
-    'TopBar must not bind the module useIdentity store directly (full-embed identity divergence)');
+  const panel = read('standalone/app/src/components/shell/SessionContextPanel.tsx');
+  assert.ok(panel.includes('useResolvedIdentity'),
+    'the participant editor must use useResolvedIdentity, not the module store directly');
+  assert.ok(!/=\s*useIdentity\(\)/.test(panel),
+    'the participant editor must not bind the module useIdentity store directly (full-embed identity divergence)');
 }
 
 // ─── camera claim releases synchronously so a same-tick remount can claim it ─
@@ -129,10 +132,9 @@ const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
 }
 
 // ─── oyon:sample — live per-sample emotion: UNGATED, full-rate, full signal ──
-// Oyon is research-grade (CLAUDE.md "Data policy"): the live affect stream is
-// NOT gated, throttled, or scoped. oyon:sample fires unconditionally on every
-// sample (outside the 100ms React-render throttle), carries the full signal,
-// and bubbles+composed like every other host event.
+// Oyon's INTERNAL research stream remains full-rate and ungated.
+// The element boundary may explicitly control DOM event DELIVERY for a host
+// without altering inference, aggregation, or the runtime stream.
 {
   const runtime = read('standalone/app/src/lib/runtime.ts');
   assert.ok(runtime.includes("emitHostEvent('oyon:sample'"),
@@ -155,14 +157,17 @@ const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
   assert.ok(throttleAt >= 0 && sampleAt < throttleAt,
     'oyon:sample must be emitted at full source rate (before the 100ms throttle)');
 
-  // The liveSamples plumbing is fully removed from the bridge and the element.
+  // Delivery controls live only at the element boundary: the runtime/bridge
+  // remain source-rate and unaware of host UI throttling.
   const bridge = read('standalone/app/src/lib/hostBridge.ts');
   assert.ok(!/liveSamples/.test(bridge),
-    'hostBridge must not carry a liveSamples gate (removed — signal is ungated)');
+    'hostBridge must not gate the internal source stream');
   const element = read('standalone/app/src/element.tsx');
-  assert.ok(!/live-samples|liveSamples/.test(element),
-    'the element must not observe/parse a live-samples gate (removed)');
-  // Every host event bubbles + composed (nothing scoped/suppressed).
+  assert.ok(/sample-events/.test(element) && /sample-event-hz/.test(element),
+    'the element boundary must expose explicit source/throttled/off delivery');
+  assert.ok(/live-samples/.test(element),
+    'the element must retain the legacy live-samples compatibility attribute');
+  // Every event that is dispatched still bubbles + composed.
   const emitBlock = element.slice(
     element.indexOf('emitHostEvent: (type, detail)'),
     element.indexOf('emitHostEvent: (type, detail)') + 600,
@@ -173,8 +178,8 @@ const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
 
 // ─── chrome="none" viewer stub: NO capture machinery constructed ──────────
 // A pure analytics viewer must construct zero capture machinery — crucially
-// no gaze adapter, whose default engine (WebGazer) pops a browser alert on
-// plain-HTTP at construction. Prove the chromeless branch never reaches
+// no gaze adapter, whose default engine (WebGazer) starts camera machinery.
+// Prove the chromeless branch never reaches
 // createGazeAdapter / CameraController / buildRuntime.
 {
   const runtime = read('standalone/app/src/lib/runtime.ts');
@@ -189,7 +194,7 @@ const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
   );
 
   // Isolate the stub function body and prove it constructs none of the
-  // capture machinery. `createGazeAdapter` (→ WebGazer alert), the camera,
+  // capture machinery. `createGazeAdapter`, the camera,
   // and the buildRuntime path must never appear inside it.
   const stubStart = runtime.indexOf('function useViewerStubRuntime');
   const stubEnd = runtime.indexOf('export function useStandaloneRuntime');
@@ -227,6 +232,16 @@ const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
   assert.ok(element.includes('createMemoryHistory'),
     'embedded router must not hijack the host URL');
   assert.ok(element.includes('attachShadow'));
+  assert.ok(element.includes("'sample-events'") && element.includes("'sample-event-hz'"),
+    'element must expose explicit host sample-event delivery controls');
+  assert.ok(element.includes("type SampleEventMode = 'source' | 'throttled' | 'off'"),
+    'sample-event modes must preserve source while allowing throttle/off');
+  assert.ok(element.includes("this.getAttribute('live-samples')"),
+    'legacy live-samples compatibility must remain wired');
+  assert.ok(element.includes('OYON_VERSION') && element.includes('OYON_HOST_CONTRACT_VERSION'),
+    'element and host events must expose machine-readable version identity');
+  assert.ok(element.includes('this.withContractMetadata(detail)'),
+    'every host event must carry version/contract metadata');
   // Camera-safety guard: at most one REAL-runtime instance owns the camera at a
   // time (tracked by `realInstance`); chrome="none" viewers are unlimited and
   // may coexist. The old page-level `mountedInstance` singleton is gone.
@@ -316,6 +331,56 @@ const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
   assert.ok(branch.includes('<Outlet />'), 'combined branch renders the analytics outlet');
   assert.ok(branch.includes('<EmbedHeader />'), 'combined branch renders the unified embed header (nav + tabs + filter)');
   assert.ok(branch.includes('<RuntimeProvider>'), 'combined branch keeps the real runtime provider');
+}
+
+// ─── embedded analytics: current-session privacy boundary ────────────────
+// Every embedded analytics surface (viewer, combined, or full custom element)
+// is locked to one active/pinned session. A missing session must yield no rows;
+// it must never degrade to browser history or a host-fed tenant pool.
+{
+  const filtered = read('standalone/app/src/lib/useFilteredWindows.ts');
+  assert.ok(filtered.includes("const effectiveScope = embedded ? 'current' : scope"),
+    'embedded analytics must force the current-session scope');
+  assert.ok(filtered.includes("const currentSessionId = chromeMode === 'none'"),
+    'viewer and real-runtime embeds must resolve the current session separately');
+  assert.ok(filtered.includes('? pinnedSessionId ?? liveSessionId')
+    && filtered.includes(': liveSessionId ?? pinnedSessionId'),
+  'a viewer pin must win, while a real runtime must prefer its actual live session');
+  assert.ok(filtered.includes('const allWindows = embedded ? filtered : enriched'),
+    'embedded analytics must not expose other-session counts/options through allWindows');
+  assert.ok(filtered.includes('sessionLocked: embedded'),
+    'useFilteredWindows must tell embedded chrome that the session boundary is locked');
+
+  const provider = read('standalone/app/src/lib/RuntimeProvider.tsx');
+  assert.ok(provider.includes('if (chromeless) return'),
+    "a viewer stub must not erase a sibling capture element's active session marker");
+
+  const filterBar = read('standalone/app/src/components/shell/FilterBar.tsx');
+  assert.ok(filterBar.includes('if (sessionLocked)'),
+    'embedded filters must render a fixed current-session label instead of history selectors');
+  assert.ok(filterBar.includes("currentSessionId ?? 'No active session'"),
+    'an embedded viewer with no active session must say so instead of falling back to All');
+  assert.ok(filterBar.includes('if (!sessionLocked && !currentSessionId'),
+    'the standalone no-session fallback to All must never run for an embedded viewer');
+}
+
+// ─── capture-only analytics affordance: host event with exact session ─────
+// chrome="capture" has no analytics outlet. Its ↗ must emit a host event tied
+// to the active session instead of navigating an invisible memory route.
+{
+  const pill = read('standalone/app/src/components/capture/CapturePill.tsx');
+  assert.ok(pill.includes("emitHostEvent?.('oyon:open-analytics', { sessionId, userId })"),
+    'capture pill must ask the host to open analytics with the active session id');
+  assert.ok(pill.includes("chromeMode === 'capture'"),
+    'capture-only mode must use the host event path');
+  assert.ok(pill.includes('disabled={!sessionId}'),
+    'analytics launch must be disabled until an active capture session exists');
+
+  const types = read('types/app-element.d.ts');
+  assert.ok(types.includes('OyonOpenAnalyticsEventDetail'),
+    'the public element types must expose oyon:open-analytics detail');
+  assert.ok(types.includes("'oyon:open-analytics': CustomEvent<OyonOpenAnalyticsEventDetail>"),
+    'HTMLElementEventMap must type the analytics launch event');
 }
 
 // ─── router construction stays inside the entry points ────────────────────

@@ -635,6 +635,13 @@ export default function TnaDashboardV2({ onClose, embedded = false, defaultSourc
             { id: 'gaze',       label: 'Gaze',       icon: ScanEye },
             { id: 'compare',    label: 'Compare',    icon: GitCompare },
             { id: 'sessions',   label: 'Sessions',   icon: ListVideo },
+            // NOTE: Trends and Engagement are deliberately absent. Their
+            // standalone views (OyonTrendsView / OyonEngagementView) still
+            // exist but were retired from this strip on purpose — Attention
+            // absorbed the engagement analytics (it computes
+            // engagementAnalytics itself: engagement coverage, blink rate,
+            // focus). Re-adding them here would put two competing views of the
+            // same numbers in one dashboard. Pinned by the sibling test.
         ],
         [
             { id: 'settings',  label: 'Settings',  icon: Settings2 },

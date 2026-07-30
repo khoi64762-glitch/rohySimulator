@@ -56,6 +56,17 @@ export function recordToWindow(r) {
         // v2 blocks (migration 0028) — null on rows captured before it ran.
         gaze: rec.gaze ?? null,
         engagement: rec.engagement ?? null,
+        // Oyon 3 window-shared blocks (migration 0039). Null on rows captured
+        // before it ran, and on tenants with the matching modality disabled.
+        // Passing them through is what lets the element's own Analyze
+        // dashboards render the new signals without Rohy authoring a view per
+        // modality.
+        facial: rec.facial ?? null,
+        posture: rec.posture ?? null,
+        heart_rate: rec.heart_rate ?? null,
+        respiration: rec.respiration ?? null,
+        illumination: rec.illumination ?? null,
+        capture_quality: rec.capture_quality ?? null,
         // Simulator-room stamp (migration 0029) — drives the per-room gaze view.
         room: rec.room ?? null,
     };

@@ -17,12 +17,16 @@ import { OYON_ASSET_BASE } from './captureBridge';
  * Viewer instances are unlimited by the element's camera guard, so this
  * coexists with the capture pill in the Patient Monitor.
  */
-export default function OyonServerDashboards({ records, loading }) {
+export default function OyonServerDashboards({ records, loading, sessionId = null }) {
    const hostRef = useRef(null);
    const elRef = useRef(null);
    // Latest records, readable from the mount effect — so the element gets its
    // FIRST feed even when the 5 MB module finishes loading after the fetch.
    const recordsRef = useRef(records);
+   // Same reason as recordsRef: the pin must be on the element from the very
+   // first render, or the viewer resolves "no active session" and renders zero
+   // before we ever get to update the attribute.
+   const sessionIdRef = useRef(sessionId);
    const [loadError, setLoadError] = useState(null);
    // false until the <oyon-app> element is defined, mounted and fed its
    // first batch — drives the loading veil so a 5 MB module on a slow link
@@ -40,6 +44,14 @@ export default function OyonServerDashboards({ records, loading }) {
             el.setAttribute('chrome', 'none');
             el.setAttribute('page', '/analyze');
             el.setAttribute('asset-base', OYON_ASSET_BASE);
+            // REQUIRED, not optional. An embedded chrome="none" viewer forces
+            // the current-session scope as a privacy boundary: with no pinned
+            // session it reports "No active session" and renders ZERO rows no
+            // matter what setWindows() fed it (Oyon's own contract test:
+            // "a missing session must yield no rows" / "a viewer pin must
+            // win"). Without this the dashboard silently showed the empty
+            // state on any load where no capture session happened to be live.
+            if (sessionIdRef.current) el.setAttribute('session-id', String(sessionIdRef.current));
             el.style.display = 'block';
             el.style.height = '100%';
             host.appendChild(el);
@@ -62,6 +74,17 @@ export default function OyonServerDashboards({ records, loading }) {
       recordsRef.current = records;
       elRef.current?.setWindows?.(recordsToWindows(records));
    }, [records]);
+
+   // Re-pin when the educator picks another session. `session-id` is an
+   // observed attribute, so this re-scopes the live viewer without remounting
+   // the 5 MB element.
+   useEffect(() => {
+      sessionIdRef.current = sessionId;
+      const el = elRef.current;
+      if (!el) return;
+      if (sessionId) el.setAttribute('session-id', String(sessionId));
+      else el.removeAttribute('session-id');
+   }, [sessionId]);
 
    if (loadError) {
       return (

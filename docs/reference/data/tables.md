@@ -2,7 +2,7 @@
 
 > **Generated file — do not edit by hand.** Regenerate with `npm run docs:gen:data`. One section per table; columns in declaration order.
 
-**91 tables.**
+**92 tables.**
 
 ## `active_sessions`
 
@@ -1151,6 +1151,7 @@ Stores oyon emotion consents records.
 | `source_page` | TEXT | — | — |
 | `user_agent` | TEXT | — | — |
 | `created_at` | DATETIME | NOT NULL DEFAULT CURRENT_TIMESTAMP | — |
+| `accepted_version` | TEXT | — | `0041_oyon_consent_v2_signals.sql` |
 
 ## `oyon_emotion_records`
 
@@ -1221,6 +1222,12 @@ Stores oyon emotion records records.
 | `gaze_json` | TEXT | — | `0028_oyon_records_gaze_engagement.sql` |
 | `engagement_json` | TEXT | — | `0028_oyon_records_gaze_engagement.sql` |
 | `room` | TEXT | — | `0029_oyon_records_room.sql` |
+| `facial_json` | TEXT | — | `0039_oyon_signal_windows.sql` |
+| `posture_json` | TEXT | — | `0039_oyon_signal_windows.sql` |
+| `heart_rate_json` | TEXT | — | `0039_oyon_signal_windows.sql` |
+| `respiration_json` | TEXT | — | `0039_oyon_signal_windows.sql` |
+| `illumination_json` | TEXT | — | `0039_oyon_signal_windows.sql` |
+| `capture_quality_json` | TEXT | — | `0039_oyon_signal_windows.sql` |
 
 ## `oyon_settings`
 
@@ -1249,6 +1256,71 @@ Stores oyon settings records.
 | `smoothing_alpha` | REAL | NOT NULL DEFAULT 0.28 | `0012_oyon_settings_runtime.sql` |
 | `min_hold_ms` | INTEGER | NOT NULL DEFAULT 3000 | `0012_oyon_settings_runtime.sql` |
 | `min_switch_confidence` | REAL | NOT NULL DEFAULT 0.5 | `0012_oyon_settings_runtime.sql` |
+| `facial_signals_enabled` | INTEGER | NOT NULL DEFAULT 1 | `0040_oyon_signal_settings.sql` |
+| `heart_rate_enabled` | INTEGER | NOT NULL DEFAULT 1 | `0040_oyon_signal_settings.sql` |
+| `respiration_enabled` | INTEGER | NOT NULL DEFAULT 1 | `0040_oyon_signal_settings.sql` |
+| `illumination_enabled` | INTEGER | NOT NULL DEFAULT 1 | `0040_oyon_signal_settings.sql` |
+| `eye_tracking_enabled` | INTEGER | NOT NULL DEFAULT 1 | `0040_oyon_signal_settings.sql` |
+| `gaze_tracking_enabled` | INTEGER | NOT NULL DEFAULT 1 | `0040_oyon_signal_settings.sql` |
+| `enable_dynamics` | INTEGER | NOT NULL DEFAULT 1 | `0040_oyon_signal_settings.sql` |
+| `posture_tracking_enabled` | INTEGER | NOT NULL DEFAULT 0 | `0040_oyon_signal_settings.sql` |
+| `signal_window_share` | INTEGER | NOT NULL DEFAULT 1 | `0040_oyon_signal_settings.sql` |
+| `typing_enabled` | INTEGER | NOT NULL DEFAULT 1 | `0041_oyon_consent_v2_signals.sql` |
+| `interaction_enabled` | INTEGER | NOT NULL DEFAULT 1 | `0041_oyon_consent_v2_signals.sql` |
+| `discourse_enabled` | INTEGER | NOT NULL DEFAULT 1 | `0041_oyon_consent_v2_signals.sql` |
+| `ai_assist_enabled` | INTEGER | NOT NULL DEFAULT 1 | `0041_oyon_consent_v2_signals.sql` |
+
+## `oyon_signal_windows`
+
+Stores oyon signal windows records.
+
+**Introduced by:** migration `0039_oyon_signal_windows.sql`
+
+**Cross-cutting:** `tenant-scoped` · `audit (created_at)` · `snapshot (student_role_snapshot, case_title_snapshot, case_category_snapshot, course_title_snapshot, cohort_title_snapshot)`
+
+| Column | Type | Constraints | Added by |
+| --- | --- | --- | --- |
+| `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | — |
+| `tenant_id` | TEXT | NOT NULL | — |
+| `user_id` | TEXT | NOT NULL | — |
+| `student_id` | TEXT | — | — |
+| `session_id` | TEXT | NOT NULL | — |
+| `case_id` | TEXT | — | — |
+| `record_id` | TEXT | — | — |
+| `course_id` | TEXT | — | — |
+| `cohort_id` | TEXT | — | — |
+| `mirroring` | oyon | _emotion_records so the new dashboards -- can name a row without joining back to mutable tables. student_name_snapshot TEXT | — |
+| `student_role_snapshot` | TEXT | — | — |
+| `case_title_snapshot` | TEXT | — | — |
+| `case_category_snapshot` | TEXT | — | — |
+| `course_title_snapshot` | TEXT | — | — |
+| `cohort_title_snapshot` | TEXT | — | — |
+| `session_type` | TEXT | — | — |
+| `attempt_number` | INTEGER | — | — |
+| `started_from_page` | TEXT | — | — |
+| `room` | TEXT | — | — |
+| `window_kind` | TEXT | NOT NULL DEFAULT 'interval' | — |
+| `window_start` | DATETIME | NOT NULL | — |
+| `window_end` | DATETIME | NOT NULL | — |
+| `duration_ms` | INTEGER | — | — |
+| `verbatim` | (untyped) | . Shape is owned by Oyon's aggregator for that -- modality and varies per modality by design | — |
+| `so` | it | stays JSON rather than -- being projected into per-modality columns. payload_json TEXT | — |
+| `dynamics_json` | TEXT | — | — |
+| `model_profile` | TEXT | — | — |
+| `settings_hash` | TEXT | — | — |
+| `settings_snapshot_json` | TEXT | — | — |
+| `capture_mode` | TEXT | NOT NULL DEFAULT 'local-browser' | — |
+| `capture_status` | TEXT | NOT NULL DEFAULT 'captured' | — |
+| `resolved` | at | -- write time from the tenant's oyon_settings. student_consent_enabled INTEGER NOT NULL DEFAULT 0 | — |
+| `student_can_view` | INTEGER | NOT NULL DEFAULT 0 | — |
+| `admin_can_view` | INTEGER | NOT NULL DEFAULT 1 | — |
+| `educator_can_view` | INTEGER | NOT NULL DEFAULT 0 | — |
+| `consent_version` | TEXT | NOT NULL | — |
+| `consent_recorded_at` | DATETIME | — | — |
+| `and` | pinning | them per row -- lets a later analysis tell which engine produced a signal. oyon_version TEXT | — |
+| `contract_version` | TEXT | — | — |
+| `schema_version` | TEXT | — | — |
+| `created_at` | DATETIME | NOT NULL DEFAULT CURRENT_TIMESTAMP | — |
 
 ## `panel_tests`
 

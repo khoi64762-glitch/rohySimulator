@@ -2,7 +2,8 @@ import express from 'express';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { validateEmotionBatch } from 'oyon/validation';
+import { validateEmotionBatch, isModalityOnlyEvent } from 'oyon/validation';
+import { OYON_MODALITIES, OYON_WINDOW_KINDS } from 'oyon/version';
 import { authenticateToken, hasRoleAtLeast, requireAdmin, ROLE_RANKS } from '../middleware/auth.js';
 import { dbAll, dbGet, dbRun, logAuditAsync, redactRow, tenantId } from './_helpers.js';
 import { logger } from '../logger.js';
@@ -13,7 +14,48 @@ const __dirname = path.dirname(__filename);
 const oyonLog = logger('oyon-addon');
 const router = express.Router();
 const ASSET_ROOT = path.resolve(__dirname, '../../OyonR/standalone');
-const DEFAULT_CONSENT_VERSION = 'oyon-consent-v1';
+const DEFAULT_CONSENT_VERSION = 'oyon-consent-v2';
+// The contract that covered camera-derived affect only. Kept as a named
+// constant because it is still a valid accepted version — it simply does not
+// extend to the host-driven modalities below.
+const CONSENT_VERSION_CAMERA_ONLY = 'oyon-consent-v1';
+
+/*
+ * Modalities that need consent v2 (migration 0041).
+ *
+ * These are new CATEGORIES of personal data, not more camera-derived affect:
+ * keystroke timing, page-wide pointer/scroll telemetry, message-text analysis,
+ * and AI-assistance cycles. `oyon-consent-v1` describes none of them, so a
+ * learner who accepted v1 has not agreed to them.
+ *
+ * Enforced on INGEST rather than only at the client prompt: a stale or
+ * hand-rolled client cannot deposit these rows for a learner who never accepted
+ * v2. Camera modalities are absent from this set and keep working under v1.
+ */
+const CONSENT_V2_MODALITIES = new Set([
+    'typing', 'interaction', 'discourse', 'ai_assist', 'voice',
+]);
+
+/** Ordered consent contracts, oldest first — index doubles as the version rank. */
+const CONSENT_VERSION_ORDER = Object.freeze(['oyon-consent-v1', 'oyon-consent-v2']);
+
+/**
+ * Whether the consent actually accepted for this session covers `modality`.
+ *
+ * A consent row written before 0041 has no `accepted_version`; it is read as v1,
+ * the only contract that existed when it was written. Never as "whatever the
+ * tenant advertises now" — that would silently re-label an old consent as
+ * covering data the learner was never asked about.
+ */
+function acceptedConsentVersion(value) {
+    return CONSENT_VERSION_ORDER.includes(value) ? value : CONSENT_VERSION_CAMERA_ONLY;
+}
+
+function consentCoversModality(consent, modality) {
+    if (!CONSENT_V2_MODALITIES.has(modality)) return true;
+    const accepted = consent?.accepted_version || CONSENT_VERSION_CAMERA_ONLY;
+    return CONSENT_VERSION_ORDER.indexOf(accepted) >= CONSENT_VERSION_ORDER.indexOf('oyon-consent-v2');
+}
 const MAX_EMOTION_EVENT_JSON_LENGTH = 20_000;
 const POST_SESSION_CAPTURE_GRACE_MS = 24 * 60 * 60 * 1000;
 
@@ -94,6 +136,10 @@ router.put('/settings', authenticateToken, requireAdmin, async (req, res) => {
         smoothing_alpha: clampFloat(req.body?.smoothing_alpha, 0, 1, previousRuntime.smoothing_alpha),
         min_hold_ms: clampInt(req.body?.min_hold_ms, 0, 60_000, previousRuntime.min_hold_ms),
         min_switch_confidence: clampFloat(req.body?.min_switch_confidence, 0, 1, previousRuntime.min_switch_confidence),
+        // Oyon 3 signal flags (migration 0040). Key-presence merge: an absent
+        // field keeps its stored value, so a partial PUT from one settings
+        // section cannot silently disable a signal another section owns.
+        ...signalFlagsFromBody(req.body, previous),
     };
 
     await dbRun(
@@ -111,6 +157,19 @@ router.put('/settings', authenticateToken, requireAdmin, async (req, res) => {
              smoothing_alpha = ?,
              min_hold_ms = ?,
              min_switch_confidence = ?,
+             facial_signals_enabled = ?,
+             heart_rate_enabled = ?,
+             respiration_enabled = ?,
+             illumination_enabled = ?,
+             eye_tracking_enabled = ?,
+             gaze_tracking_enabled = ?,
+             enable_dynamics = ?,
+             posture_tracking_enabled = ?,
+             signal_window_share = ?,
+             typing_enabled = ?,
+             interaction_enabled = ?,
+             discourse_enabled = ?,
+             ai_assist_enabled = ?,
              updated_at = CURRENT_TIMESTAMP
          WHERE tenant_id = ?`,
         [
@@ -127,6 +186,19 @@ router.put('/settings', authenticateToken, requireAdmin, async (req, res) => {
             next.smoothing_alpha,
             next.min_hold_ms,
             next.min_switch_confidence,
+            next.facial_signals_enabled,
+            next.heart_rate_enabled,
+            next.respiration_enabled,
+            next.illumination_enabled,
+            next.eye_tracking_enabled,
+            next.gaze_tracking_enabled,
+            next.enable_dynamics,
+            next.posture_tracking_enabled,
+            next.signal_window_share,
+            next.typing_enabled,
+            next.interaction_enabled,
+            next.discourse_enabled,
+            next.ai_assist_enabled,
             String(currentTenant),
         ]
     );
@@ -179,8 +251,8 @@ router.post('/consent', authenticateToken, async (req, res) => {
     await dbRun(
         `INSERT INTO oyon_emotion_consents (
             tenant_id, user_id, student_id, session_id, case_id,
-            consent_granted, consent_version, source_page, user_agent
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            consent_granted, consent_version, accepted_version, source_page, user_agent
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
             tenantId(req),
             String(req.user.id),
@@ -189,6 +261,13 @@ router.post('/consent', authenticateToken, async (req, res) => {
             session.case_id == null ? null : String(session.case_id),
             granted ? 1 : 0,
             settings.consent_version || DEFAULT_CONSENT_VERSION,
+            // What the client actually SHOWED and the learner accepted — not
+            // what the tenant currently advertises. A client that names no
+            // version is a pre-0041 client, which can only have displayed the
+            // v1 contract, so it records v1 and cannot grant itself v2. This is
+            // the whole point of the column: consent means the contract the
+            // learner saw, never the newest one on file.
+            acceptedConsentVersion(req.body?.accepted_version),
             shortText(req.body?.source_page, 200),
             shortText(req.headers['user-agent'], 500),
         ]
@@ -254,10 +333,50 @@ router.post('/emotion-records', authenticateToken, async (req, res) => {
 
     let inserted = 0;
     let skipped = 0;
+    let signalsInserted = 0;
+    let signalsSkipped = 0;
+    let consentBlocked = 0;
     for (const event of events) {
         const serverErrors = validateServerEvent(event, session);
         if (serverErrors.length) {
             return res.status(400).json({ error: 'Invalid emotion event', details: serverErrors });
+        }
+        // Oyon 3 (migration 0039): a window declaring a non-emotion `modality`
+        // — or carrying a legacy `<x>_only` boolean — is NOT an emotion record.
+        // It carries no emotion fields, so storing it in oyon_emotion_records
+        // would add `dominant_emotion IS NULL` rows that silently shift every
+        // existing count and distribution. Route it to oyon_signal_windows,
+        // where legacy queries cannot see it.
+        if (isModalityOnlyEvent(event)) {
+            const modality = resolveModality(event);
+            if (!modality) {
+                oyonLog.warn('signal window rejected: unknown modality', {
+                    session_id: session.id,
+                    modality: event?.modality ?? null,
+                });
+                return res.status(400).json({
+                    error: 'Unknown Oyon modality',
+                    code: 'oyon_unknown_modality',
+                });
+            }
+            // Consent gate (migration 0041). A modality the learner's accepted
+            // contract doesn't cover is DROPPED, not rejected: a mixed batch
+            // must still store the camera windows travelling with it, and a
+            // learner who declined the newer contract should not see capture
+            // fail — it should simply not record what they didn't agree to.
+            if (!consentCoversModality(consent, modality)) {
+                consentBlocked += 1;
+                oyonLog.info('signal window dropped: consent version does not cover modality', {
+                    session_id: session.id,
+                    modality,
+                    accepted_version: consent?.accepted_version || CONSENT_VERSION_CAMERA_ONLY,
+                });
+                continue;
+            }
+            const signalResult = await insertSignalWindow(req, session, settings, consent, event, modality);
+            if (signalResult?.changes === 1) signalsInserted += 1;
+            else signalsSkipped += 1;
+            continue;
         }
         // insertEmotionRecord uses INSERT ... ON CONFLICT DO NOTHING on
         // (tenant_id, session_id, record_id). For duplicate retries the
@@ -270,8 +389,21 @@ router.post('/emotion-records', authenticateToken, async (req, res) => {
         else skipped += 1;
     }
 
-    oyonLog.info('emotion batch accepted', { session_id: session.id, inserted, skipped });
-    res.json({ ok: true, inserted, skipped });
+    oyonLog.info('emotion batch accepted', {
+        session_id: session.id, inserted, skipped, signalsInserted, signalsSkipped, consentBlocked,
+    });
+    // `inserted`/`skipped` keep counting emotion records ONLY, so existing
+    // clients and tests reading them are unaffected by the new modalities.
+    res.json({
+        ok: true,
+        inserted,
+        skipped,
+        signals_inserted: signalsInserted,
+        signals_skipped: signalsSkipped,
+        // Reported rather than silent: a client seeing this knows its consent
+        // prompt is stale, not that the network dropped the windows.
+        signals_consent_blocked: consentBlocked,
+    });
 });
 
 router.get('/emotion-records', authenticateToken, async (req, res) => {
@@ -319,6 +451,84 @@ router.get('/emotion-records', authenticateToken, async (req, res) => {
     res.json({
         records: rows.map(hydrateRecord).map(r => redactRow(r)),
         total,
+    });
+});
+
+/*
+ * Oyon 3 modality-scoped windows (migration 0039). Deliberately a SEPARATE
+ * endpoint from /emotion-records rather than a `modality` query param on it:
+ * every existing caller of /emotion-records keeps its exact response shape, so
+ * no current dashboard can be perturbed by this addition.
+ *
+ * Same access policy as /emotion-records — assertOyonReadAccess (role + the
+ * per-role tenant flag), per-row visibility column, tenant scoping, session
+ * ownership, and redactRow on the way out.
+ */
+router.get('/signal-windows', authenticateToken, async (req, res) => {
+    const settings = await ensureSettings(tenantId(req));
+    if (!assertOyonReadAccess(req, res, settings)) return;
+
+    const session = req.query.session_id ? await resolveSession(req, req.query.session_id) : null;
+    if (req.query.session_id && !session) return res.status(404).json({ error: 'Session not found' });
+    if (session && !canReadSession(req.user, session)) return res.status(403).json({ error: 'Access denied' });
+
+    const requestedModality = req.query.modality ? String(req.query.modality) : null;
+    if (requestedModality && !OYON_MODALITIES.includes(requestedModality)) {
+        return res.status(400).json({
+            error: 'Unknown Oyon modality',
+            code: 'oyon_unknown_modality',
+        });
+    }
+
+    const { whereSql, params: whereParams } = buildSignalWindowsWhere(req, {
+        session,
+        modality: requestedModality,
+    });
+
+    const countRow = await dbGet(
+        `SELECT COUNT(*) AS total FROM oyon_signal_windows r
+         LEFT JOIN users u ON CAST(r.user_id AS INTEGER) = u.id AND u.tenant_id = r.tenant_id
+         WHERE ${whereSql}`,
+        whereParams
+    );
+    const total = Number(countRow?.total) || 0;
+
+    const pageParams = [...whereParams, limit(req.query.limit, 200), offsetParam(req.query.offset)];
+    const rows = await dbAll(
+        `SELECT r.*, u.username, u.role AS user_role
+         FROM oyon_signal_windows r
+         LEFT JOIN users u ON CAST(r.user_id AS INTEGER) = u.id AND u.tenant_id = r.tenant_id
+         WHERE ${whereSql}
+         ORDER BY r.window_start DESC, r.id DESC
+         LIMIT ? OFFSET ?`,
+        pageParams
+    );
+
+    // Which modalities actually have data for this filter — lets a dashboard
+    // render only the tabs a cohort really produced instead of empty shells.
+    const modalityRows = await dbAll(
+        `SELECT r.modality, COUNT(*) AS count
+         FROM oyon_signal_windows r
+         LEFT JOIN users u ON CAST(r.user_id AS INTEGER) = u.id AND u.tenant_id = r.tenant_id
+         WHERE ${whereSql}
+         GROUP BY r.modality
+         ORDER BY count DESC`,
+        whereParams
+    );
+
+    oyonLog.debug('signal windows read', {
+        user_id: req.user.id,
+        role: req.user.role,
+        session_id: session?.id,
+        modality: requestedModality,
+        scope: session ? 'session' : 'tenant',
+        returned: rows.length,
+        total,
+    });
+    res.json({
+        windows: rows.map(hydrateSignalWindow).map(r => redactRow(r)),
+        total,
+        modalities: modalityRows.map(r => ({ modality: r.modality, count: Number(r.count) || 0 })),
     });
 });
 
@@ -709,6 +919,8 @@ async function insertEmotionRecord(req, session, settings, consent, event) {
         'valid_frames', 'missing_face_ratio', 'quality_json', 'model_name', 'model_version',
         'model_profile', 'settings_hash', 'settings_snapshot_json', 'dynamics_json',
         'gaze_json', 'engagement_json', 'room',
+        'facial_json', 'posture_json', 'heart_rate_json', 'respiration_json',
+        'illumination_json', 'capture_quality_json',
         'capture_mode', 'capture_status', 'student_consent_enabled', 'student_can_view',
         'admin_can_view', 'educator_can_view', 'consent_version', 'consent_recorded_at',
     ];
@@ -771,6 +983,15 @@ async function insertEmotionRecord(req, session, settings, consent, event) {
         jsonTextOrNull(event.gaze),
         jsonTextOrNull(event.engagement),
         shortText(event.room, 100),
+        // Oyon 3 window-shared blocks (migration 0039). Present whenever the
+        // matching modality is enabled with `*_window_share` (the default);
+        // dropped on the floor before 0039 for want of a column.
+        jsonTextOrNull(event.facial),
+        jsonTextOrNull(event.posture),
+        jsonTextOrNull(event.heart_rate),
+        jsonTextOrNull(event.respiration),
+        jsonTextOrNull(event.illumination),
+        jsonTextOrNull(event.capture_quality),
         event.capture_mode,
         'captured',
         consent.consent_granted ? 1 : 0,
@@ -802,6 +1023,158 @@ async function insertEmotionRecord(req, session, settings, consent, event) {
     );
 }
 
+/*
+ * Oyon 3 modality-scoped windows (migration 0039).
+ *
+ * `isModalityOnlyEvent` is Oyon's own seam: true for any event declaring a
+ * non-emotion `modality`, and for the legacy `<x>_only` booleans the v3
+ * contract still emits. Everything it returns false for is an emotion window
+ * and keeps its existing path into `oyon_emotion_records` untouched.
+ */
+
+/** Legacy `<x>_only` boolean → modality name, for pre-v4 shaped events. */
+const MODALITY_ONLY_FLAG_NAMES = Object.freeze({
+    engagement_only: 'engagement',
+    facial_only: 'facial',
+    gaze_only: 'gaze',
+    heart_rate_only: 'heart_rate',
+    posture_only: 'posture',
+});
+
+/** Envelope keys that are never part of a modality's own payload block. */
+const SIGNAL_ENVELOPE_KEYS = new Set([
+    'modality', 'window_kind', 'window_start', 'window_end', 'duration_ms',
+    'session_id', 'sessionId', 'user_id', 'username', 'student_id', 'case_id',
+    'record_id', 'window_id', 'capture_id', 'course_id', 'cohort_id',
+    'course_title', 'cohort_title', 'session_type', 'attempt_number',
+    'started_from_page', 'room', 'capture_mode', 'capture_status',
+    'consent_version', 'settings_snapshot', 'settings_hash', 'model_profile',
+    'dynamics', 'oyonVersion', 'contractVersion', 'schema_version',
+    ...Object.keys(MODALITY_ONLY_FLAG_NAMES),
+]);
+
+/**
+ * The modality a non-emotion window declares, or null if it isn't one we can
+ * name. Validated against Oyon's own exported list rather than a local copy so
+ * a vendor bump that adds a modality needs no change here — and so an unknown
+ * value is rejected rather than silently stored (the table has no CHECK
+ * constraint by design; see migration 0039).
+ */
+function resolveModality(event) {
+    const declared = typeof event?.modality === 'string' ? event.modality : null;
+    const fromFlag = Object.keys(MODALITY_ONLY_FLAG_NAMES)
+        .find(flag => event?.[flag] === true);
+    const modality = declared || (fromFlag ? MODALITY_ONLY_FLAG_NAMES[fromFlag] : null);
+    if (!modality || modality === 'emotion') return null;
+    return OYON_MODALITIES.includes(modality) ? modality : null;
+}
+
+/**
+ * The modality's aggregate block. Camera modality-only windows nest it under
+ * the modality name (`{facial_only: true, facial: {…}}`); SignalCapture
+ * episodes ARE the window, so fall back to the event minus the envelope.
+ */
+function resolveSignalPayload(event, modality) {
+    const nested = event?.[modality];
+    if (nested && typeof nested === 'object') return nested;
+    const rest = {};
+    for (const [key, value] of Object.entries(event || {})) {
+        if (!SIGNAL_ENVELOPE_KEYS.has(key)) rest[key] = value;
+    }
+    return Object.keys(rest).length ? rest : null;
+}
+
+async function insertSignalWindow(req, session, settings, consent, event, modality) {
+    const snapshot = parseJson(session.case_snapshot) || {};
+    const liveConfig = parseJson(session.live_case_config) || {};
+    const config = snapshot.config || liveConfig || {};
+    const demographics = config.demographics || {};
+    const caseTitle = snapshot.name || session.live_case_name || null;
+    const studentName = session.student_name || req.user.username || session.username || null;
+    // Prefer SignalCapture's own `window_id` — episode windows have no fixed
+    // cadence, so (start, end) is not their identity. Fall back to the camera
+    // hash, with modality mixed in: a facial_only window shares its bounds with
+    // the sibling emotion window, so without it the two would collide.
+    const recordId = event.window_id != null
+        ? String(event.window_id)
+        : (event.record_id != null
+            ? String(event.record_id)
+            : deriveRecordId(tenantId(req), `${session.id}|${modality}`, event.window_start, event.window_end));
+    const windowKind = OYON_WINDOW_KINDS.includes(event.window_kind)
+        ? event.window_kind
+        : 'interval';
+    const columns = [
+        'tenant_id', 'user_id', 'student_id', 'session_id', 'case_id', 'record_id',
+        'course_id', 'cohort_id', 'student_name_snapshot', 'student_role_snapshot',
+        'case_title_snapshot', 'case_category_snapshot', 'course_title_snapshot',
+        'cohort_title_snapshot', 'session_type', 'attempt_number', 'started_from_page',
+        'room', 'modality', 'window_kind', 'window_start', 'window_end', 'duration_ms',
+        'payload_json', 'dynamics_json', 'model_profile', 'settings_hash',
+        'settings_snapshot_json', 'capture_mode', 'capture_status',
+        'student_consent_enabled', 'student_can_view', 'admin_can_view',
+        'educator_can_view', 'consent_version', 'consent_recorded_at',
+        'oyon_version', 'contract_version', 'schema_version',
+    ];
+    const values = [
+        String(tenantId(req)),
+        String(req.user.id),
+        String(session.user_id),
+        String(session.id),
+        session.case_id == null ? null : String(session.case_id),
+        recordId,
+        event.course_id == null ? null : String(event.course_id),
+        event.cohort_id == null ? null : String(event.cohort_id),
+        shortText(studentName, 200),
+        shortText(session.role || req.user.role, 80),
+        shortText(caseTitle, 300),
+        shortText(config.category || config.specialty || demographics.category, 200),
+        shortText(event.course_title, 300),
+        shortText(event.cohort_title, 300),
+        shortText(event.session_type || 'simulation', 100),
+        Number.isInteger(event.attempt_number) ? event.attempt_number : null,
+        shortText(event.started_from_page, 200),
+        shortText(event.room, 100),
+        modality,
+        windowKind,
+        event.window_start,
+        event.window_end,
+        integerOrNull(event.duration_ms),
+        jsonTextOrNull(resolveSignalPayload(event, modality)),
+        jsonTextOrNull(event.dynamics),
+        shortText(event.model_profile || event.settings_snapshot?.model_profile, 200),
+        shortText(event.settings_hash || event.settings_snapshot?.settings_hash, 100),
+        jsonTextOrNull(event.settings_snapshot),
+        event.capture_mode || 'local-browser',
+        'captured',
+        consent.consent_granted ? 1 : 0,
+        settings.student_emotion_view_enabled ? 1 : 0,
+        settings.admin_emotion_view_enabled ? 1 : 0,
+        settings.educator_emotion_view_enabled ? 1 : 0,
+        // Server-authoritative, exactly as for emotion records.
+        consent.consent_version || settings.consent_version || DEFAULT_CONSENT_VERSION,
+        consent.created_at || null,
+        shortText(event.oyonVersion, 40),
+        shortText(event.contractVersion, 40),
+        shortText(event.schema_version, 60),
+    ];
+
+    return dbRun(
+        `INSERT INTO oyon_signal_windows (${columns.join(', ')})
+         VALUES (${columns.map(() => '?').join(', ')})
+         ON CONFLICT(tenant_id, session_id, modality, record_id) WHERE record_id IS NOT NULL DO NOTHING`,
+        values
+    );
+}
+
+function hydrateSignalWindow(row) {
+    return {
+        ...row,
+        payload: parseJson(row.payload_json),
+        dynamics: parseJson(row.dynamics_json),
+        settings_snapshot: parseJson(row.settings_snapshot_json),
+    };
+}
+
 function hydrateRecord(row) {
     return {
         ...row,
@@ -811,6 +1184,13 @@ function hydrateRecord(row) {
         dynamics: parseJson(row.dynamics_json),
         gaze: parseJson(row.gaze_json),
         engagement: parseJson(row.engagement_json),
+        // Oyon 3 window-shared blocks (migration 0039).
+        facial: parseJson(row.facial_json),
+        posture: parseJson(row.posture_json),
+        heart_rate: parseJson(row.heart_rate_json),
+        respiration: parseJson(row.respiration_json),
+        illumination: parseJson(row.illumination_json),
+        capture_quality: parseJson(row.capture_quality_json),
     };
 }
 
@@ -825,6 +1205,10 @@ function normalizeSettings(settings) {
         retention_days: settings.retention_days,
         consent_version: settings.consent_version || DEFAULT_CONSENT_VERSION,
         ...runtime,
+        // The single tenant switch behind runtime's per-modality
+        // `*_window_share` fan-out, so the admin form round-trips one control
+        // rather than seven derived ones.
+        signal_window_share: boolFrom(settings.signal_window_share, SIGNAL_SETTING_DEFAULTS.signal_window_share),
         updated_at: settings.updated_at,
     };
 }
@@ -844,7 +1228,100 @@ function runtimeFromSettings(settings) {
         smoothing_alpha: numberOr(settings.smoothing_alpha, DEFAULT_RUNTIME.smoothing_alpha),
         min_hold_ms: numberOr(settings.min_hold_ms, DEFAULT_RUNTIME.min_hold_ms),
         min_switch_confidence: numberOr(settings.min_switch_confidence, DEFAULT_RUNTIME.min_switch_confidence),
+        ...signalFlagsFromSettings(settings),
     };
+}
+
+/*
+ * Oyon 3 signal flags (migration 0040) → the element's `settings` attribute.
+ *
+ * These are AUTHORITY over signals that already run: the element's own
+ * DEFAULT_SETTINGS turns gaze/eye/facial/posture/respiration/heart-rate on, and
+ * before 0040 Rohy forwarded no booleans at all, so a tenant could not switch
+ * any of them off. Forwarding them explicitly — rather than omitting a key and
+ * letting the element decide — is the point: an omitted key leaves the element's
+ * persisted store in charge, which is per-browser and invisible to the admin.
+ */
+function signalFlagsFromSettings(settings) {
+    const flag = (key) => boolFrom(settings?.[key], SIGNAL_SETTING_DEFAULTS[key]);
+    const share = flag('signal_window_share');
+    return {
+        facial_signals_enabled: flag('facial_signals_enabled'),
+        heart_rate_enabled: flag('heart_rate_enabled'),
+        respiration_enabled: flag('respiration_enabled'),
+        illumination_enabled: flag('illumination_enabled'),
+        eye_tracking_enabled: flag('eye_tracking_enabled'),
+        gaze_tracking_enabled: flag('gaze_tracking_enabled'),
+        enable_dynamics: flag('enable_dynamics'),
+        posture_tracking_enabled: flag('posture_tracking_enabled'),
+        typing_enabled: flag('typing_enabled'),
+        interaction_enabled: flag('interaction_enabled'),
+        discourse_enabled: flag('discourse_enabled'),
+        ai_assist_enabled: flag('ai_assist_enabled'),
+        // One tenant switch drives every modality's window_share, so signals
+        // cannot end up split across shapes for reasons an admin can't see.
+        facial_signals_window_share: share,
+        posture_window_share: share,
+        heart_rate_window_share: share,
+        respiration_window_share: share,
+        illumination_window_share: share,
+        engagement_window_share: share,
+        gaze_window_share: share,
+    };
+}
+
+function boolFrom(value, fallback) {
+    if (value === null || value === undefined) return fallback;
+    return Boolean(Number(value));
+}
+
+/*
+ * The tenant-editable signal columns of migration 0040, with the SAME defaults
+ * the migration writes. One map so the SQL defaults, the runtime projection and
+ * the PUT merge can never disagree — a mismatch would show up as a signal that
+ * silently flips state on an unrelated settings save.
+ */
+const SIGNAL_SETTING_DEFAULTS = Object.freeze({
+    facial_signals_enabled: true,
+    heart_rate_enabled: true,
+    respiration_enabled: true,
+    illumination_enabled: true,
+    eye_tracking_enabled: true,
+    gaze_tracking_enabled: true,
+    enable_dynamics: true,
+    // Off — the pose model cannot be served same-origin. See migration 0040.
+    posture_tracking_enabled: false,
+    signal_window_share: true,
+    // Host-driven modalities (migration 0041). Enabled at tenant level so they
+    // are ready the moment a learner accepts consent v2 — the ingest consent
+    // gate, not these flags, is what keeps them dormant until then. `voice` is
+    // absent on purpose: it gates microphone HARDWARE and Rohy's VoiceService
+    // already owns the mic, so it is its own follow-up.
+    typing_enabled: true,
+    interaction_enabled: true,
+    discourse_enabled: true,
+    ai_assist_enabled: true,
+});
+
+/*
+ * PUT /settings body → the signal columns, as a KEY-PRESENCE MERGE.
+ *
+ * Deliberately not a full replace. `PUT /addons/oyon/settings` is shared by
+ * every Oyon settings section, and a full replace here would mean the capture-
+ * engine form silently zeroing every signal flag it does not render — the exact
+ * partial-update trap CLAUDE.md records for this endpoint's boolean flags. An
+ * absent field keeps the STORED value, read from the settings row rather than
+ * the runtime projection (which renames window_share per modality).
+ */
+function signalFlagsFromBody(body, previousSettings) {
+    const out = {};
+    for (const [key, fallback] of Object.entries(SIGNAL_SETTING_DEFAULTS)) {
+        const supplied = body != null && Object.prototype.hasOwnProperty.call(body, key);
+        out[key] = supplied
+            ? (boolToInt(body[key]) ? 1 : 0)
+            : (boolFrom(previousSettings?.[key], fallback) ? 1 : 0);
+    }
+    return out;
 }
 
 function pickModelProfile(value, fallback) {
@@ -919,6 +1396,64 @@ function rowVisibilityColumn(user) {
     if (hasRoleAtLeast(user, ROLE_RANKS.admin)) return 'r.admin_can_view';
     if (hasRoleAtLeast(user, ROLE_RANKS.educator)) return 'r.educator_can_view';
     return null;
+}
+
+/*
+ * Filter builder for oyon_signal_windows. Mirrors buildEmotionRecordsWhere's
+ * tenant / per-row visibility / session / case / user / date semantics (same
+ * bare-date upper-bound handling), minus the emotion-specific predicates
+ * (dominant emotion, free-text search over emotion labels) and plus `modality`.
+ *
+ * Kept as its own function rather than parameterising the emotion builder: that
+ * builder is on the hot path of every existing dashboard, and the whole point of
+ * this change is that none of them shift.
+ */
+function buildSignalWindowsWhere(req, { session = null, modality = null } = {}) {
+    const params = [tenantId(req)];
+    const parts = ['r.tenant_id = ?'];
+
+    const visCol = rowVisibilityColumn(req.user);
+    if (visCol) {
+        parts.push(`${visCol} = 1`);
+    } else {
+        parts.push('1 = 0');
+    }
+
+    if (modality) {
+        parts.push('r.modality = ?');
+        params.push(modality);
+    }
+
+    if (session) {
+        parts.push('r.session_id = ?');
+        params.push(String(session.id));
+    } else {
+        if (req.query.case_id) {
+            parts.push('r.case_id = ?');
+            params.push(String(req.query.case_id));
+        }
+        if (req.query.user_id) {
+            parts.push('r.user_id = ?');
+            params.push(String(req.query.user_id));
+        }
+    }
+
+    const dateOnly = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
+    if (req.query.from) {
+        parts.push('r.window_start >= ?');
+        params.push(String(req.query.from));
+    }
+    if (req.query.to) {
+        if (dateOnly(req.query.to)) {
+            parts.push("r.window_start < date(?, '+1 day')");
+            params.push(String(req.query.to));
+        } else {
+            parts.push('r.window_start <= ?');
+            params.push(String(req.query.to));
+        }
+    }
+
+    return { whereSql: parts.join(' AND '), params };
 }
 
 function buildEmotionRecordsWhere(req, { session = null } = {}) {

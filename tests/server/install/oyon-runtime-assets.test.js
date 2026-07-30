@@ -27,6 +27,8 @@ const requiredStaticPaths = [
 
 describe('Oyon ONNX Runtime packaging contract', () => {
   const installer = read('OyonR/scripts/download-models.sh');
+  const verifier = read('scripts/verify-oyon-install.mjs');
+  const packageJson = JSON.parse(read('package.json'));
   const techTest = read('scripts/tech-test.sh');
   const freshInstall = read('.github/workflows/install-from-scratch.yml');
   const release = read('.github/workflows/release.yml');
@@ -42,10 +44,39 @@ describe('Oyon ONNX Runtime packaging contract', () => {
 
   it.each(requiredAssets)('requires %s in every install and verification path', (asset) => {
     expect(installer).toContain(asset);
+    expect(verifier).toContain(asset);
     expect(requiredProbeBlock).toContain(asset);
     expect(freshInstall).toContain(`standalone/vendor/onnxruntime-web/${asset}`);
     expect(release).toContain(`standalone/vendor/onnxruntime-web/${asset}`);
     expect(airgap).toContain(asset);
+  });
+
+  it('fails installation and builds when required Oyon assets are incomplete', () => {
+    expect(packageJson.scripts.postinstall).toBe('npm run setup:oyon');
+    expect(packageJson.scripts['setup:oyon']).toContain('npm run verify:oyon');
+    expect(packageJson.scripts.prebuild).toBe('npm run verify:oyon');
+  });
+
+  it('downloads models atomically and verifies immutable checksums', () => {
+    expect(installer).toContain('.part.$$');
+    expect(installer).toContain('--retry 3');
+    expect(installer).toContain('verify_sha256');
+    expect(installer).toContain('checksum mismatch');
+    expect(installer).not.toContain('EmotiEffLib/main/');
+    expect(installer).toContain('EmotiEffLib/520a051c64cd191521e5934655314e769a319684/');
+  });
+
+  it('verifies every multi-file Oyon element runtime family', () => {
+    for (const family of [
+      'voiceAnalysisWorker-',
+      'voiceFrameWorklet-',
+      'ort\\.bundle\\.min-',
+      'ort\\.webgpu\\.bundle\\.min-',
+      'ort-wasm-simd-threaded\\.asyncify-',
+      'ort-wasm-simd-threaded\\.jsep-',
+    ]) {
+      expect(verifier).toContain(family);
+    }
   });
 
   it('boots the published image with its required browser origin', () => {

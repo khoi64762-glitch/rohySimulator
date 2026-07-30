@@ -89,12 +89,13 @@ filterable by session/user) drops into any page as a web component:
 
 ```html
 <script type="module"
-  src="https://cdn.jsdelivr.net/npm/oyon@2/standalone/app/dist-element/oyon-app.element.js"></script>
+  src="https://cdn.jsdelivr.net/npm/oyon@3.0.3/standalone/app/dist-element/oyon-app.element.js"></script>
 <oyon-app user-id="student-42" style="height:100vh"></oyon-app>
 ```
 
 Local-first (IndexedDB), optional backend sync, shadow-DOM isolated.
-See [`docs/EMBEDDING.md`](docs/EMBEDDING.md).
+See [`docs/EMBEDDING.md`](docs/EMBEDDING.md). Hosts upgrading from v2 should
+follow [`MIGRATING_V2_TO_V3.md`](MIGRATING_V2_TO_V3.md).
 
 ### 1. Standalone
 
@@ -226,10 +227,11 @@ with a websocket) without touching the rest.
 
 Oyon is built around four hard rules:
 
-1. **No raw frames stored.** Validators on both ends (`src/validation/`
-   and the example backend route) reject any payload containing
-   `frame*`, `image*`, `video*`, `pixels`, `landmarks`, `blob`, or
-   `base64`.
+1. **The runtime does not store or emit raw frames.** Validators on both ends
+   (`src/validation/` and the example backend route) recursively reject known
+   raw-media fields anywhere in an event, including arbitrary extension
+   objects. Backends should still persist an explicit field allowlist as a
+   separate defense-in-depth boundary.
 2. **No emotion labels shown to the learner during the case** by default.
 3. **No grading or automated decisions** from Oyon outputs.
 4. **Per-session opt-in, one-click stop, camera light follows actual capture.**
@@ -247,7 +249,16 @@ specified and templated but not yet pulled into a host app. See
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE).
+Carm Research License v1.4 — full text embedded at [`LICENSE`](LICENSE),
+synced from the canonical
+[mohsaqr/carm-license](https://github.com/mohsaqr/carm-license) repository.
 
-Bundled third-party model weights are distributed under their own
-licenses. See [`NOTICE.md`](NOTICE.md).
+Free for research, teaching and other non-commercial use — including
+industry-funded academic work. A paid license is required for commercial use.
+**Results you produce are yours** and may be published without restriction.
+
+Every third-party component Oyon ships, vendors or downloads at runtime has
+its full license text embedded under [`licenses/`](licenses/) and indexed in
+[`NOTICE.md`](NOTICE.md) — not merely linked, as the license requires. Note
+that the default gaze engine (WebGazer) is **GPL-3.0-or-later**; see the
+integrator note in `NOTICE.md` before shipping it in a proprietary host.

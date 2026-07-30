@@ -31,29 +31,72 @@ function normalizedEmotion(value) {
 }
 
 /**
- * Group windows by session, time-order each group, and emit one state
- * sequence per session (insertion-ordered by first appearance).
+ * Group records by session, order each group, and emit one state sequence per
+ * session (insertion-ordered by first appearance).
  *
- * @param {Array<object>} windows  stored EmotionWindow records
- * @returns {string[][]}  one chain of normalized emotion states per session
+ * Records are EmotionWindows by default. Signal-log events (typing, discourse,
+ * interaction, ai_assist) are the same shape of problem — group by session,
+ * order, project to a state label — so they reuse this function rather than a
+ * near-duplicate: pass `stateOf` and `orderOf`. Everything downstream
+ * (dynajs `tna()`, `discoverPatterns`, `lsa`, CentralityPanel) consumes
+ * `string[][]` and does not care which channel produced it.
+ *
+ * @param {Array<object>} records
+ * @param {object} [options]
+ * @param {(record: object) => string} [options.stateOf]  record → state label
+ * @param {(record: object) => number} [options.orderOf]  record → sort key
+ * @param {(record: object) => string} [options.groupOf]  record → chain key
+ * @returns {string[][]}  one chain per group
  */
-export function buildSessionSequences(windows) {
-  const list = Array.isArray(windows) ? windows : [];
+export function buildSessionSequences(records, options = {}) {
+  const list = Array.isArray(records) ? records : [];
+  const stateOf = options.stateOf
+    || ((w) => normalizedEmotion(w.dominant_emotion) || 'insufficient');
+  const groupOf = options.groupOf || sessionIdOf;
+  // Events carry a monotonic `sequence_index`; windows only have wall-clock
+  // times. Prefer the index where present — wall clock is not monotonic across
+  // a tab suspend, and ordering by it can silently scramble a chain.
+  const orderOf = options.orderOf
+    || ((w) => (Number.isFinite(w.sequence_index)
+      ? w.sequence_index
+      : parseTime(w.window_end || w.timestamp)));
+
   const groups = new Map();
-  for (const w of list) {
-    const key = sessionIdOf(w);
+  for (const record of list) {
+    const key = groupOf(record);
     if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(w);
+    groups.get(key).push(record);
   }
   const sequences = [];
   for (const group of groups.values()) {
-    const sorted = group
-      .slice()
-      .sort((a, b) => parseTime(a.window_end || a.timestamp) - parseTime(b.window_end || b.timestamp));
-    const states = sorted.map((w) => normalizedEmotion(w.dominant_emotion) || 'insufficient');
+    const sorted = group.slice().sort((a, b) => orderOf(a) - orderOf(b));
+    const states = sorted.map(stateOf).filter((s) => typeof s === 'string' && s.length > 0);
     if (states.length > 0) sequences.push(states);
   }
   return sequences;
+}
+
+/**
+ * Signal-log events → per-session state chains, via `buildSessionSequences`.
+ * `modality` filters the log to one channel; omit it to interleave every
+ * channel on one timeline (typing + discourse + ai_assist in `sequence_index`
+ * order), which is what cross-channel transition questions need.
+ *
+ * @param {Array<object>} events  stored signal_events records
+ * @param {string|null} [modality]
+ * @returns {string[][]}
+ */
+export function buildEventSequences(events, modality = null) {
+  const list = Array.isArray(events) ? events : [];
+  const scoped = modality ? list.filter((e) => e?.modality === modality) : list;
+  return buildSessionSequences(scoped, {
+    stateOf: (e) => e?.state,
+    // Chain per CAPTURE, not per session. `sequence_index` restarts at 0 for
+    // each capture, so two captures in one session would otherwise be sorted
+    // into each other and joined end-to-end — producing a phantom transition
+    // from one capture's last state to the next capture's first.
+    groupOf: (e) => `${sessionIdOf(e)}::${e?.capture_id ?? ''}`,
+  });
 }
 
 /**

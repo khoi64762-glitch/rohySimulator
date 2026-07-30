@@ -70,7 +70,15 @@ function el(name, attrs = {}, children = []) {
 
 // Render a TNA model into a container as SVG, faithful to Rohy's NetworkGraph.
 // model is the dynajs TNA shape: { labels, weights (Matrix), inits (Float64Array) }.
-// Options: { svgWidth=960, graphHeight=500, nodeRadius=25, showSelfLoops=true, showEdgeLabels=false }.
+// Options: { svgWidth=960, graphHeight=500, nodeRadius=25, showSelfLoops=true, showEdgeLabels=false,
+//            nodeRadii=null }.
+//
+// nodeRadii: optional per-node radius array (same order as model.labels), used
+// to size nodes by a centrality measure. Omit it and every node keeps the
+// single `nodeRadius` — the geometry below reads radii through rOf(i), so the
+// scalar path is unchanged. Edge endpoints and self-loops must use the radius
+// of THEIR OWN node: trimming every edge by a global radius leaves arrowheads
+// buried inside large nodes and floating away from small ones.
 export function renderNetworkGraph(container, model, options = {}) {
   container.replaceChildren();
   if (!model || !model.labels || model.labels.length === 0) return;
@@ -78,6 +86,11 @@ export function renderNetworkGraph(container, model, options = {}) {
   const svgWidth = options.svgWidth ?? 960;
   const graphHeight = options.graphHeight ?? 500;
   const nodeRadius = options.nodeRadius ?? 25;
+  const nodeRadii = Array.isArray(options.nodeRadii) ? options.nodeRadii : null;
+  const rOf = (i) => {
+    const r = nodeRadii ? nodeRadii[i] : nodeRadius;
+    return Number.isFinite(r) && r > 0 ? r : nodeRadius;
+  };
   const showSelfLoops = options.showSelfLoops ?? true;
   const showEdgeLabels = options.showEdgeLabels ?? false;
   const edgeColor = options.edgeColor ?? EDGE_COLOR;
@@ -93,7 +106,10 @@ export function renderNetworkGraph(container, model, options = {}) {
   const n = labels.length;
   const centerX = svgWidth / 2;
   const centerY = graphHeight / 2;
-  const layoutRadius = Math.min(svgWidth, graphHeight) / 2 - nodeRadius - 45;
+  const maxNodeRadius = nodeRadii
+    ? nodeRadii.reduce((m, r) => (Number.isFinite(r) && r > m ? r : m), nodeRadius)
+    : nodeRadius;
+  const layoutRadius = Math.min(svgWidth, graphHeight) / 2 - maxNodeRadius - 45;
 
   const nodes = labels.map((label, i) => {
     const angle = (2 * Math.PI * i / n) - Math.PI / 2;
@@ -144,9 +160,10 @@ export function renderNetworkGraph(container, model, options = {}) {
       const dirX = dx / dist;
       const dirY = dy / dist;
 
-      const loopRadius = nodeRadius * 0.55;
-      const loopCenterX = node.x + dirX * (nodeRadius + loopRadius);
-      const loopCenterY = node.y + dirY * (nodeRadius + loopRadius);
+      const selfR = rOf(node.index);
+      const loopRadius = selfR * 0.55;
+      const loopCenterX = node.x + dirX * (selfR + loopRadius);
+      const loopCenterY = node.y + dirY * (selfR + loopRadius);
 
       const gapAngle = 0.4;
       const startAngle = Math.atan2(-dirY, -dirX) + gapAngle;
@@ -219,18 +236,20 @@ export function renderNetworkGraph(container, model, options = {}) {
     const startDirX = midX - src.x;
     const startDirY = midY - src.y;
     const startDist = Math.sqrt(startDirX * startDirX + startDirY * startDirY) || 1;
-    const sx = src.x + (startDirX / startDist) * nodeRadius;
-    const sy = src.y + (startDirY / startDist) * nodeRadius;
+    const srcR = rOf(src.index);
+    const tgtR = rOf(tgt.index);
+    const sx = src.x + (startDirX / startDist) * srcR;
+    const sy = src.y + (startDirY / startDist) * srcR;
 
     const endDirX = midX - tgt.x;
     const endDirY = midY - tgt.y;
     const endDist = Math.sqrt(endDirX * endDirX + endDirY * endDirY) || 1;
-    const stopDist = nodeRadius + ARROW_SIZE;
+    const stopDist = tgtR + ARROW_SIZE;
     const ex = tgt.x + (endDirX / endDist) * stopDist;
     const ey = tgt.y + (endDirY / endDist) * stopDist;
 
-    const tipX = tgt.x + (endDirX / endDist) * nodeRadius;
-    const tipY = tgt.y + (endDirY / endDist) * nodeRadius;
+    const tipX = tgt.x + (endDirX / endDist) * tgtR;
+    const tipY = tgt.y + (endDirY / endDist) * tgtR;
 
     const tangent = bezierTangent(1, sx, sy, midX, midY, tipX, tipY);
 
@@ -267,8 +286,9 @@ export function renderNetworkGraph(container, model, options = {}) {
 
   // Layer 3: Nodes (with init-probability donut arc)
   for (const node of nodes) {
-    const rimWidth = nodeRadius * 0.18;
-    const ringRadius = nodeRadius + rimWidth * 0.7;
+    const drawR = rOf(node.index);
+    const rimWidth = drawR * 0.18;
+    const ringRadius = drawR + rimWidth * 0.7;
     const arcPath = donutArc(ringRadius, node.init);
     const labelText = node.label.length > 12 ? `${node.label.slice(0, 11)}…` : node.label;
     const fontSize = node.label.length > 8 ? 9 : 11;
@@ -293,7 +313,7 @@ export function renderNetworkGraph(container, model, options = {}) {
       }));
     }
     g.appendChild(el('circle', {
-      r: nodeRadius,
+      r: drawR,
       fill: node.color,
       stroke: 'var(--tna-svg-node-stroke, #f7f9fc)',
       'stroke-width': 2.5,

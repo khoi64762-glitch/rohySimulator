@@ -1,0 +1,162 @@
+// Lifecycle contract for the lazy SignalCapture host.
+//
+// The properties worth pinning are the ones whose failure is invisible: a
+// chunk fetched for a tenant that has signals off, a capture that outlives its
+// session, a stop() that never runs so an in-flight typing episode is lost,
+// and voice reaching getUserMedia because a flag defaulted the wrong way.
+
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { renderHook, waitFor, act } from '@testing-library/react';
+
+// `imported` counts module evaluations, which is how we observe that the
+// dynamic import really is deferred — not merely that start() wasn't called.
+const h = vi.hoisted(() => ({ imported: 0, instances: [] }));
+
+vi.mock('oyon/signal-capture', () => {
+    h.imported += 1;
+    return {
+        createSignalCapture: vi.fn((options) => {
+            const instance = {
+                options,
+                started: null,
+                stopped: 0,
+                disposed: 0,
+                start: vi.fn(function (ctx) { this.started = ctx; return this; }),
+                stop: vi.fn(function () { this.stopped += 1; return Promise.resolve(); }),
+                dispose: vi.fn(function () { this.disposed += 1; }),
+            };
+            h.instances.push(instance);
+            return instance;
+        }),
+    };
+});
+vi.mock('./clientLogger', () => ({ oyonClientLog: vi.fn() }));
+vi.mock('./signalTransport', () => ({ createSignalTransport: vi.fn(fn => ({ send: fn })) }));
+
+const { useSignalCapture, captureSettings, anyModalityEnabled } = await import('./useSignalCapture.js');
+
+const CONFIG = { typing_enabled: true, interaction_enabled: true, discourse_enabled: false, ai_assist_enabled: false };
+const PROPS = { enabled: true, persist: true, runtimeConfig: CONFIG, sessionId: 's1', caseId: 'c1', room: 'chat' };
+
+beforeEach(() => {
+    h.imported = 0;
+    h.instances.length = 0;
+});
+
+describe('captureSettings', () => {
+    // Same trap captureBridge.elementSettings documents: createOyonSettings
+    // merges over its own defaults with a type check, so a SQLite 0/1 int is
+    // read as "no opinion" rather than as off.
+    it('forwards only real booleans', () => {
+        expect(captureSettings({ typing_enabled: 1, interaction_enabled: 'true', discourse_enabled: false }))
+            .toEqual({ voice_enabled: false, discourse_enabled: false });
+    });
+
+    // Rohy's VoiceService owns the microphone. A stray tenant flag must not be
+    // able to reach getUserMedia through Oyon.
+    it('forces voice off even when a config asks for it', () => {
+        expect(captureSettings({ voice_enabled: true }).voice_enabled).toBe(false);
+    });
+
+    it('survives a missing or malformed config', () => {
+        expect(captureSettings(null)).toEqual({ voice_enabled: false });
+        expect(anyModalityEnabled(null)).toBe(false);
+        expect(anyModalityEnabled({ typing_enabled: 1 })).toBe(false);
+        expect(anyModalityEnabled({ typing_enabled: true })).toBe(true);
+    });
+});
+
+describe('useSignalCapture — when it stays out of the way', () => {
+    // The lazy guarantee. Asserting the module was never evaluated is stronger
+    // than asserting start() wasn't called: it means the chunk is not fetched.
+    it.each([
+        ['the addon is disabled', { enabled: false }],
+        ['consent is not open', { persist: false }],
+        ['there is no session', { sessionId: null }],
+        ['the tenant enabled no modality', { runtimeConfig: { typing_enabled: false } }],
+    ])('never imports the chunk when %s', async (_label, override) => {
+        const { result } = renderHook(() => useSignalCapture({ ...PROPS, ...override }));
+        await act(async () => {});
+        expect(h.imported).toBe(0);
+        expect(result.current.capture).toBeNull();
+    });
+});
+
+describe('useSignalCapture — lifecycle', () => {
+    it('starts under rohy\'s session id and exposes the handle', async () => {
+        const { result } = renderHook(() => useSignalCapture(PROPS));
+        await waitFor(() => expect(result.current.capture).not.toBeNull());
+
+        expect(h.imported).toBe(1);
+        expect(h.instances[0].started).toEqual({ session_id: 's1' });
+        expect(h.instances[0].options.settings).toEqual({
+            voice_enabled: false,
+            typing_enabled: true,
+            interaction_enabled: true,
+            discourse_enabled: false,
+            ai_assist_enabled: false,
+        });
+    });
+
+    // stop() finalizes an in-flight typing episode as abandoned and flushes
+    // pending writes; disposing first would discard those windows.
+    it('stops before disposing on unmount', async () => {
+        const { result, unmount } = renderHook(() => useSignalCapture(PROPS));
+        await waitFor(() => expect(result.current.capture).not.toBeNull());
+
+        const instance = h.instances[0];
+        unmount();
+        await waitFor(() => expect(instance.disposed).toBe(1));
+        expect(instance.stopped).toBe(1);
+        expect(instance.stop.mock.invocationCallOrder[0])
+            .toBeLessThan(instance.dispose.mock.invocationCallOrder[0]);
+    });
+
+    // Session identity is baked into the shared event log at start().
+    it('restarts on a session change', async () => {
+        const { result, rerender } = renderHook(props => useSignalCapture(props), { initialProps: PROPS });
+        await waitFor(() => expect(result.current.capture).not.toBeNull());
+
+        rerender({ ...PROPS, sessionId: 's2' });
+        await waitFor(() => expect(h.instances).toHaveLength(2));
+        expect(h.instances[0].stopped).toBe(1);
+        expect(h.instances[1].started).toEqual({ session_id: 's2' });
+    });
+
+    // Regression lock: room and case are read at SEND time by the transport.
+    // Restarting on them would abandon a typing episode on every navigation.
+    it('does not restart when the learner changes room or case', async () => {
+        const { result, rerender } = renderHook(props => useSignalCapture(props), { initialProps: PROPS });
+        await waitFor(() => expect(result.current.capture).not.toBeNull());
+
+        rerender({ ...PROPS, room: 'examination', caseId: 'c2' });
+        await act(async () => {});
+
+        expect(h.instances).toHaveLength(1);
+        expect(h.instances[0].stopped).toBe(0);
+    });
+
+    // The transport reads context lazily so a room hop reaches the next batch
+    // without disturbing capture.
+    it('gives the transport the current room, not the one at start', async () => {
+        const { result, rerender } = renderHook(props => useSignalCapture(props), { initialProps: PROPS });
+        await waitFor(() => expect(result.current.capture).not.toBeNull());
+
+        const readContext = h.instances[0].options.transport.send;
+        expect(readContext().room).toBe('chat');
+        rerender({ ...PROPS, room: 'radiology' });
+        expect(readContext().room).toBe('radiology');
+    });
+
+    // The async gap. Unmounting while the chunk is still loading must not
+    // construct anything: the import is the only await, so bailing there means
+    // no aggregators, no DOM listeners, and no capture left running with
+    // nobody holding a reference to stop it.
+    it('constructs nothing when unmounted while the chunk is still loading', async () => {
+        const { unmount } = renderHook(() => useSignalCapture(PROPS));
+        unmount();
+        await act(async () => {});
+        await act(async () => {});
+        expect(h.instances).toHaveLength(0);
+    });
+});

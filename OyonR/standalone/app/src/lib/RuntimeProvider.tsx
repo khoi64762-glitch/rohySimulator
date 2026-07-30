@@ -11,6 +11,7 @@ import {
   GAZE_VIDEO_ELEMENT_ID,
   type UseStandaloneRuntimeResult,
 } from './runtime';
+import { useBridge } from './hostBridge';
 import { useSessionContext } from './sessionContext';
 import { useSettings } from './settingsStore';
 
@@ -34,6 +35,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const runtime = useStandaloneRuntime({ videoRef });
   const setContext = useSessionContext((s) => s.setContext);
+  const chromeless = useBridge((s) => s.chromeless);
   // Read the editable settings hash so the TopBar pill reflects user
   // edits live (rather than the frozen hash of the running runtime).
   const editedHash = useSettings((s) => s.settings_hash);
@@ -42,6 +44,13 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   // useSessionContext, so all of its pills update transparently when the
   // runtime starts, the model changes, or the user dials a slider.
   useEffect(() => {
+    // A chrome="none" viewer has a stub runtime with no session of its own.
+    // When it coexists with a capture element, writing that stub's null session
+    // into the module-level context would erase the capture's active session
+    // and blank the viewer's current-session analytics. Viewer identity comes
+    // from its per-instance session-id bridge (or the sibling capture context),
+    // so it must remain a read-only consumer of this shared strip.
+    if (chromeless) return;
     setContext({
       modelName: 'oyon',
       modelVersion: runtime.modelLabel,
@@ -68,6 +77,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     runtime.modelLabel,
     runtime.windowCount,
     runtime.sessionId,
+    chromeless,
     editedHash,
     setContext,
   ]);

@@ -1,4 +1,4 @@
-// Contract tests for the pure Oyon-v2 glue (captureBridge.js): the element
+// Contract tests for the pure Oyon-v3 glue (captureBridge.js): the element
 // `settings` attribute payload and the POST /addons/oyon/emotion-records
 // body. These are the two payloads that cross host boundaries — pin them.
 
@@ -58,6 +58,7 @@ describe('persistBody — oyon:window payload → emotion-records POST body', ()
 
     it('stamps the ROHY session and case onto every event', () => {
         const body = persistBody([win], { sessionId: 'rohy-42', caseId: 'case-7' });
+        expect(body.schema_version).toBe('oyon-window-batch-v4');
         expect(body.session_id).toBe('rohy-42');
         expect(body.events).toHaveLength(1);
         expect(body.events[0].session_id).toBe('rohy-42'); // element's own id overwritten
@@ -117,5 +118,57 @@ describe('persistBody — oyon:window payload → emotion-records POST body', ()
 describe('asset base contract', () => {
     it('points at the served OyonR standalone tree (install-assets layout)', () => {
         expect(OYON_ASSET_BASE).toBe('/oyon/standalone');
+    });
+});
+
+// Oyon 3 signal flags (migration 0040). These exist so a tenant can DISABLE a
+// signal: the element's own DEFAULT_SETTINGS turns gaze/eye/facial/posture/
+// respiration/heart-rate on, so before these were forwarded there was no way to
+// switch any of them off from Rohy.
+describe('elementSettings — Oyon 3 signal flags', () => {
+    it('forwards false, not just true — the whole point of the passthrough', () => {
+        const out = elementSettings({
+            heart_rate_enabled: false,
+            respiration_enabled: false,
+            facial_signals_enabled: true,
+        });
+        expect(out.heart_rate_enabled).toBe(false);
+        expect(out.respiration_enabled).toBe(false);
+        expect(out.facial_signals_enabled).toBe(true);
+    });
+
+    it('forwards the per-modality window_share fan-out', () => {
+        const out = elementSettings({
+            facial_signals_window_share: true,
+            heart_rate_window_share: false,
+            gaze_window_share: true,
+        });
+        expect(out.facial_signals_window_share).toBe(true);
+        expect(out.heart_rate_window_share).toBe(false);
+        expect(out.gaze_window_share).toBe(true);
+    });
+
+    // The element merges `settings` key-by-key with a primitive-type check, so a
+    // non-boolean would be dropped on its side and read as "no opinion" here.
+    it('ignores non-boolean values rather than forwarding a coercible one', () => {
+        const out = elementSettings({
+            heart_rate_enabled: 0,
+            respiration_enabled: 'false',
+            gaze_tracking_enabled: 1,
+        });
+        expect('heart_rate_enabled' in out).toBe(false);
+        expect('respiration_enabled' in out).toBe(false);
+        expect('gaze_tracking_enabled' in out).toBe(false);
+    });
+
+    it('omits every flag when the server supplies none, leaving numeric knobs intact', () => {
+        const out = elementSettings({ window_ms: 10000, model_profile: 'hse-emotion-mtl' });
+        for (const key of ['facial_signals_enabled', 'posture_tracking_enabled',
+            'heart_rate_enabled', 'respiration_enabled', 'illumination_enabled',
+            'eye_tracking_enabled', 'gaze_tracking_enabled', 'enable_dynamics']) {
+            expect(key in out).toBe(false);
+        }
+        expect(out.aggregate_window_ms).toBe(10000);
+        expect(out.model_profile).toBe('hse-emotion-mtl');
     });
 });

@@ -78,3 +78,45 @@ describe('recordsToWindows', () => {
         expect(recordsToWindows(undefined)).toEqual([]);
     });
 });
+
+// Oyon 3 window-shared blocks (migration 0039). These are what let the
+// element's OWN Analyze dashboards render the new modalities without Rohy
+// authoring a view per signal — so dropping them here would silently blank the
+// new dashboards exactly as a column rename would blank the old ones.
+describe('Oyon 3 window-shared blocks', () => {
+    const V3_RECORD = {
+        ...DB_RECORD,
+        facial: { facing_screen_ratio: 0.9, head_pose_mean: { yaw: 2 } },
+        posture: { slump_ratio: 0.15 },
+        heart_rate: { bpm: 74, bpm_robust: 73, confidence: 0.62 },
+        respiration: { brpm: 13 },
+        illumination: { mean_luma: 0.38 },
+        capture_quality: { decoded_fps: 15.8 },
+    };
+
+    it('passes every v3 block through to the EmotionWindow', () => {
+        const w = recordToWindow(V3_RECORD);
+        expect(w.facial).toEqual({ facing_screen_ratio: 0.9, head_pose_mean: { yaw: 2 } });
+        expect(w.posture).toEqual({ slump_ratio: 0.15 });
+        expect(w.heart_rate).toEqual({ bpm: 74, bpm_robust: 73, confidence: 0.62 });
+        expect(w.respiration).toEqual({ brpm: 13 });
+        expect(w.illumination).toEqual({ mean_luma: 0.38 });
+        expect(w.capture_quality).toEqual({ decoded_fps: 15.8 });
+    });
+
+    it('yields null (never undefined) for rows captured before 0039', () => {
+        const w = recordToWindow(DB_RECORD);
+        for (const key of ['facial', 'posture', 'heart_rate', 'respiration', 'illumination', 'capture_quality']) {
+            expect(w[key]).toBeNull();
+        }
+    });
+
+    it('leaves the pre-existing projection untouched', () => {
+        const before = recordToWindow(DB_RECORD);
+        const after = recordToWindow(V3_RECORD);
+        expect(after.dominant_emotion).toBe(before.dominant_emotion);
+        expect(after.gaze).toEqual(before.gaze);
+        expect(after.engagement).toEqual(before.engagement);
+        expect(after.room).toBe(before.room);
+    });
+});

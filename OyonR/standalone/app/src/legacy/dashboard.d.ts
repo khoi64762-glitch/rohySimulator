@@ -41,6 +41,11 @@ declare module '@/legacy/dashboard.js' {
   export function drawNetwork(
     container: HTMLElement,
     result: any | null,
+    options?: {
+      nodeRadii?: number[] | null;
+      svgWidth?: number;
+      graphHeight?: number;
+    },
   ): { nodes: number; edges: number };
   export function drawDynamics(canvas: HTMLCanvasElement, windows: any[]): void;
   export function drawSequenceDistribution(canvas: HTMLCanvasElement, result: any | null): void;
@@ -49,7 +54,11 @@ declare module '@/legacy/dashboard.js' {
   export function renderMatrixHeatmap(container: HTMLElement, result: any | null): void;
   export function renderIndexPlotPanel(container: HTMLElement, result: any | null): void;
   export function renderDistributionPlotPanel(container: HTMLElement, result: any | null): void;
-  export function renderSequenceSummary(wrap: HTMLElement, result: any | null): void;
+  export function renderSequenceSummary(
+    wrap: HTMLElement,
+    result: any | null,
+    options?: { includeOverview?: boolean },
+  ): void;
 
   export function summarizeGazeKpis(gazeWindows: any[]): {
     windows: number;

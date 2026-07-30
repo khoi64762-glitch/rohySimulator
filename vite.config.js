@@ -1,10 +1,32 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { fileURLToPath } from 'node:url'
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
   base: process.env.NODE_ENV === 'production' ? '/rohy/' : '/',
+  resolve: {
+    alias: [
+      // Keep onnxruntime-web out of the SPA bundle. `oyon/signal-capture`
+      // statically reaches the voice VAD, which lazily imports ONNX — and a
+      // bundler must emit everything it can reach, so dist/ grew by ~48.7 MB
+      // of .wasm plus ~500 KB of glue for a code path Rohy never runs
+      // (voice_enabled is forced false). The <oyon-app> element loads its own
+      // runtime same-origin from /oyon/standalone/vendor/onnxruntime-web, so
+      // this was a duplicate of bytes already shipped.
+      //
+      // The stub throws with an explanatory message rather than being empty.
+      // Aliased by PACKAGE NAME, not by Oyon's internal file path: the package
+      // name survives a vendored-engine bump, an internal path does not — and
+      // a stale path alias would silently put the 48.7 MB back.
+      // Pinned by src/components/oyon/onnxRuntimeStub.test.js.
+      {
+        find: /^onnxruntime-web(\/.*)?$/,
+        replacement: fileURLToPath(new URL('./src/components/oyon/onnxRuntimeStub.js', import.meta.url)),
+      },
+    ],
+  },
   // ES module workers are kept enabled in case future inference moves off-thread.
   worker: {
     format: 'es',

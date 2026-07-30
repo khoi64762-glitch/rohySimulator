@@ -106,6 +106,13 @@ export default defineConfig({
     // @mediapipe/tasks-vision/wasm.
     include: ['@mediapipe/tasks-vision', 'onnxruntime-web'],
   },
+  worker: {
+    // The voice analysis worker (src/workers/voiceAnalysisWorker.js, reached
+    // via WorkerVoiceAnalyzer's `new Worker(new URL(...), { type: 'module' })`)
+    // imports onnxruntime-web, whose dynamic imports force a code-splitting
+    // worker build — Vite's default 'iife' worker format cannot host that.
+    format: 'es',
+  },
   build: {
     rollupOptions: {
       output: {
