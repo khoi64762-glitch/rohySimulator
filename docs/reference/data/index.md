@@ -2,7 +2,7 @@
 
 > **Generated file — do not edit by hand.** Produced by `scripts/docs-gen/gen-data.mjs` from `server/db.js`, `migrations/0001_initial.sql` (the bootstrap schema) and all `migrations/*.sql`. Regenerate with `npm run docs:gen:data`.
 
-**91 tables** in the durable data model.
+**92 tables** in the durable data model.
 
 > Note: `server/db.js` no longer holds inline `CREATE TABLE` DDL — it delegates to the migration runner. The canonical bootstrap schema is `migrations/0001_initial.sql`, treated here as the base schema. SQLite rebuild-scaffold tables (`*_new`/`*_old`) are intentionally excluded.
 
@@ -23,7 +23,7 @@ These columns recur across many tables and carry platform-wide semantics (see `C
 
 Schema evolves only through versioned `migrations/*.sql`. Each migration is classified **additive** (previous-version code still runs) or **destructive** in `migrations/MANIFEST.md`, which `bin/rohy-update` reads to decide whether to auto-apply. Default is additive-only; destructive changes follow a multi-release dance.
 
-Parsed **37 migration files** beyond the base schema (`0001_initial.sql`).
+Parsed **38 migration files** beyond the base schema (`0001_initial.sql`).
 
 | Migration | Class | Note |
 | --- | --- | --- |
@@ -65,6 +65,7 @@ Parsed **37 migration files** beyond the base schema (`0001_initial.sql`).
 | `0036_user_onboarding_settings.sql` | additive | Per-user onboarding/first-run prefs: one nullable `user_preferences.onboarding_settings JSON` column (`first_run_done`, `voice_mode`, `oyon_consent`). NULL = never onboarded, so every existing user sees the new first-run screen once (deliberate — it surfaces the previously silent emotion-capture consent). Single nullable ADD COLUMN; pre-migration code never selects it. |
 | `0037_registration_invites.sql` | additive | Registration invites: `registration_invites` (one plaintext `token` that serves as BOTH a `/register?invite=…` link and a typeable code — the platform cannot send email, so an invite is a copy-paste artifact like `cohorts.join_code`; carries role, optional auto-enrol `cohort_id`, `max_uses`/`uses`, `expires_at`, optional `email_pattern` that beats the global domain allowlist, and revocation) plus `registration_invite_uses` (the redemption ledger, kept separate so a revoked invite still shows who it admitted). Two new tables; nothing on existing tables changes and behaviour is unchanged until an admin mints an invite. |
 | `0038_registration_requests.sql` | additive | The registration approval queue — the storage `approval` mode never had. `approval` was selectable and advertised by the public probe, but `/auth/register` had no branch for it, so it behaved exactly like `open`: everyone in, unreviewed, with a token. New `registration_requests` table (username/email/hashed password + pending/approved/rejected + who decided and when). Deliberately NOT `users.status='pending'`: that column has a CHECK constraint SQLite cannot ALTER, so adding a state means rebuilding the most FK-referenced table in the schema — and a pending applicant is not a user, so keeping them out of `users` preserves the invariant that a row in `users` is someone who may sign in. Partial unique indexes on live rows only, so a rejected applicant may re-apply but two simultaneous requests for one username cannot both land. One new table; behaviour unchanged until an admin selects `approval`. |
+| `0039_oyon_signal_windows.sql` | additive | Storage for Oyon 3's new signal modalities. Enabling any of them produces three event shapes, all mishandled before this migration. (1) Blocks riding on the emotion window — every `*_window_share` setting defaults TRUE, so `facial`/`posture`/`heart_rate`/`respiration`/`illumination` arrive as extra keys on the ordinary emotion window and were silently dropped for want of a column, exactly the defect 0028 records about v1 dropping `gaze`/`engagement`. Fixed with six nullable `ADD COLUMN`s on `oyon_emotion_records` (`facial_json`, `posture_json`, `heart_rate_json`, `respiration_json`, `illumination_json`, `capture_quality_json`); pre-migration rows read NULL, no existing query changes meaning, and the only visible effect is extra keys on `SELECT r.*` which EmotionWindow's open index signature already tolerates. (2) Standalone modality-only windows (`facial_only`/`posture_only`/`heart_rate_only`, emitted when `*_window_share` is false and on stop/flush) carry no emotion data and keep `valid_frames` INSIDE the modality block, so the top-level bind was NULL into `valid_frames NOT NULL` — the insert threw and the whole batch 500'd, losing the emotion windows travelling with it. (3) Host-bounded episodes (typing, voice, interaction, discourse, ai_assist) do not share the camera's fixed cadence and cannot use the `(session, window_start, window_end)` identity at all. Shapes 2 and 3 go to a new `oyon_signal_windows` table rather than a `modality` column on `oyon_emotion_records`: a column would require auditing every existing query for `WHERE modality = 'emotion'`, whereas a separate table makes the isolation structural — legacy SQL cannot address the new rows. No CHECK on `modality`/`capture_mode` (SQLite cannot ALTER a CHECK and upstream may add modalities — see 0038); both are validated in app code against Oyon's exported `OYON_MODALITIES`/`OYON_WINDOW_KINDS`. Dedup key includes `modality` because a `facial_only` window shares window bounds with its sibling emotion window. One new table plus six nullable columns; behaviour is unchanged until the new capture flags are enabled. |
 
 ## Tables by concern
 
@@ -110,7 +111,7 @@ Parsed **37 migration files** beyond the base schema (`0001_initial.sql`).
 
 ### Oyon (emotion add-on)
 
-`oyon_emotion_consents`, `oyon_emotion_records`, `oyon_settings`
+`oyon_emotion_consents`, `oyon_emotion_records`, `oyon_settings`, `oyon_signal_windows`
 
 ### Alarms
 

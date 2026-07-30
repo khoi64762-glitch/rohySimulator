@@ -9,6 +9,43 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.2] — 2026-07-30
+
+### Added
+
+- **Storage and a read API for Oyon 3's new signal modalities** — the groundwork
+  that makes enabling them safe, landed before any capture flag is turned on.
+  Migration `0039` adds an `oyon_signal_windows` table for standalone
+  modality-only windows and host-bounded episodes (typing, voice, interaction,
+  discourse, ai-assist), plus six nullable columns on `oyon_emotion_records` for
+  the blocks that ride on the emotion window. New `GET /addons/oyon/
+  signal-windows` sits behind the existing Oyon read policy (role + per-role
+  tenant flag, tenant scoping, redaction) and reports which modalities hold data.
+
+### Fixed
+
+- **Oyon 3 window blocks were discarded on ingest.** Every `*_window_share`
+  setting defaults on, so `facial`, `posture`, `heart_rate`, `respiration`,
+  `illumination` and `capture_quality` arrive as extra keys on the ordinary
+  emotion window — and `insertEmotionRecord` had no columns for them, so they
+  were dropped without a trace. This is the same defect migration `0028` records
+  about v1 discarding `gaze` and `engagement`, repeated for the v3 signals.
+- **A standalone modality window failed its whole batch.** With
+  `*_window_share` off (and on stop/flush) Oyon emits `facial_only` /
+  `posture_only` / `heart_rate_only` events that carry no emotion data and keep
+  `valid_frames` inside the modality block. Routed into `oyon_emotion_records`
+  that bound NULL into a NOT NULL column, so the insert threw and the entire
+  batch was rejected — losing the emotion windows travelling with it.
+
+### Changed
+
+- Ingest now splits on Oyon's own `isModalityOnlyEvent` seam, so emotion windows
+  keep their existing path unchanged. `inserted` / `skipped` still count emotion
+  records only; new modality counts are reported separately as
+  `signals_inserted` / `signals_skipped`. Existing dashboards, queries and
+  response shapes are untouched — the new rows live in a separate table that
+  legacy SQL cannot address.
+
 ## [2.9.1] — 2026-07-30
 
 ### Fixed
