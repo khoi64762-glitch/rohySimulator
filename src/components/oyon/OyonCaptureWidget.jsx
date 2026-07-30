@@ -8,7 +8,7 @@ import { elementSettings, persistBody, OYON_ASSET_BASE } from './captureBridge';
 import { getAois, onAois } from './screenAois';
 import { publishAffectSample, publishAffectWindows, clearAffect } from '../../utils/latestAffect';
 import { parseOnboardingSettings } from '../../utils/onboardingSettings';
-import { OYON_CONSENT_VERSION_LS_KEY } from '../../utils/oyonConsent';
+import { ensureSessionConsent } from './ensureSessionConsent';
 
 export const VALENCE_GRAPH_PREF_KEY = 'oyon.showValenceGraph';
 export const CONSENT_PREF_KEY = 'oyon.defaultConsent';
@@ -83,14 +83,6 @@ export default function OyonCaptureWidget({ sessionId, caseId, room, onOpenAnaly
          .catch(() => { /* fall back to the local flag */ });
    }, []);
 
-   // What this browser recorded as the accepted contract (first-run card or the
-   // re-consent prompt). Absent → the server reads it as v1, which is correct
-   // for a learner who consented before versions were recorded.
-   const readConsentVersionPref = () => {
-      try { return localStorage.getItem(OYON_CONSENT_VERSION_LS_KEY) || undefined; }
-      catch { return undefined; }
-   };
-
    const ensureConsent = useCallback(async () => {
       const sid = sessionRef.current;
       if (!sid || !readConsentPref()) {
@@ -104,31 +96,13 @@ export default function OyonCaptureWidget({ sessionId, caseId, room, onOpenAnaly
          persistGateRef.current = true;
          return;
       }
-      try {
-         await apiFetch('/addons/oyon/consent', {
-            method: 'POST',
-            json: {
-               session_id: sid,
-               consent_granted: true,
-               source_page: window.location.pathname,
-               // The contract this learner actually accepted. The server records
-               // it verbatim and gates the newer signal modalities on it; a
-               // client that names nothing is treated as having shown v1, so
-               // this can never over-grant — only correctly report.
-               accepted_version: readConsentVersionPref(),
-            },
-         });
-         consentSessionRef.current = sid;
-         persistGateRef.current = true;
-         setPersistOk(true);
-         oyonClientLog('info', 'consent recorded', { session_id: sid });
-      } catch (e) {
-         persistGateRef.current = false;
-         setPersistOk(false);
-         oyonClientLog('warn', 'consent POST failed; capture will not persist', {
-            session_id: sid, error: e?.message || String(e),
-         });
-      }
+      // Shared with the host-driven signal capture, which needs the same row
+      // and must not depend on the camera having started. The helper posts at
+      // most once per session, so both callers can ask freely.
+      const recorded = await ensureSessionConsent(sid, { sourcePage: window.location.pathname });
+      if (recorded) consentSessionRef.current = sid;
+      persistGateRef.current = recorded;
+      setPersistOk(recorded);
    }, []);
 
    useEffect(() => {

@@ -583,3 +583,72 @@ describe('ChatInterface — broader behaviour (Phase 4 sibling, not the leak tes
         expect(submit).toBeDisabled();
     });
 });
+
+// ---------- Oyon typing capture (Phase 4, Step 3) -----------------------
+//
+// ChatInterface owns two things in the typing pipeline and nothing else:
+// attaching Oyon's adapter to the composer element, and closing the episode
+// as SUBMITTED when the learner sends. Both fail silently if wrong — a
+// missed attach records nothing, and a missed submit() relabels a composed
+// message as an abandoned draft.
+
+function fakeTypingCapture() {
+    const calls = { attach: [], submit: 0, abandon: 0 };
+    return {
+        calls,
+        capture: {
+            typing: {
+                attach: (element, opts) => { calls.attach.push({ element, opts }); },
+                submit: () => { calls.submit += 1; },
+                abandon: () => { calls.abandon += 1; },
+            },
+        },
+    };
+}
+
+describe('Oyon typing capture wiring', () => {
+    it('attaches the adapter to the composer element itself', async () => {
+        const { calls, capture } = fakeTypingCapture();
+        mount(caseFixture, { props: { signalCapture: capture } });
+
+        const input = await screen.findByPlaceholderText(/message alice original/i);
+        await waitFor(() => expect(calls.attach.length).toBeGreaterThan(0));
+
+        const last = calls.attach[calls.attach.length - 1];
+        expect(last.element).toBe(input);
+        expect(last.opts.targetKind).toBe('chat_composer');
+        expect(last.opts.targetId).toBe('patient');
+    });
+
+    // `submitted` vs `abandoned` is the difference between a message the
+    // learner composed and one they gave up on — the same keystrokes either
+    // way, so only this call distinguishes them.
+    it('finalizes the episode as submitted when the learner sends', async () => {
+        const { calls, capture } = fakeTypingCapture();
+        mount(caseFixture, { props: { signalCapture: capture } });
+
+        const input = await screen.findByPlaceholderText(/message alice original/i);
+        fireEvent.change(input, { target: { value: 'Does it hurt?' } });
+        fireEvent.click(input.parentElement.querySelector('button[type="submit"]'));
+
+        await waitFor(() => expect(calls.submit).toBe(1));
+    });
+
+    // A tenant with typing disabled gets a null handle, not a stub.
+    it('renders and sends normally when no capture is supplied', async () => {
+        mount(caseFixture, { props: { signalCapture: null } });
+        const input = await screen.findByPlaceholderText(/message alice original/i);
+        fireEvent.change(input, { target: { value: 'Hello' } });
+        expect(() => fireEvent.click(input.parentElement.querySelector('button[type="submit"]'))).not.toThrow();
+    });
+
+    it('detaches on unmount so no listener leaks onto a detached node', async () => {
+        const { calls, capture } = fakeTypingCapture();
+        const { unmount } = mount(caseFixture, { props: { signalCapture: capture } });
+
+        await screen.findByPlaceholderText(/message alice original/i);
+        await waitFor(() => expect(calls.attach.length).toBeGreaterThan(0));
+        unmount();
+        expect(calls.abandon).toBeGreaterThan(0);
+    });
+});

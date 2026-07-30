@@ -209,12 +209,16 @@ function notifySubstitutionOnce(toast, t, r) {
     toast?.info?.(t('voice_default_not_configured', { voice: r.file }));
 }
 
-export default function ChatInterface({ activeCase, onSessionStart, restoredSessionId, sessionStartTime, currentVitals, personaRefreshCounter = 0 }) {
+export default function ChatInterface({ activeCase, onSessionStart, restoredSessionId, sessionStartTime, currentVitals, personaRefreshCounter = 0, signalCapture = null }) {
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
     const [sessionId, setSessionId] = useState(null);
     const [messagesLoaded, setMessagesLoaded] = useState(false);
     const messagesEndRef = useRef(null);
+    // Callback ref, not useRef: the composer is inside a conditional branch, so
+    // it remounts when the case loads or the tab gains/loses chat. State makes
+    // the effect below re-run on the new node instead of holding a stale one.
+    const [composerEl, setComposerEl] = useState(null);
     // Last (voice|language) pair we already warned about — one toast per
     // combination, re-armed automatically when either side changes.
     const voiceLangWarnedRef = useRef(null);
@@ -1021,9 +1025,34 @@ export default function ChatInterface({ activeCase, onSessionStart, restoredSess
         }
     };
 
+    // Attach Oyon's typing adapter to the composer. `capture.typing` is null
+    // when the tenant disabled the modality — a null handle, not a silent
+    // stub, so branching on it is the intended use.
+    //
+    // `activeTab` is a dependency on purpose: composing to the patient and
+    // composing to a consultant are different tasks, and the episode should
+    // carry which one it was. The cost is that switching tabs mid-draft
+    // finalizes that episode as abandoned, which is the honest reading.
+    useEffect(() => {
+        const typing = signalCapture?.typing;
+        if (!typing || !composerEl) return undefined;
+        typing.attach(composerEl, { targetKind: 'chat_composer', targetId: activeTab });
+        return () => {
+            // Finalizes an in-flight episode and removes the listeners. Skipped
+            // teardown would leak a listener onto a detached node every remount.
+            try { typing.abandon(); } catch { /* already finalized */ }
+        };
+    }, [signalCapture, composerEl, activeTab]);
+
     const handleSend = async (e) => {
         e.preventDefault();
         if (!input.trim() || loading || !sessionId) return;
+
+        // Close the typing episode as SUBMITTED before the send. Left alone it
+        // would eventually finalize as abandoned, which is the opposite
+        // reading of the same keystrokes — `submitted` is what separates a
+        // composed message from a draft the learner gave up on.
+        try { signalCapture?.typing?.submit(); } catch { /* never block a send */ }
 
         // If on patient tab, send to patient
         if (activeTab === 'patient') {
@@ -2056,6 +2085,7 @@ export default function ChatInterface({ activeCase, onSessionStart, restoredSess
                     <form onSubmit={handleSend} className="relative">
                         <input
                             type="text"
+                            ref={setComposerEl}
                             value={input}
                             onChange={(e) => setInput(e.target.value)}
                             disabled={loading || (activeTab !== 'patient' && !agentStatus?.canChat)}

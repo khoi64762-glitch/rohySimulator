@@ -38,6 +38,8 @@ import InvestigationsScreen from './components/investigations/InvestigationsScre
 import RoomNavigator from './components/common/RoomNavigator';
 import AgentPersonaEditor from './components/settings/AgentPersonaEditor';
 import OyonCaptureWidget from './components/oyon/OyonCaptureWidget';
+import { useSignalCapture } from './components/oyon/useSignalCapture';
+import { useOyonSignalGate } from './components/oyon/useOyonSignalGate';
 import AoiRegion from './components/oyon/AoiRegion';
 import { HelpCenter, OnboardingTour } from './help';
 import FirstRunGate, { useSetup } from './components/setup/FirstRunGate';
@@ -634,6 +636,21 @@ function MainApp() {
       : showLessonsRoom ? 'lessons'
       : currentRoom;
 
+   // Host-driven signal capture (typing today; interaction/discourse next).
+   // Mounted here for the same reason the pill is: App outlives every screen
+   // switch, so a typing episode is not abandoned when the learner moves
+   // between rooms. `room`/`caseId` are read at flush time by the transport,
+   // so changing them does not restart capture.
+   const signalGate = useOyonSignalGate(sessionId);
+   const { capture: signalCapture } = useSignalCapture({
+      enabled: signalGate.enabled,
+      persist: signalGate.persist,
+      runtimeConfig: signalGate.runtimeConfig,
+      sessionId,
+      caseId: activeCase?.id,
+      room: oyonRoom,
+   });
+
    // Publish the pill's live width as --oyon-pill-w on <html> so headers it
    // floats over (PatientMonitor's) can reserve a real layout slot for it
    // instead of letting their content slide underneath. The width is dynamic
@@ -985,6 +1002,7 @@ function MainApp() {
                      onSessionStart={setSessionId}
                      restoredSessionId={sessionId}
                      personaRefreshCounter={personaRefreshCounter}
+                     signalCapture={signalCapture}
                   />
                )}
             </AoiRegion>
