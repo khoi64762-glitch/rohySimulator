@@ -9,6 +9,16 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.3] — 2026-07-30
+
+### Fixed
+
+- Regenerated the `en-XA` pseudo-locale for `authoring_config`, which had been
+  stale since the 2.7.x registration/approval-queue work: 25 keys existed in
+  `src/locales/en/authoring_config.json` with no pseudo counterpart, so
+  `?pseudo=1` rendered them as plain English and could not flag them as
+  translated-but-unverified or catch truncation.
+
 ## [2.9.2] — 2026-07-30
 
 ### Added
