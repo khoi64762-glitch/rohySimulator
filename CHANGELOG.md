@@ -9,6 +9,33 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.6] — 2026-07-30
+
+### Added
+
+- **Consent version 2, covering the non-camera signals.** Typing dynamics,
+  interaction telemetry, discourse analytics and AI-assistance cycles are new
+  categories of personal data rather than more camera-derived affect, so they
+  are not covered by the original consent. Rohy now records **which consent
+  version each learner actually accepted**, and refuses to store any of the new
+  signals for a learner whose accepted version predates it. Camera-derived
+  signals are unaffected and continue to work under the original consent.
+- Administrators get switches for typing, interaction, discourse and
+  AI-assistance under Settings → Oyon → Signals. They stay dormant until a
+  learner accepts the new consent, whatever the switches say.
+
+### Changed
+
+- Tenants still using the original default consent version are moved to the new
+  one. An administrator who set a custom consent version keeps it.
+
+### Security
+
+- The consent check runs on the server at ingest, not only as a prompt in the
+  browser, so an out-of-date client cannot record signals a learner never agreed
+  to. A client that does not state which consent version it displayed is treated
+  as having shown the original one, and so cannot grant itself the new scope.
+
 ## [2.9.5] — 2026-07-30
 
 ### Added

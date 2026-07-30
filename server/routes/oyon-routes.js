@@ -14,7 +14,48 @@ const __dirname = path.dirname(__filename);
 const oyonLog = logger('oyon-addon');
 const router = express.Router();
 const ASSET_ROOT = path.resolve(__dirname, '../../OyonR/standalone');
-const DEFAULT_CONSENT_VERSION = 'oyon-consent-v1';
+const DEFAULT_CONSENT_VERSION = 'oyon-consent-v2';
+// The contract that covered camera-derived affect only. Kept as a named
+// constant because it is still a valid accepted version — it simply does not
+// extend to the host-driven modalities below.
+const CONSENT_VERSION_CAMERA_ONLY = 'oyon-consent-v1';
+
+/*
+ * Modalities that need consent v2 (migration 0041).
+ *
+ * These are new CATEGORIES of personal data, not more camera-derived affect:
+ * keystroke timing, page-wide pointer/scroll telemetry, message-text analysis,
+ * and AI-assistance cycles. `oyon-consent-v1` describes none of them, so a
+ * learner who accepted v1 has not agreed to them.
+ *
+ * Enforced on INGEST rather than only at the client prompt: a stale or
+ * hand-rolled client cannot deposit these rows for a learner who never accepted
+ * v2. Camera modalities are absent from this set and keep working under v1.
+ */
+const CONSENT_V2_MODALITIES = new Set([
+    'typing', 'interaction', 'discourse', 'ai_assist', 'voice',
+]);
+
+/** Ordered consent contracts, oldest first — index doubles as the version rank. */
+const CONSENT_VERSION_ORDER = Object.freeze(['oyon-consent-v1', 'oyon-consent-v2']);
+
+/**
+ * Whether the consent actually accepted for this session covers `modality`.
+ *
+ * A consent row written before 0041 has no `accepted_version`; it is read as v1,
+ * the only contract that existed when it was written. Never as "whatever the
+ * tenant advertises now" — that would silently re-label an old consent as
+ * covering data the learner was never asked about.
+ */
+function acceptedConsentVersion(value) {
+    return CONSENT_VERSION_ORDER.includes(value) ? value : CONSENT_VERSION_CAMERA_ONLY;
+}
+
+function consentCoversModality(consent, modality) {
+    if (!CONSENT_V2_MODALITIES.has(modality)) return true;
+    const accepted = consent?.accepted_version || CONSENT_VERSION_CAMERA_ONLY;
+    return CONSENT_VERSION_ORDER.indexOf(accepted) >= CONSENT_VERSION_ORDER.indexOf('oyon-consent-v2');
+}
 const MAX_EMOTION_EVENT_JSON_LENGTH = 20_000;
 const POST_SESSION_CAPTURE_GRACE_MS = 24 * 60 * 60 * 1000;
 
@@ -125,6 +166,10 @@ router.put('/settings', authenticateToken, requireAdmin, async (req, res) => {
              enable_dynamics = ?,
              posture_tracking_enabled = ?,
              signal_window_share = ?,
+             typing_enabled = ?,
+             interaction_enabled = ?,
+             discourse_enabled = ?,
+             ai_assist_enabled = ?,
              updated_at = CURRENT_TIMESTAMP
          WHERE tenant_id = ?`,
         [
@@ -150,6 +195,10 @@ router.put('/settings', authenticateToken, requireAdmin, async (req, res) => {
             next.enable_dynamics,
             next.posture_tracking_enabled,
             next.signal_window_share,
+            next.typing_enabled,
+            next.interaction_enabled,
+            next.discourse_enabled,
+            next.ai_assist_enabled,
             String(currentTenant),
         ]
     );
@@ -202,8 +251,8 @@ router.post('/consent', authenticateToken, async (req, res) => {
     await dbRun(
         `INSERT INTO oyon_emotion_consents (
             tenant_id, user_id, student_id, session_id, case_id,
-            consent_granted, consent_version, source_page, user_agent
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            consent_granted, consent_version, accepted_version, source_page, user_agent
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
             tenantId(req),
             String(req.user.id),
@@ -212,6 +261,13 @@ router.post('/consent', authenticateToken, async (req, res) => {
             session.case_id == null ? null : String(session.case_id),
             granted ? 1 : 0,
             settings.consent_version || DEFAULT_CONSENT_VERSION,
+            // What the client actually SHOWED and the learner accepted — not
+            // what the tenant currently advertises. A client that names no
+            // version is a pre-0041 client, which can only have displayed the
+            // v1 contract, so it records v1 and cannot grant itself v2. This is
+            // the whole point of the column: consent means the contract the
+            // learner saw, never the newest one on file.
+            acceptedConsentVersion(req.body?.accepted_version),
             shortText(req.body?.source_page, 200),
             shortText(req.headers['user-agent'], 500),
         ]
@@ -279,6 +335,7 @@ router.post('/emotion-records', authenticateToken, async (req, res) => {
     let skipped = 0;
     let signalsInserted = 0;
     let signalsSkipped = 0;
+    let consentBlocked = 0;
     for (const event of events) {
         const serverErrors = validateServerEvent(event, session);
         if (serverErrors.length) {
@@ -302,6 +359,20 @@ router.post('/emotion-records', authenticateToken, async (req, res) => {
                     code: 'oyon_unknown_modality',
                 });
             }
+            // Consent gate (migration 0041). A modality the learner's accepted
+            // contract doesn't cover is DROPPED, not rejected: a mixed batch
+            // must still store the camera windows travelling with it, and a
+            // learner who declined the newer contract should not see capture
+            // fail — it should simply not record what they didn't agree to.
+            if (!consentCoversModality(consent, modality)) {
+                consentBlocked += 1;
+                oyonLog.info('signal window dropped: consent version does not cover modality', {
+                    session_id: session.id,
+                    modality,
+                    accepted_version: consent?.accepted_version || CONSENT_VERSION_CAMERA_ONLY,
+                });
+                continue;
+            }
             const signalResult = await insertSignalWindow(req, session, settings, consent, event, modality);
             if (signalResult?.changes === 1) signalsInserted += 1;
             else signalsSkipped += 1;
@@ -319,7 +390,7 @@ router.post('/emotion-records', authenticateToken, async (req, res) => {
     }
 
     oyonLog.info('emotion batch accepted', {
-        session_id: session.id, inserted, skipped, signalsInserted, signalsSkipped,
+        session_id: session.id, inserted, skipped, signalsInserted, signalsSkipped, consentBlocked,
     });
     // `inserted`/`skipped` keep counting emotion records ONLY, so existing
     // clients and tests reading them are unaffected by the new modalities.
@@ -329,6 +400,9 @@ router.post('/emotion-records', authenticateToken, async (req, res) => {
         skipped,
         signals_inserted: signalsInserted,
         signals_skipped: signalsSkipped,
+        // Reported rather than silent: a client seeing this knows its consent
+        // prompt is stale, not that the network dropped the windows.
+        signals_consent_blocked: consentBlocked,
     });
 });
 
@@ -1180,6 +1254,10 @@ function signalFlagsFromSettings(settings) {
         gaze_tracking_enabled: flag('gaze_tracking_enabled'),
         enable_dynamics: flag('enable_dynamics'),
         posture_tracking_enabled: flag('posture_tracking_enabled'),
+        typing_enabled: flag('typing_enabled'),
+        interaction_enabled: flag('interaction_enabled'),
+        discourse_enabled: flag('discourse_enabled'),
+        ai_assist_enabled: flag('ai_assist_enabled'),
         // One tenant switch drives every modality's window_share, so signals
         // cannot end up split across shapes for reasons an admin can't see.
         facial_signals_window_share: share,
@@ -1214,6 +1292,15 @@ const SIGNAL_SETTING_DEFAULTS = Object.freeze({
     // Off — the pose model cannot be served same-origin. See migration 0040.
     posture_tracking_enabled: false,
     signal_window_share: true,
+    // Host-driven modalities (migration 0041). Enabled at tenant level so they
+    // are ready the moment a learner accepts consent v2 — the ingest consent
+    // gate, not these flags, is what keeps them dormant until then. `voice` is
+    // absent on purpose: it gates microphone HARDWARE and Rohy's VoiceService
+    // already owns the mic, so it is its own follow-up.
+    typing_enabled: true,
+    interaction_enabled: true,
+    discourse_enabled: true,
+    ai_assist_enabled: true,
 });
 
 /*

@@ -170,11 +170,14 @@ describe('Oyon 3 modality-scoped window ingest', () => {
             'SELECT id FROM sessions WHERE user_id = ? ORDER BY id DESC LIMIT 1', [stu.id]);
         sessionId = sess.id;
 
-        // Granted consent — ingest refuses without one.
+        // Granted consent — ingest refuses without one. accepted_version is v2
+        // so this block can exercise the host-driven modalities; the consent
+        // GATE itself is covered by its own describe below, against a session
+        // that accepted only v1.
         await dbRun(db,
             `INSERT INTO oyon_emotion_consents
-                (tenant_id, user_id, session_id, consent_granted, consent_version)
-             VALUES ('1', ?, ?, 1, 'oyon-consent-v1')`,
+                (tenant_id, user_id, session_id, consent_granted, consent_version, accepted_version)
+             VALUES ('1', ?, ?, 1, 'oyon-consent-v2', 'oyon-consent-v2')`,
             [String(stu.id), String(sessionId)]);
         await dbClose(db);
 
@@ -376,5 +379,117 @@ describe('Oyon 3 modality-scoped window ingest', () => {
         expect(body.records.length).toBeGreaterThan(0);
         expect(body.records.every(r => r.dominant_emotion != null)).toBe(true);
         expect(body.records.every(r => r.modality === undefined)).toBe(true);
+    });
+});
+
+// Consent v2 gate (migration 0041).
+//
+// typing/interaction/discourse/ai_assist are new CATEGORIES of personal data —
+// keystroke timing, page-wide pointer telemetry, message-text analysis — not
+// more camera-derived affect. `oyon-consent-v1` describes none of them, so a
+// learner who accepted v1 has not agreed to them. Enforced on INGEST, not just
+// at the client prompt, so a stale client cannot deposit them anyway.
+describe('consent v2 gate for host-driven modalities', () => {
+    let server, studentTok, v1Session, v2Session;
+
+    async function seedSession(db, userId, acceptedVersion) {
+        await dbRun(db,
+            `INSERT INTO sessions (user_id, case_id, start_time, tenant_id)
+             VALUES (?, 1, datetime('now', '-1 hour'), 1)`, [userId]);
+        const s = await dbGet(db,
+            'SELECT id FROM sessions WHERE user_id = ? ORDER BY id DESC LIMIT 1', [userId]);
+        await dbRun(db,
+            `INSERT INTO oyon_emotion_consents
+                (tenant_id, user_id, session_id, consent_granted, consent_version, accepted_version)
+             VALUES ('1', ?, ?, 1, 'oyon-consent-v2', ?)`,
+            [String(userId), String(s.id), acceptedVersion]);
+        return s.id;
+    }
+
+    beforeAll(async () => {
+        server = await startTestServer({ env: { JWT_SECRET: SECRET, OYON_ENABLED: '1' } });
+        const db = await openDb(server.dbPath);
+        const pwd = await bcrypt.hash('x', 4);
+        await dbRun(db,
+            `INSERT INTO users (username, name, password_hash, email, role, status, tenant_id)
+             VALUES ('cg_stu', 'cg_stu', ?, 'cg@example.com', 'student', 'active', 1)`, [pwd]);
+        const stu = await dbGet(db, 'SELECT id FROM users WHERE username = ?', ['cg_stu']);
+        v1Session = await seedSession(db, stu.id, 'oyon-consent-v1');
+        v2Session = await seedSession(db, stu.id, 'oyon-consent-v2');
+        await dbClose(db);
+        studentTok = tokenFor({ id: stu.id, username: 'cg_stu', role: 'student', tenant_id: 1 }, 'cg-s');
+        await setOyonViewFlags(server.dbPath, { admin: 1, educator: 1, student: 1 });
+    });
+
+    afterAll(async () => { if (server) await server.close(); });
+
+    it('drops v2-only modalities for a learner who accepted only v1', async () => {
+        const { status, body } = await postBatch(server, studentTok, [
+            modalityWindow(v1Session, 'typing', { keystrokes: 40 }, 'episode'),
+            modalityWindow(v1Session, 'interaction', { clicks: 3 }),
+            modalityWindow(v1Session, 'discourse', { moves: 2 }),
+        ]);
+        expect(status).toBe(200);
+        expect(body.signals_inserted).toBe(0);
+        // Reported, not silent — a client seeing this knows its prompt is stale.
+        expect(body.signals_consent_blocked).toBe(3);
+    });
+
+    // The gate must be narrow: v1 still fully covers camera-derived affect.
+    it('still accepts camera modalities under v1 consent', async () => {
+        const { status, body } = await postBatch(server, studentTok, [
+            modalityOnlyWindow(v1Session, 'facial_only', { facial: { head_yaw_deg: 2 } }),
+            modalityWindow(v1Session, 'illumination', { mean_luma: 0.4 }),
+        ]);
+        expect(status).toBe(200);
+        expect(body.signals_inserted).toBe(2);
+        expect(body.signals_consent_blocked).toBe(0);
+    });
+
+    it('accepts v2-only modalities once the learner has accepted v2', async () => {
+        const { status, body } = await postBatch(server, studentTok, [
+            modalityWindow(v2Session, 'typing', { keystrokes: 40 }, 'episode'),
+            modalityWindow(v2Session, 'interaction', { clicks: 3 }),
+        ]);
+        expect(status).toBe(200);
+        expect(body.signals_inserted).toBe(2);
+        expect(body.signals_consent_blocked).toBe(0);
+    });
+
+    // A mixed batch must still store what IS permitted.
+    it('drops only the uncovered windows, keeping the rest of the batch', async () => {
+        const { status, body } = await postBatch(server, studentTok, [
+            emotionWindow(v1Session),
+            modalityOnlyWindow(v1Session, 'heart_rate_only', { heart_rate: { bpm: 70 } }),
+            modalityWindow(v1Session, 'typing', { keystrokes: 12 }, 'episode'),
+        ]);
+        expect(status).toBe(200);
+        expect(body.inserted).toBe(1);              // emotion window kept
+        expect(body.signals_inserted).toBe(1);      // heart_rate kept (v1 covers it)
+        expect(body.signals_consent_blocked).toBe(1); // typing dropped
+    });
+
+    // A pre-0041 consent row has no accepted_version; it must read as v1, never
+    // as "whatever the tenant advertises now".
+    it('treats a legacy consent row with no accepted_version as v1', async () => {
+        const db = await openDb(server.dbPath);
+        const stu = await dbGet(db, 'SELECT id FROM users WHERE username = ?', ['cg_stu']);
+        await dbRun(db,
+            `INSERT INTO sessions (user_id, case_id, start_time, tenant_id)
+             VALUES (?, 1, datetime('now', '-1 hour'), 1)`, [stu.id]);
+        const s = await dbGet(db,
+            'SELECT id FROM sessions WHERE user_id = ? ORDER BY id DESC LIMIT 1', [stu.id]);
+        await dbRun(db,
+            `INSERT INTO oyon_emotion_consents
+                (tenant_id, user_id, session_id, consent_granted, consent_version)
+             VALUES ('1', ?, ?, 1, 'oyon-consent-v2')`,
+            [String(stu.id), String(s.id)]);
+        await dbClose(db);
+
+        const { body } = await postBatch(server, studentTok, [
+            modalityWindow(s.id, 'typing', { keystrokes: 5 }, 'episode'),
+        ]);
+        expect(body.signals_inserted).toBe(0);
+        expect(body.signals_consent_blocked).toBe(1);
     });
 });

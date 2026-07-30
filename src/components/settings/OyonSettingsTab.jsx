@@ -115,6 +115,10 @@ export default function OyonSettingsTab({ onOpenAnalytics } = {}) {
                enable_dynamics: settings.enable_dynamics,
                posture_tracking_enabled: settings.posture_tracking_enabled,
                signal_window_share: settings.signal_window_share,
+               typing_enabled: settings.typing_enabled,
+               interaction_enabled: settings.interaction_enabled,
+               discourse_enabled: settings.discourse_enabled,
+               ai_assist_enabled: settings.ai_assist_enabled,
             },
          });
          setSettings(res?.settings || settings);
@@ -469,6 +473,30 @@ export default function OyonSettingsTab({ onOpenAnalytics } = {}) {
                               hint="OFF by default: the pose model is not bundled, so enabling this makes the browser download it from a Google CDN. Leave off on air-gapped installs."
                               checked={!!settings.posture_tracking_enabled}
                               onChange={v => updateSetting({ posture_tracking_enabled: v })}
+                           />
+                           <ToggleRow
+                              label="Typing dynamics"
+                              hint="Keystroke timing on the message composer — pause and burst structure, never the text itself. Needs learner consent v2."
+                              checked={!!settings.typing_enabled}
+                              onChange={v => updateSetting({ typing_enabled: v })}
+                           />
+                           <ToggleRow
+                              label="Interaction telemetry"
+                              hint="Pointer, click, scroll, selection and focus aggregates across the page. Needs learner consent v2."
+                              checked={!!settings.interaction_enabled}
+                              onChange={v => updateSetting({ interaction_enabled: v })}
+                           />
+                           <ToggleRow
+                              label="Discourse analytics"
+                              hint="Per-sentence speech acts and text metrics over messages the learner sends. Needs learner consent v2."
+                              checked={!!settings.discourse_enabled}
+                              onChange={v => updateSetting({ discourse_enabled: v })}
+                           />
+                           <ToggleRow
+                              label="AI-assistance cycles"
+                              hint="Suggestion request / accept / reject timing. Needs learner consent v2."
+                              checked={!!settings.ai_assist_enabled}
+                              onChange={v => updateSetting({ ai_assist_enabled: v })}
                            />
                            <ToggleRow
                               label="Keep signals on one window"
