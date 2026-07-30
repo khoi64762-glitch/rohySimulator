@@ -9,6 +9,17 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.12] — 2026-07-30
+
+### Fixed
+
+- **The container image builds again.** The v2.9.11 image build failed outright:
+  the Oyon asset verifier added in "build: harden Oyon asset installation" runs
+  during `npm install`, but the Docker builder did not copy `scripts/` until
+  after that step, so the install aborted and no image was produced. The air-gap
+  tarball was unaffected. Operators should use v2.9.12; the v2.9.11 release has
+  no container image.
+
 ## [2.9.11] — 2026-07-30
 
 ### Fixed

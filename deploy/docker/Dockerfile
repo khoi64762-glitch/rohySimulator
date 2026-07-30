@@ -63,6 +63,17 @@ RUN npm install --prefer-offline --no-audit --no-fund
 WORKDIR /workspace/rohy
 COPY package.json package-lock.json* ./
 COPY OyonR ./OyonR
+# `scripts/` must land BEFORE npm install, not with the `COPY . .` below.
+# postinstall → `setup:oyon` → `verify:oyon` → `node
+# scripts/verify-oyon-install.mjs`, so without this npm install dies with
+# MODULE_NOT_FOUND and takes the whole image build with it. The verifier
+# imports only node built-ins, so the directory alone is enough.
+#
+# This is the same two-gate Docker trap recorded in CLAUDE.md, in its other
+# form: not "a root file missed by directory COPYs", but "a file that exists
+# in the repo yet not YET in the layer that needs it". Adding a postinstall
+# step means checking what the install layer can actually see.
+COPY scripts ./scripts
 # `npm install` triggers our postinstall hook which calls
 # OyonR/scripts/download-models.sh — that fetches the ~93 MB MediaPipe +
 # ONNX bundles + emotion models. The script is idempotent (skips if
