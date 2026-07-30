@@ -31,6 +31,7 @@ import { X, StopCircle, AlertTriangle } from 'lucide-react';
 import BodyMapDebug from './components/examination/BodyMapDebug';
 import TnaDashboard from './components/analytics/tna/TnaDashboardV2';
 import OyonDashboardRoom from './components/oyon/OyonDashboardRoom';
+import OyonConsentUpdate from './components/oyon/OyonConsentUpdate';
 import DiscussionScreen from './components/discussion/DiscussionScreen';
 import PhysicalExamScreen from './components/exam/PhysicalExamScreen';
 import InvestigationsScreen from './components/investigations/InvestigationsScreen';
@@ -666,6 +667,11 @@ function MainApp() {
    // reserves a matching slot via --oyon-pill-w. Everywhere else it keeps
    // the historical viewport top-center spot.
    const oyonDockedOverMonitor = oyonRoom === 'chat';
+   // Re-consent prompt for a widened Oyon contract. Rendered beside the capture
+   // pill so it reaches every surface, and self-suppressing — it returns null
+   // unless this learner previously accepted an older contract.
+   const oyonConsentUpdate = user ? <OyonConsentUpdate /> : null;
+
    const oyonPill = user ? (
       // Rendered whenever a user is signed in, session or not: without a
       // session the pill still captures locally; persistence starts once
@@ -719,6 +725,7 @@ function MainApp() {
       return (
          <>
          {oyonPill}
+         {oyonConsentUpdate}
          <AgentPersonaEditor
             templateId={personaEditorTarget}
             onClose={handleClosePersonaEditor}
@@ -733,6 +740,7 @@ function MainApp() {
       return (
          <>
          {oyonPill}
+         {oyonConsentUpdate}
          <div className="h-screen w-screen rohy-offwhite-bg overflow-hidden">
             <Suspense fallback={<div className="p-8 text-sm text-neutral-500">Loading…</div>}>
                <LessonsRoomContainer
@@ -753,6 +761,7 @@ function MainApp() {
       return (
          <>
          {oyonPill}
+         {oyonConsentUpdate}
          <div className="h-screen w-screen rohy-offwhite-bg overflow-hidden">
             <ConfigPanel
                key={settingsNavNonce}
@@ -783,6 +792,7 @@ function MainApp() {
       return (
          <>
          {oyonPill}
+         {oyonConsentUpdate}
          <div className="h-screen w-screen overflow-hidden">
             <TnaDashboard onClose={() => setShowTnaAnalytics(false)} />
          </div>
@@ -799,6 +809,7 @@ function MainApp() {
       return (
          <>
          {oyonPill}
+         {oyonConsentUpdate}
          <div className="h-screen w-screen overflow-hidden">
             <TnaDashboard onClose={() => setShowOyonAnalytics(false)} defaultSource="emotions" defaultEmotionDimension="raw" />
          </div>
@@ -814,6 +825,7 @@ function MainApp() {
       return (
          <>
          {oyonPill}
+         {oyonConsentUpdate}
          <OyonDashboardRoom onClose={() => setShowOyonDashboard(false)} />
          </>
       );

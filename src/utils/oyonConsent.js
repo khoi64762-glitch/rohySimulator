@@ -1,0 +1,68 @@
+// Oyon consent versioning (migration 0041).
+//
+// Consent used to be a bare boolean, so nothing recorded WHICH contract a
+// learner agreed to. That made a version bump unsafe: it would have silently
+// re-labelled every existing consent as covering data the learner was never
+// asked about. These helpers are the client half of the fix — the server half
+// is `consentCoversModality()` in server/routes/oyon-routes.js, which is the
+// authority. Nothing here is a security boundary; the server re-checks.
+//
+// Rule everywhere: an ACCEPTED version is what the learner was actually shown.
+// Never what the tenant currently advertises.
+
+/** Where this browser mirrors the accepted contract, beside CONSENT_PREF_KEY. */
+export const OYON_CONSENT_VERSION_LS_KEY = 'oyon.consentVersion';
+
+/** Ordered contracts, oldest first — index doubles as the version rank. */
+export const OYON_CONSENT_VERSIONS = Object.freeze([
+    'oyon-consent-v1',
+    'oyon-consent-v2',
+]);
+
+/** The contract that covered camera-derived affect only. */
+export const OYON_CONSENT_CAMERA_ONLY = 'oyon-consent-v1';
+
+/**
+ * Rank of a consent version; -1 for anything unrecognised.
+ * An unrecognised value is deliberately ranked BELOW v1 so an unknown string
+ * can never satisfy a staleness check.
+ */
+export function consentRank(version) {
+    return OYON_CONSENT_VERSIONS.indexOf(version);
+}
+
+/**
+ * Has the learner accepted a contract at least as new as the tenant requires?
+ *
+ * A missing `accepted` is read as v1 — the only contract that existed before
+ * the column did — matching the server's reading of a NULL accepted_version.
+ * A `required` the client doesn't recognise (server newer than this bundle)
+ * is treated as NOT satisfied, so an out-of-date client re-prompts rather than
+ * silently assuming it is current.
+ */
+export function consentSatisfies(accepted, required) {
+    if (!required) return true;
+    const requiredRank = consentRank(required);
+    if (requiredRank === -1) return false;
+    const acceptedRank = consentRank(accepted || OYON_CONSENT_CAMERA_ONLY);
+    return acceptedRank >= requiredRank;
+}
+
+/**
+ * Should the re-consent prompt be shown?
+ *
+ * Only when the learner previously said YES to an older contract. Someone who
+ * declined has already made a choice — re-asking on every load would be
+ * nagging, and they can opt in from Settings → Oyon whenever they want. Someone
+ * who has never answered gets the first-run card instead, not this.
+ */
+export function needsConsentUpgrade({ granted, acceptedVersion, requiredVersion }) {
+    if (!granted) return false;
+    if (!acceptedVersion) return false;
+    return !consentSatisfies(acceptedVersion, requiredVersion);
+}
+
+/** What to send as `accepted_version` — only ever a contract we can render. */
+export function acceptableVersion(requiredVersion) {
+    return consentRank(requiredVersion) === -1 ? OYON_CONSENT_CAMERA_ONLY : requiredVersion;
+}

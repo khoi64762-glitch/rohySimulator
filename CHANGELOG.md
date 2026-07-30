@@ -9,6 +9,24 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.7] — 2026-07-30
+
+### Added
+
+- **A consent prompt for the widened capture scope.** Learners who previously
+  agreed to camera-based emotion capture are now asked once, plainly, about the
+  additional signals: typing rhythm (pauses and bursts, never the words),
+  on-screen interaction, and the style of the messages they send. Saying no
+  leaves their existing emotion-capture choice untouched, and either choice can
+  be changed later under Settings → Oyon.
+- The consent version a learner actually saw is recorded when they answer, so a
+  future change of scope asks again rather than assuming.
+
+### Changed
+
+- Learners who declined are not asked again, and learners who have never
+  answered continue to see the first-run consent card rather than this prompt.
+
 ## [2.9.6] — 2026-07-30
 
 ### Added
