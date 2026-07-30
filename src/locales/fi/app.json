@@ -25,6 +25,7 @@
   "open_settings": "Avaa asetukset",
   "oyon_dashboard": "Oyon-koontinäyttö",
   "oyon_dashboard_load_failed": "Oyon-koontinäyttöä ei voitu ladata",
+  "oyon_dashboard_session": "Istunto",
   "oyon_dashboard_truncated": "rajattu 1000 uusimpaan ikkunaan",
   "oyon_dashboard_window_count": "{count, plural, one {# ikkuna} other {# ikkunaa}}",
   "oyon_reconsent_accept": "Kyllä, tallenna myös nämä",

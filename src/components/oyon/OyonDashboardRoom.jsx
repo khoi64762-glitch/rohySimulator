@@ -86,6 +86,41 @@ export default function OyonDashboardRoom({ onClose }) {
       [modalities]
    );
 
+   // The embedded viewer renders ONE session at a time — it forces the
+   // current-session scope as a privacy boundary and shows nothing without a
+   // pin. So the cross-session pool we fetched has to become a chooser, and
+   // the element gets exactly one session's windows.
+   const sessions = useMemo(() => {
+      const byId = new Map();
+      for (const r of records || []) {
+         const id = r?.session_id == null ? null : String(r.session_id);
+         if (!id) continue;
+         const prev = byId.get(id);
+         const end = r.window_end || '';
+         if (prev) {
+            prev.count += 1;
+            if (end > prev.lastSeen) prev.lastSeen = end;
+         } else {
+            byId.set(id, { id, count: 1, lastSeen: end, who: r.username || r.student_name_snapshot || null });
+         }
+      }
+      return [...byId.values()].sort((a, b) => b.lastSeen.localeCompare(a.lastSeen));
+   }, [records]);
+
+   // Default to the most recent session once the fetch lands. Derived from the
+   // list rather than stored on its own, so it can never point at a session
+   // that fell out of the current pool.
+   const [pickedSession, setPickedSession] = useState(null);
+   const activeSession = useMemo(
+      () => (sessions.some(s => s.id === pickedSession) ? pickedSession : sessions[0]?.id || null),
+      [sessions, pickedSession]
+   );
+
+   const sessionRecords = useMemo(
+      () => (activeSession ? (records || []).filter(r => String(r.session_id) === activeSession) : []),
+      [records, activeSession]
+   );
+
    return (
       <div className="h-screen w-screen overflow-hidden flex flex-col bg-slate-950">
          <header className="flex items-center gap-3 px-4 py-2 border-b border-slate-800 shrink-0">
@@ -96,6 +131,22 @@ export default function OyonDashboardRoom({ onClose }) {
                   {t('oyon_dashboard_window_count', { count: records.length })}
                   {truncated ? ` · ${t('oyon_dashboard_truncated')}` : ''}
                </span>
+            )}
+            {sessions.length > 0 && (
+               <label className="flex items-center gap-1.5 text-xs text-slate-400">
+                  {t('oyon_dashboard_session')}
+                  <select
+                     value={activeSession || ''}
+                     onChange={(e) => setPickedSession(e.target.value)}
+                     className="bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-slate-200 max-w-[22rem]"
+                  >
+                     {sessions.map(s => (
+                        <option key={s.id} value={s.id}>
+                           {(s.who ? `${s.who} · ` : '') + `${s.id} · ${s.count}`}
+                        </option>
+                     ))}
+                  </select>
+               </label>
             )}
             {totalSignals > 0 && (
                <span className="flex items-center gap-1 flex-wrap">
@@ -129,7 +180,11 @@ export default function OyonDashboardRoom({ onClose }) {
             </div>
          ) : (
             <div className="flex-1 min-h-0">
-               <OyonServerDashboards records={records || []} loading={loading} />
+               <OyonServerDashboards
+                  records={sessionRecords}
+                  loading={loading}
+                  sessionId={activeSession}
+               />
             </div>
          )}
       </div>

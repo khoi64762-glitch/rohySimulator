@@ -25,6 +25,7 @@
   "open_settings": "Öppna inställningar",
   "oyon_dashboard": "Oyon-panel",
   "oyon_dashboard_load_failed": "Kunde inte ladda Oyon-panelen",
+  "oyon_dashboard_session": "Session",
   "oyon_dashboard_truncated": "begränsat till de 1000 senaste fönstren",
   "oyon_dashboard_window_count": "{count, plural, one {# fönster} other {# fönster}}",
   "oyon_reconsent_accept": "Ja, registrera även detta",

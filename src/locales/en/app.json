@@ -25,6 +25,7 @@
   "open_settings": "Open Settings",
   "oyon_dashboard": "Oyon Dashboard",
   "oyon_dashboard_load_failed": "Could not load the Oyon dashboard",
+  "oyon_dashboard_session": "Session",
   "oyon_dashboard_truncated": "capped at the most recent 1000 windows",
   "oyon_dashboard_window_count": "{count, plural, one {# window} other {# windows}}",
   "oyon_reconsent_accept": "Yes, record these too",
