@@ -9,6 +9,57 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.11] — 2026-07-30
+
+### Fixed
+
+- **The Oyon dashboard no longer goes blank after a page refresh.** It used to
+  render on the way in and then show "No stored windows yet" on reload. The
+  embedded Oyon viewer only ever displays one session at a time — a deliberate
+  privacy boundary — and with no session selected it shows nothing at all. The
+  dashboard now names the session it is showing and offers a picker for the
+  others, so a refresh lands on real data instead of an empty panel.
+- The same fault meant only the live session was ever reachable; every earlier
+  session in the fetched pool was invisible. All of them can now be opened.
+
+## [2.9.10] — 2026-07-30
+
+### Added
+
+- An end-to-end test covering the whole signal path — real capture engine, real
+  window shapes, real validation — so a break in the joins between capture and
+  storage is caught before it reaches a learner.
+
+## [2.9.9] — 2026-07-30
+
+### Added
+
+- **Typing rhythm is now actually recorded** for tenants that enabled it: pauses,
+  bursts, revisions and whether a message was sent or abandoned — never the
+  words themselves. Consented learners only.
+- Interaction signals (pointer, scroll, focus, idle) record alongside it.
+
+### Fixed
+
+- Signal capture no longer depends on the camera being switched on. Consent for a
+  session is registered once and shared, so a tenant running Oyon without the
+  camera gets typing analytics instead of silence.
+
+## [2.9.8] — 2026-07-30
+
+### Added
+
+- The plumbing that carries the new Oyon signals to the server, loaded only when
+  a tenant has enabled them and the learner has consented.
+
+### Changed
+
+- The Oyon signal engine is loaded on demand, keeping it out of the main
+  application bundle: startup is unchanged for everyone.
+- Excluded an unused inference runtime from the browser bundle, cutting about
+  48 MB from the shipped build and the container image. Nothing that runs in the
+  browser needed it — the same runtime is already served alongside Oyon's models.
+
 ## [2.9.7] — 2026-07-30
 
 ### Added
