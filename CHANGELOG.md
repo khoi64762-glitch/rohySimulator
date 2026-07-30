@@ -9,6 +9,16 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.1] — 2026-07-30
+
+### Fixed
+
+- Regenerated `docs/reference/cli/index.md`, which had drifted since 2.9.0: the
+  release added `scripts/verify-oyon-install.mjs` and the `verify:oyon` script
+  (and chained it into `setup:oyon`) without regenerating the CLI reference, so
+  `npm run docs:check` failed on a clean 2.9.0 checkout. No workflow runs on
+  release branches, so nothing caught it.
+
 ## [2.9.0] — 2026-07-29
 
 ### Changed
