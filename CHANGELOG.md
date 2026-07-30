@@ -9,6 +9,14 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.13] — 2026-07-31
+
+### Fixed
+
+- **The dark strip below the Oyon dashboard is gone.** The panel stopped short
+  of the bottom of the window, leaving a dead band of empty space. It now fills
+  the room properly.
+
 ## [2.9.12] — 2026-07-30
 
 ### Fixed

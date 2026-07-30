@@ -103,19 +103,26 @@ export default function OyonServerDashboards({ records, loading, sessionId = nul
    }
 
    return (
-      <div className="space-y-2">
-         <p className="text-xs text-gray-500">
+      <div className="flex flex-col h-full min-h-0 gap-2">
+         <p className="shrink-0 text-xs text-gray-500">
             Oyon dashboards over the records matching the current filters
             {loading ? ' — refreshing…' : ''}. Estimates from visible facial
             signals only, aggregated in ~10&nbsp;s windows.
          </p>
          {/* Light card: the element ships a light theme; don't sink it into
-             the settings page's dark chrome. Height tracks the viewport so
-             the embed fills the settings panel instead of a fixed strip
-             (ConfigPanel's content column is the only scroller). The host
-             div stays mounted while loading — the mount effect needs its
-             ref — with a veil on top until the element is live. */}
-         <div className="relative h-[calc(100vh-15rem)] min-h-[560px]">
+             the host's dark chrome. The host div stays mounted while loading —
+             the mount effect needs its ref — with a veil on top until the
+             element is live.
+
+             Height FILLS the flex parent rather than computing a viewport
+             fraction. The old `h-[calc(100vh-15rem)]` dated from when this
+             embed lived inside ConfigPanel's scrolling column; in the
+             full-screen dashboard room it under-fills by exactly the room
+             header plus the caption above, leaving a dead dark strip below
+             the panel. `min-h-0` is required — a flex child defaults to
+             min-height:auto and would refuse to shrink, pushing the strip
+             back. */}
+         <div className="relative flex-1 min-h-0">
             <div ref={hostRef} className="h-full overflow-hidden rounded-lg border border-gray-300 bg-white" />
             {!ready && (
                <div className="absolute inset-0 grid place-items-center rounded-lg border border-gray-300 bg-white">
