@@ -1,6 +1,7 @@
 {
   "cancel": "[Çáñçéĺ··]",
   "case_analytics": "[Çášé Áñáĺýţíçš···]",
+  "close": "[Çĺóšé·]",
   "dismiss": "[Ðíšɱíšš··]",
   "emotion_analytics": "[Éɱóţíóñ Áñáĺýţíçš····]",
   "end_debrief": "[Éñð & Ðéƀŕíéƒ··]",
@@ -22,6 +23,10 @@
   "multi_tab_warning": "[ţĥíš šéššíóñ íš óþéñ íñ áñóţĥéŕ ƀŕóŵšéŕ ţáƀ. Ĺášţ-ŵŕíţé-ŵíñš áþþĺíéš.············]",
   "my_profile": "[Mý Þŕóƒíĺé··]",
   "open_settings": "[Óþéñ Šéţţíñğš···]",
+  "oyon_dashboard": "[Óýóñ Ðášĥƀóáŕð···]",
+  "oyon_dashboard_load_failed": "[Çóúĺð ñóţ ĺóáð ţĥé Óýóñ ðášĥƀóáŕð······]",
+  "oyon_dashboard_truncated": "[çáþþéð áţ ţĥé ɱóšţ ŕéçéñţ 1000 ŵíñðóŵš······]",
+  "oyon_dashboard_window_count": "{count, plural, one {# window} other {# windows}}",
   "settings": "[Šéţţíñğš··]",
   "settings_menu_aria": "[Šéţţíñğš áñð þŕóƒíĺé ɱéñú·····]"
 }

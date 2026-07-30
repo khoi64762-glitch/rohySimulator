@@ -9,6 +9,27 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.4] — 2026-07-30
+
+### Added
+
+- **A named Oyon dashboard for educators and administrators.** A new full-page
+  surface, reachable from the top-bar menu, that renders Oyon's own Analyze
+  dashboards over the platform's stored windows. It sits beside the existing
+  Emotion Analytics view rather than replacing it: Emotion Analytics remains
+  Rohy's own dashboard, while this surface shows the engine's, so newly enabled
+  signals appear here as the engine gains support for them. Access uses the
+  existing Oyon permission — educator or administrator, subject to the
+  per-role tenant setting — and all authorisation stays on the server.
+- Window-shared signal blocks captured under Oyon 3 (facial, posture, heart
+  rate, respiration, illumination, capture quality) are now passed through to
+  the dashboards, so the new signals can be displayed as they start arriving.
+
+### Changed
+
+- The German, Spanish, Italian, Finnish and Swedish strings for the new
+  dashboard are provisional and awaiting native review.
+
 ## [2.9.3] — 2026-07-30
 
 ### Fixed

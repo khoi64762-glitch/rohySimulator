@@ -1,6 +1,7 @@
 {
   "cancel": "Avbryt",
   "case_analytics": "Fallanalys",
+  "close": "Stäng",
   "dismiss": "Avfärda",
   "emotion_analytics": "Emotionsanalys",
   "end_debrief": "Avsluta & debriefa",
@@ -22,6 +23,10 @@
   "multi_tab_warning": "den här sessionen är öppen i en annan webbläsarflik. Senast sparade ändring gäller.",
   "my_profile": "Min profil",
   "open_settings": "Öppna inställningar",
+  "oyon_dashboard": "Oyon-panel",
+  "oyon_dashboard_load_failed": "Kunde inte ladda Oyon-panelen",
+  "oyon_dashboard_truncated": "begränsat till de 1000 senaste fönstren",
+  "oyon_dashboard_window_count": "{count, plural, one {# fönster} other {# fönster}}",
   "settings": "Inställningar",
   "settings_menu_aria": "Meny för inställningar och profil"
 }

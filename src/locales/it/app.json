@@ -1,6 +1,7 @@
 {
   "cancel": "Annulla",
   "case_analytics": "Analisi del caso",
+  "close": "Chiudi",
   "dismiss": "Ignora",
   "emotion_analytics": "Analisi delle emozioni",
   "end_debrief": "Termina e debriefing",
@@ -22,6 +23,10 @@
   "multi_tab_warning": "questa sessione è aperta in un'altra scheda del browser. Vale l'ultima modifica salvata.",
   "my_profile": "Il mio profilo",
   "open_settings": "Apri impostazioni",
+  "oyon_dashboard": "Dashboard Oyon",
+  "oyon_dashboard_load_failed": "Impossibile caricare la dashboard Oyon",
+  "oyon_dashboard_truncated": "limitato alle 1000 finestre più recenti",
+  "oyon_dashboard_window_count": "{count, plural, one {# finestra} other {# finestre}}",
   "settings": "Impostazioni",
   "settings_menu_aria": "Menu impostazioni e profilo"
 }
