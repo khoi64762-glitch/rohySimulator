@@ -45,6 +45,24 @@ import { LLM_PROVIDERS, defaultModelFor } from '../../services/llmCatalogue';
 import ModelSelect from './ModelSelect';
 import { friendlyLlmError } from '../../utils/llmErrorMessage';
 import { SCENARIO_TEMPLATES, scaleScenarioTimeline } from '../../data/scenarioTemplates';
+import { MARITAL_STATUSES, PATIENT_GENDERS, PERSONA_TYPES } from '../../services/patientDemographics';
+
+/**
+ * Keeps a stored value selectable when it is not one of the canonical options.
+ *
+ * Cases authored before the dropdowns carried explicit `value` attributes may
+ * hold a translated label ("Sposato", "Ängstlich") instead of the English one.
+ * Without this the select would match no option and render BLANK — the author
+ * would see an empty field, and the stale value would survive untouched in the
+ * config because nothing had changed it. Showing it keeps the data visible and
+ * lets the next save converge it onto a canonical value.
+ *
+ * Renders nothing in the normal case, which is every case created since.
+ */
+function LegacyValueOption({ value, canonical }) {
+    if (!value || canonical.includes(value)) return null;
+    return <option value={value}>{value}</option>;
+}
 
 // Bug 1 (16.5.2026): the old "Open Body Map Editor" button linked out to
 // /?debug=bodymap, an auth-bypassing branch deliberately gated to
@@ -3700,9 +3718,16 @@ PERSONALITY: You are anxious but cooperative. You're worried this might be a hea
                                             className="input-dark"
                                         >
                                             <option value="">{t('demo_select')}</option>
-                                            <option>{t('demo_gender_male')}</option>
-                                            <option>{t('demo_gender_female')}</option>
-                                            <option>{t('demo_gender_other')}</option>
+                                            {/* The value is the STORED value and must stay English:
+                                                cases.patient_gender is CHECK-constrained to exactly
+                                                these three strings. Without an explicit value an
+                                                <option> submits its translated label, which is why
+                                                saving a case used to 500 in every non-English locale.
+                                                See server/shared/patientDemographics.js. */}
+                                            <option value="Male">{t('demo_gender_male')}</option>
+                                            <option value="Female">{t('demo_gender_female')}</option>
+                                            <option value="Other">{t('demo_gender_other')}</option>
+                                            <LegacyValueOption value={caseData.config?.demographics?.gender} canonical={PATIENT_GENDERS} />
                                         </select>
                                     </div>
                                 </div>
@@ -3810,11 +3835,14 @@ PERSONALITY: You are anxious but cooperative. You're worried this might be a hea
                                         className="input-dark"
                                     >
                                         <option value="">{t('demo_select')}</option>
-                                        <option>{t('demo_marital_single')}</option>
-                                        <option>{t('demo_marital_married')}</option>
-                                        <option>{t('demo_marital_divorced')}</option>
-                                        <option>{t('demo_marital_widowed')}</option>
-                                        <option>{t('demo_marital_separated')}</option>
+                                        {/* English values, translated labels — the stored string is
+                                            read as prose into the case context sent to the model. */}
+                                        <option value="Single">{t('demo_marital_single')}</option>
+                                        <option value="Married">{t('demo_marital_married')}</option>
+                                        <option value="Divorced">{t('demo_marital_divorced')}</option>
+                                        <option value="Widowed">{t('demo_marital_widowed')}</option>
+                                        <option value="Separated">{t('demo_marital_separated')}</option>
+                                        <LegacyValueOption value={caseData.config?.demographics?.maritalStatus} canonical={MARITAL_STATUSES} />
                                     </select>
                                 </div>
                             </div>
@@ -3911,14 +3939,20 @@ PERSONALITY: You are anxious but cooperative. You're worried this might be a hea
                                         onChange={e => updateConfig('persona_type', e.target.value)}
                                         className="input-dark"
                                     >
-                                        <option>{t('persona_standard')}</option>
-                                        <option>{t('persona_difficult')}</option>
-                                        <option>{t('persona_anxious')}</option>
-                                        <option>{t('persona_depressed')}</option>
-                                        <option>{t('persona_elderly')}</option>
-                                        <option>{t('persona_pediatric')}</option>
-                                        <option>{t('persona_noncompliant')}</option>
-                                        <option>{t('persona_drugseeking')}</option>
+                                        {/* English values, translated labels. The persona string is
+                                            injected into the patient system prompt as prose
+                                            (ChatInterface: `config.persona_type` → "you are …"), so a
+                                            localized value would have quietly changed the model's
+                                            instructions along with the UI language. */}
+                                        <option value="Standard Simulated Patient">{t('persona_standard')}</option>
+                                        <option value="Difficult/Angry Patient">{t('persona_difficult')}</option>
+                                        <option value="Anxious Patient">{t('persona_anxious')}</option>
+                                        <option value="Depressed Patient">{t('persona_depressed')}</option>
+                                        <option value="Elderly/Confused Patient">{t('persona_elderly')}</option>
+                                        <option value="Pediatric Proxy (Parent)">{t('persona_pediatric')}</option>
+                                        <option value="Non-compliant Patient">{t('persona_noncompliant')}</option>
+                                        <option value="Drug-seeking Patient">{t('persona_drugseeking')}</option>
+                                        <LegacyValueOption value={caseData.config?.persona_type} canonical={PERSONA_TYPES} />
                                     </select>
                                 </div>
                                 <div>
@@ -4775,7 +4809,7 @@ PERSONALITY: You are anxious but cooperative. You're worried this might be a hea
                     <PhysicalExamEditor
                         caseData={caseData}
                         setCaseData={setCaseData}
-                        patientGender={caseData.config?.demographics?.gender?.toLowerCase() || 'male'}
+                        patientGender={caseData.config?.demographics?.gender}
                     />
                 )}
 

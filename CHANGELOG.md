@@ -9,6 +9,55 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.15] — 2026-07-31
+
+### Fixed
+
+- **Saving a case no longer fails when the interface is not in English.**
+  Creating or updating a case returned a server error in German, Spanish,
+  Finnish, Italian and Swedish. Authors could edit a case but never save it;
+  English was unaffected, so the fault only appeared once someone worked in
+  another language.
+
+  The patient-gender dropdown stored whatever it displayed. Because the
+  displayed text is translated, choosing "Männlich" tried to store the word
+  "Männlich" in a column that only accepts `Male`, `Female` or `Other`, and the
+  save was rejected at the last possible moment. English worked purely by
+  coincidence — its label for that option is the word "Male", which the column
+  happens to accept.
+
+  Every dropdown of this kind now stores a fixed English value and translates
+  only what you see. The same fault affected the marital-status and persona
+  dropdowns; those did not fail visibly, but they did store the label in
+  whatever language the author happened to be using, so the persona instruction
+  sent to the model changed with the interface language. Both now store a
+  stable value. A case saved before this fix keeps its old value and still
+  shows it in the dropdown rather than appearing blank.
+
+- **A patient's sex is no longer read as male whenever the value is
+  unfamiliar.** The body map and examination manikin decided sex by testing
+  whether the stored value was exactly the English word "female". Anything else
+  — including a correct value in another language — silently produced a male
+  body map, with no error to notice. That decision now lives in one place, and
+  the male default applies only where there genuinely is no distinct anatomy.
+
+- **A rejected save now explains itself.** The failure surfaced as an internal
+  server error carrying raw database text, which said nothing useful and
+  exposed schema internals. Both the create and update paths now check the
+  value first and answer with a plain message naming the accepted values.
+  A value that is merely lower-case (`male`) is corrected rather than refused,
+  so older API clients and imported cases keep working.
+
+### Added
+
+- **A guard so this class of bug cannot return.** The patient-demographic
+  vocabularies live in one shared module (`server/shared/patientDemographics.js`)
+  used by both the editor and the server. A new test fails on any dropdown whose
+  label is translated but whose stored value is left implicit — the exact shape
+  of this bug, which is invisible in review and in every English-language test
+  run. A second test drives a real server in all five languages and locks the
+  rejection behaviour for both create and update.
+
 ## [2.9.14] — 2026-07-31
 
 ### Changed

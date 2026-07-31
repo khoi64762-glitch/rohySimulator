@@ -5,6 +5,7 @@ import BodyMap from '../examination/BodyMap';
 import { BODY_REGIONS, EXAM_TECHNIQUES } from '../../data/examRegions';
 import { useToast } from '../../contexts/ToastContext';
 import { apiFetch } from '../../services/apiClient';
+import { bodyMapGender } from '../../services/patientDemographics';
 
 /**
  * Physical Examination Editor for Case Design
@@ -19,10 +20,14 @@ export default function PhysicalExamEditor({ caseData, setCaseData, patientGende
     const [gender, setGender] = useState(patientGender);
     const [uploading, setUploading] = useState(false);
 
-    // Update gender when patient gender changes
+    // Update gender when patient gender changes. bodyMapGender() owns the
+    // mapping: the hand-rolled `=== 'female'` test this replaces silently
+    // rendered a MALE body for any value it did not recognise, so a case whose
+    // gender had been stored in another language showed the wrong anatomy with
+    // no error anywhere.
     useEffect(() => {
         if (patientGender) {
-            setGender(patientGender.toLowerCase() === 'female' ? 'female' : 'male');
+            setGender(bodyMapGender(patientGender));
         }
     }, [patientGender]);
 

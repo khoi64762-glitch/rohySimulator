@@ -883,7 +883,7 @@ function MainApp() {
                activeCase={activeCase}
                sessionId={sessionId}
                physicalExam={caseSnapshot?.config?.physical_exam ?? activeCase?.config?.physical_exam ?? null}
-               patientGender={(caseSnapshot?.config?.demographics?.gender ?? activeCase?.config?.demographics?.gender)?.toLowerCase() || 'male'}
+               patientGender={caseSnapshot?.config?.demographics?.gender ?? activeCase?.config?.demographics?.gender}
                onExamPerformed={(exam) => {
                   EventLogger.physicalExamPerformed(
                      exam.regionId,
