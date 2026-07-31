@@ -54,7 +54,11 @@ describe('Oyon ONNX Runtime packaging contract', () => {
   it('fails installation and builds when required Oyon assets are incomplete', () => {
     expect(packageJson.scripts.postinstall).toBe('npm run setup:oyon');
     expect(packageJson.scripts['setup:oyon']).toContain('npm run verify:oyon');
-    expect(packageJson.scripts.prebuild).toBe('npm run verify:oyon');
+    // `toContain`, matching setup:oyon above: what matters is that
+    // verify:oyon gates the build, not that it is the only thing prebuild
+    // does. prebuild also runs license:sync, and an exact match here would
+    // fail every time a build step is legitimately composed alongside it.
+    expect(packageJson.scripts.prebuild).toContain('npm run verify:oyon');
   });
 
   it('downloads models atomically and verifies immutable checksums', () => {

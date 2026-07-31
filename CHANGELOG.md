@@ -9,6 +9,82 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.14] — 2026-07-31
+
+### Changed
+
+- **rohy is now licensed under the Carm Research License v1.4**, replacing MIT
+  and bringing it in line with the rest of the Carm ecosystem (Oyon, ChatOyon,
+  Carm, LAILA). It is free for research, teaching, personal learning and
+  non-profit use — including industry-sponsored and collaboratively funded
+  academic work, which v1.4 places explicitly inside the free grant regardless
+  of funding source. Commercial use requires a paid license. Anything you
+  produce by running rohy on your own data remains entirely yours.
+
+  MIT was not merely a different choice, it was an inaccurate one. rohy
+  git-tracks the vendored `OyonR/` addon — 658 files including its own
+  `LICENSE`, `NOTICE.md` and nine third-party texts — which is licensed under
+  the Carm Research License and forbids sublicensing and resale. The root
+  `LICENSE` was simultaneously granting permission to "sublicense, and/or sell"
+  that same tree. The two statements could not both be true.
+
+  The license text is fetched from the canonical
+  [carm-license](https://github.com/mohsaqr/carm-license) repository at its
+  **version tag**, never `main`, so a routine build cannot silently relicense
+  the product; adopting a future version is a deliberate one-line edit.
+
+### Added
+
+- **`NOTICE.md` — a complete index of everything rohy redistributes**, with
+  every license embedded in full rather than linked, as the Carm license
+  requires. `scripts/licenses.manifest.mjs` is its single source of truth;
+  `npm run license:sync` refreshes every text from its canonical upstream on
+  each build, `npm run license:verify` is the strict release form, and
+  `npm run license:latest` reports when a newer Carm License version exists.
+
+- **`tests/server/license-contract.test.js`** — 54 fully offline assertions
+  covering the whole contract: every manifest entry has real committed text,
+  every text is linked from `NOTICE.md` alongside its live upstream, the
+  version string agrees in every file that names it, the Carm license is
+  pinned to a tag rather than a branch, and the Docker image genuinely
+  carries `LICENSE`, `NOTICE.md` and `licenses/`.
+
+### Fixed
+
+- **The container image no longer ships without its license.**
+  `deploy/docker/Dockerfile` labelled images `MIT` and copied no license file
+  at all. It now copies `LICENSE`, `NOTICE.md` and `licenses/` into the
+  runtime stage, and `.dockerignore` re-includes `NOTICE.md` past the blanket
+  `*.md` exclusion — the same two-gate trap that previously shipped broken
+  images for `Lab_database.json`, `heart.txt` and `CHANGELOG.md`.
+
+### Disclosed
+
+Three obligations that were already true but written down nowhere. None of
+them change how rohy runs; all three matter before you deploy it.
+
+- **Building the image with `INCLUDE_PIPER=1` redistributes GPL-3.0 software.**
+  Piper TTS is `OHF-Voice/piper1-gpl`, and that build variant bakes it into the
+  image. The default build does not, and rohy's own terms are unaffected. The
+  full GPL text now ships at `licenses/piper1-gpl.COPYING.txt`.
+
+- **The default Piper voices are not uniformly MIT.** The voice repository
+  declares MIT, but each voice's `MODEL_CARD` names its own dataset license and
+  several are research-restricted — `en_US-lessac-*`, installed by default,
+  is trained on the CSTR Blizzard 2013 corpus. Check the card for each voice
+  you enable before deploying commercially.
+
+- **The CALIPER paediatric reference ranges are CC BY-NC-SA**, whose
+  non-commercial term is incompatible with a commercial deployment. They are
+  isolated behind their own `data_sources` row by design, so that source can be
+  dropped cleanly without disturbing the adult ranges or the LOINC coding.
+
+`NOTICE.md` also records one unresolved item: the auscultation audio in
+`public/sounds/` is committed and shipped, but its origin and license are not
+recorded anywhere in the repository or its history. It is listed as unresolved
+rather than omitted, because an unknown license is a risk to a redistributor
+and an empty row is more honest than an invented one.
+
 ## [2.9.13] — 2026-07-31
 
 ### Fixed

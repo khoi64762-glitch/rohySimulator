@@ -54,6 +54,12 @@ deploy/PORTABILITY.md
 # would strip it from the build context, so re-include it explicitly. Keep
 # this AFTER every *.md exclusion so nothing re-ignores it.
 !CHANGELOG.md
+# NOTICE.md is a legal artifact, not documentation. The Carm Research License
+# requires third-party notices to travel with every copy, so an image that
+# carried LICENSE (no extension, never excluded) but dropped its notice would
+# ship in breach. Same rule as CHANGELOG.md: keep this AFTER every *.md
+# exclusion. `licenses/` is a directory and survives the blanket rule.
+!NOTICE.md
 
 # Tests don't ship to runtime images
 tests
