@@ -689,7 +689,7 @@ export default function ConfigPanel({ onClose, onLoadCase, fullPage = false, ini
                     role gating lives on each SECTIONS item's `visible`; a
                     group with no visible items renders neither its label nor
                     body. */}
-                <div className="rohy-admin-sidebar w-48 min-h-0 overflow-y-auto border-r border-neutral-800 flex flex-col py-3">
+                <div className="rohy-admin-sidebar w-36 lg:w-48 flex-none min-h-0 overflow-y-auto border-r border-neutral-800 flex flex-col py-3">
                     {/* Simulation — not a tab: returns to the running simulation. */}
                     <button
                         type="button"
@@ -725,7 +725,11 @@ export default function ConfigPanel({ onClose, onLoadCase, fullPage = false, ini
                 </div>
 
                 {/* Content Area */}
-                <div className="rohy-admin-page flex-1 p-8 overflow-y-auto">
+                {/* `min-w-0` matters more than the padding: without it a flex
+                    child refuses to shrink below its content, so one wide
+                    table or button row inside a tab pushed the whole panel
+                    sideways instead of scrolling within itself. */}
+                <div className="rohy-admin-page flex-1 min-w-0 p-4 lg:p-8 overflow-y-auto">
 
                     {/* --- TEMP SETTINGS OVERVIEW --- Card-page prototype; all existing tabs remain unchanged. */}
                     {activeTab === 'overview' && (
@@ -3546,8 +3550,8 @@ PERSONALITY: You are anxious but cooperative. You're worried this might be a hea
                     </div>
                 )}
 
-                <div className="flex items-center justify-between mb-4">
-                    <div className="flex-1 mr-4">
+                <div className="flex flex-wrap items-center gap-y-2 justify-between mb-4">
+                    <div className="flex-1 min-w-[16rem] mr-4">
                         <div className="flex items-center gap-3 mb-1">
                             <h3 className="text-lg font-bold text-white whitespace-nowrap">{t('wizard_case_title')}</h3>
                             <input
@@ -3590,8 +3594,16 @@ PERSONALITY: You are anxious but cooperative. You're worried this might be a hea
                     </div>
                 </div>
 
-                {/* Clickable Step Navigation */}
-                <div className="flex gap-1">
+                {/* Clickable Step Navigation.
+                    Eleven steps do not fit one non-shrinking row on anything
+                    narrower than a desktop: `flex-1` cannot shrink a button
+                    below its label's min-content width, so on an iPad the
+                    later steps used to overflow off-screen with no way to
+                    reach them — an author who opened a middle step was
+                    cornered. Below `xl` the row wraps to as many lines as it
+                    needs and buttons size to their content; from `xl` up the
+                    original single equal-width row is unchanged. */}
+                <div className="flex flex-wrap xl:flex-nowrap gap-1">
                     {WIZARD_STEPS.map((s, _idx) => (
                         <button
                             key={s.num}
@@ -3600,7 +3612,7 @@ PERSONALITY: You are anxious but cooperative. You're worried this might be a hea
                                 await onSave();
                                 setStep(s.num);
                             }}
-                            className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${step === s.num
+                            className={`flex-none xl:flex-1 min-w-0 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${step === s.num
                                 ? 'bg-teal-600 text-white shadow-lg shadow-teal-900/30'
                                 : step > s.num
                                     ? 'bg-green-900/30 text-green-300 hover:bg-green-900/50 border border-green-700/50'
@@ -3608,7 +3620,7 @@ PERSONALITY: You are anxious but cooperative. You're worried this might be a hea
                                 }`}
                         >
                             <span>{s.icon}</span>
-                            <span className="hidden sm:inline">{s.title}</span>
+                            <span className="hidden sm:inline truncate">{s.title}</span>
                             <span className="sm:hidden">{s.num}</span>
                         </button>
                     ))}
@@ -4870,10 +4882,15 @@ PERSONALITY: You are anxious but cooperative. You're worried this might be a hea
 
             </div>
 
-            {/* Footer Actions */}
-            <div className="pt-4 border-t border-neutral-800 flex justify-between mt-4">
+            {/* Footer Actions.
+                `lastStep` used to be the literal 9 while WIZARD_STEPS grew to
+                11: "Next" vanished after Records, and Treatments/Agents
+                offered only "Save & Finish", so the linear path through the
+                wizard dead-ended two steps early. Derive it from the array so
+                adding a step can never strand one again. */}
+            <div className="pt-4 border-t border-neutral-800 flex flex-wrap gap-2 justify-between items-center mt-4">
                 <button onClick={onCancel} className="text-neutral-500 hover:text-white px-4">{t('btn_cancel')}</button>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                     {step > 1 && (
                         <button
                             onClick={async () => {
@@ -4888,7 +4905,7 @@ PERSONALITY: You are anxious but cooperative. You're worried this might be a hea
                     )}
 
                     {/* Save Progress button on all steps except last */}
-                    {step < 9 && (
+                    {step < WIZARD_STEPS.length && (
                         <button
                             onClick={onSave}
                             className="px-4 py-2 bg-blue-700 hover:bg-blue-600 rounded font-bold text-sm flex items-center gap-2 shadow-lg shadow-blue-900/20"
@@ -4897,7 +4914,7 @@ PERSONALITY: You are anxious but cooperative. You're worried this might be a hea
                         </button>
                     )}
 
-                    {step < 9 ? (
+                    {step < WIZARD_STEPS.length ? (
                         <button
                             onClick={async () => {
                                 // Auto-save before moving forward

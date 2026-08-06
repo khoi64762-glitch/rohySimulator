@@ -226,7 +226,11 @@ export default function BodyMap({
                 </div>
             </div>
             {/* Legend */}
-            <div className="flex-shrink-0 flex items-center justify-center gap-4 py-1.5 border-t border-slate-700/50 bg-slate-900/50">
+            {/* Four legend keys in one non-wrapping row need ~330px. The map
+                sits in a third-width column, which on a tablet is ~250px, and
+                the row was clipped at both ends ("…over" / "…veal"). Wrapping
+                costs one extra line and loses nothing. */}
+            <div className="flex-shrink-0 flex flex-wrap items-center justify-center gap-x-4 gap-y-0.5 px-2 py-1.5 border-t border-slate-700/50 bg-slate-900/50">
                 <div className="flex items-center gap-1">
                     <div className="w-3 h-3 rounded border border-white/30 bg-transparent" />
                     <span className="text-[10px] text-slate-500">{t('legend_hover')}</span>

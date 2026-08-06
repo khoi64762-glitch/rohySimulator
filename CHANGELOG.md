@@ -9,6 +9,56 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.17] — 2026-08-06
+
+### Fixed
+
+- **The patient room no longer clips the monitor on an iPad in portrait.**
+  The chat column and the monitor column carried 350px and 600px minimum
+  widths inside a viewport that never scrolls, so on any screen under
+  950px the right-hand edge of the monitor — including part of the vitals
+  column — was cut off with no way to reach it. Below 1024px the two now
+  stack: conversation on top, vitals underneath. Desktop layout unchanged.
+- **Vitals boxes no longer shrink and clip their own readings.** Each box
+  in the monitor's vitals column is a fixed-height flex child that hides
+  its overflow, but none of them declared `shrink-0`. In a column shorter
+  than their combined height the browser squeezed them instead of
+  scrolling — the heart-rate box rendered at 25px against its declared
+  96px, showing the bottom half of "110" as if it were the whole reading.
+  A clipped vital that still looks like a number is the worst failure in
+  this list. Reproduced on any short window, not only tablets.
+- **The lab and radiology rooms are usable on a tablet.** Their three
+  columns left the report viewer about 280px wide in portrait, enough to
+  wrap a one-line empty state over ten lines and to overlap the
+  READY/PENDING/VIEWED counters. Below 1024px the panes stack full-width.
+- **Room headers no longer run underneath the capture pill.** The Oyon
+  pill is a fixed overlay centred at the top of the viewport; on a
+  tablet-width header the case title ran beneath it. Titles now stop short
+  of the centre, and "End & Debrief" collapses to its icon.
+- **The body-map legend no longer clips.** Four keys in one non-wrapping
+  row need ~330px and had ~250px; the first and last were cut mid-word.
+- **The case wizard no longer strands an author mid-way.** The step strip
+  put eleven equal-width buttons in one non-shrinking row, so on anything
+  narrower than a desktop the later steps overflowed off-screen; the row
+  now wraps below 1280px. The footer separately treated step 9 as the last
+  (it was, before two steps were added), so "Next" disappeared after
+  Records and Treatments/Agents offered only "Save & Finish" — the last
+  step is now derived from the step list. Regression-locked in
+  `ConfigPanel.test.jsx`.
+- **The physical exam editor stacks below 1024px.** The body map at a
+  third of a tablet's content column was too small to hit a region
+  reliably, and its 500px inner scroller became a scroll trap once
+  stacked.
+
+### Added
+
+- `npm run test:e2e:tablet` — Playwright checks every student-facing room
+  at 820x1180 and 1180x820, asserting no horizontal overflow (the failure
+  mode above: content pushed outside a clipped container is unreachable,
+  not merely ugly) and writing a screenshot per room per viewport to
+  `test-results/tablet-layout/`. Requires `npm run build` first; like the
+  rest of the Playwright suite it is not in CI.
+
 ## [2.9.16] — 2026-08-06
 
 ### Fixed

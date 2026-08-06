@@ -135,11 +135,13 @@ export default function DiscussionScreen({ sessionId, activeCase, onClose, roomN
                     >
                         <ArrowLeft className="w-4 h-4" /> {t('back_to_cases')}
                     </button>
-                    <div className="flex items-center gap-2 text-sm">
-                        <GraduationCap className="w-5 h-5 text-indigo-400" />
-                        <span className="font-semibold text-slate-100">{t('case_debrief')}</span>
+                    <div className="flex items-center gap-2 text-sm min-w-0">
+                        <GraduationCap className="w-5 h-5 shrink-0 text-indigo-400" />
+                        <span className="font-semibold text-slate-100 whitespace-nowrap">{t('case_debrief')}</span>
+                        {/* Hidden below `lg`: the centred, `fixed` Oyon pill
+                            occupies that space on a tablet-width header. */}
                         {caseTitle && (
-                            <span className="text-slate-400">· {caseTitle}</span>
+                            <span className="text-slate-400 truncate max-lg:hidden">· {caseTitle}</span>
                         )}
                         {/* Discussant identity lives here so the centre column
                             stays free for the avatar + cinema subtitle band.

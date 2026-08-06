@@ -338,6 +338,39 @@ describe('ConfigPanel', () => {
         expect(onOpenPersonaEditor).toHaveBeenCalledWith('new');
     });
 
+    // Regression lock: the wizard footer derives the last step from
+    // WIZARD_STEPS, not a literal.
+    //
+    // The footer used `step < 9` while WIZARD_STEPS had grown to 11, so the
+    // linear path dead-ended at Records: step 9 offered "Save & Finish"
+    // (which closes the wizard) with Treatments and Agents still ahead, and
+    // those two steps had no forward control at all. Reported 2026-08-06 by
+    // an author on an iPad, where the step strip also overflowed off-screen
+    // and the footer was the only way through.
+    it.each([
+        [8, 'Exam'],
+        [9, 'Records'],
+        [10, 'Treatments'],
+    ])('offers Next (not Save & Finish) on wizard step %i (%s)', async (stepNum) => {
+        window.localStorage.setItem('rohy_editing_case', JSON.stringify({
+            id: 7, name: 'Resumed', description: 'd', config: { pages: [] },
+        }));
+        mount({ initialTab: 'cases', initialWizardStep: stepNum });
+        await waitForAdmin();
+        expect(await screen.findByRole('button', { name: /^Next$/i })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /Save & Finish/i })).not.toBeInTheDocument();
+    });
+
+    it('offers Save & Finish only on the final wizard step (Agents)', async () => {
+        window.localStorage.setItem('rohy_editing_case', JSON.stringify({
+            id: 7, name: 'Resumed', description: 'd', config: { pages: [] },
+        }));
+        mount({ initialTab: 'cases', initialWizardStep: 11 });
+        await waitForAdmin();
+        expect(await screen.findByRole('button', { name: /Save & Finish/i })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /^Next$/i })).not.toBeInTheDocument();
+    });
+
     // CONTRACT: round-trip — initialTab='cases' + initialWizardStep=11 lands
     // on the wizard's Agents step (CaseAgentEditor renders "8. AI Agents").
     it('round-trips back to wizard step 11 (Agents) when reopened from persona editor', async () => {

@@ -48,10 +48,12 @@ export default function PhysicalExamScreen({
         <div className="h-screen w-screen bg-gradient-to-br from-slate-700 to-slate-900 text-slate-100 flex flex-col overflow-hidden">
             {/* Topbar */}
             <header className="flex items-center justify-between px-6 py-3 bg-slate-900/80 backdrop-blur border-b border-slate-700">
-                <div className="flex items-center gap-2 text-sm">
-                    <Stethoscope className="w-5 h-5 text-cyan-400" />
-                    <span className="font-semibold text-slate-100">{t('physical_examination')}</span>
-                    <span className="text-slate-400">· {caseTitle}</span>
+                {/* Title capped below `lg` so it stops short of the centred,
+                    `fixed` Oyon capture pill (see InvestigationsScreen). */}
+                <div className="flex items-center gap-2 text-sm min-w-0 max-lg:max-w-[40%]">
+                    <Stethoscope className="w-5 h-5 shrink-0 text-cyan-400" />
+                    <span className="font-semibold text-slate-100 whitespace-nowrap">{t('physical_examination')}</span>
+                    <span className="text-slate-400 truncate max-lg:hidden">· {caseTitle}</span>
                 </div>
                 <div className="flex items-center gap-2">
                     {topBarControls}

@@ -159,7 +159,7 @@ export default function PhysicalExamEditor({ caseData, setCaseData, patientGende
 
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap gap-2 items-center justify-between">
                 <div>
                     <h4 className="text-lg font-bold text-purple-400">{t('heading')}</h4>
                     <p className="text-xs text-neutral-500">
@@ -184,9 +184,15 @@ export default function PhysicalExamEditor({ caseData, setCaseData, patientGende
                 <span className="text-neutral-500 text-xs">{t('gender_hint')}</span>
             </div>
 
-            <div className="flex gap-6">
+            {/* Body map beside the region editor is a desktop luxury: at a
+                third of an iPad's content column the map renders too small to
+                hit a region reliably, and the editor beside it is too narrow
+                to read. Below `lg` the two stack — full-width map, then the
+                editor underneath — which is also the order a touch user works
+                in (pick a region, then fill it in). */}
+            <div className="flex flex-col lg:flex-row gap-4 lg:gap-6">
                 {/* Left: Body Map */}
-                <div className="w-1/3 flex flex-col">
+                <div className="w-full lg:w-1/3 flex flex-col">
                     {/* View Toggle */}
                     <div className="flex gap-2 mb-3">
                         <button
@@ -212,7 +218,7 @@ export default function PhysicalExamEditor({ caseData, setCaseData, patientGende
                     </div>
 
                     {/* Body Map */}
-                    <div className="flex-1 bg-neutral-900 rounded-lg border border-neutral-700 overflow-hidden" style={{ minHeight: '400px' }}>
+                    <div className="flex-1 bg-neutral-900 rounded-lg border border-neutral-700 overflow-hidden min-h-[400px] max-lg:h-[55vh]">
                         <BodyMap
                             view={view}
                             gender={gender}
@@ -249,8 +255,14 @@ export default function PhysicalExamEditor({ caseData, setCaseData, patientGende
                     </div>
                 </div>
 
-                {/* Right: Region Editor */}
-                <div className="flex-1 bg-neutral-900 rounded-lg border border-neutral-700 p-4 overflow-y-auto" style={{ maxHeight: '500px' }}>
+                {/* Right: Region Editor.
+                    The 500px inner scroller stays on desktop, where it sits
+                    beside a fixed-height map. Stacked on a tablet it becomes
+                    a scroll trap — a short scrolling box inside the page's
+                    own scroller, where a touch drag moves whichever one the
+                    finger happened to land on. Below `lg` it grows with its
+                    content and the page does the scrolling. */}
+                <div className="flex-1 bg-neutral-900 rounded-lg border border-neutral-700 p-4 lg:overflow-y-auto lg:max-h-[500px]">
                     {selectedRegion && currentRegion ? (
                         <div className="space-y-4">
                             <div className="flex items-center justify-between border-b border-neutral-700 pb-3">
@@ -282,7 +294,7 @@ export default function PhysicalExamEditor({ caseData, setCaseData, patientGende
 
                                 return (
                                     <div key={examType} className={`space-y-2 ${isAuscultation ? 'bg-neutral-800/50 p-3 rounded-lg border border-cyan-900/30' : ''}`}>
-                                        <div className="flex items-center justify-between">
+                                        <div className="flex flex-wrap gap-x-3 gap-y-1 items-center justify-between">
                                             <label className="text-sm font-medium text-neutral-300 flex items-center gap-2">
                                                 {isAuscultation && <Volume2 className="w-4 h-4 text-cyan-400" />}
                                                 {technique?.name || examType}
@@ -441,7 +453,7 @@ export default function PhysicalExamEditor({ caseData, setCaseData, patientGende
             {/* Summary */}
             <div className="bg-neutral-800/50 rounded-lg p-4 border border-neutral-700">
                 <h5 className="text-sm font-bold text-neutral-300 mb-2">{t('config_summary')}</h5>
-                <div className="flex gap-6 text-xs">
+                <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs">
                     <div className="flex items-center gap-2">
                         <CheckCircle className="w-4 h-4 text-green-500" />
                         <span className="text-neutral-400">{t('configured_regions')}</span>
