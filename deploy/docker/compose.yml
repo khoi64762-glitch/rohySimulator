@@ -3,7 +3,18 @@
 # Quickstart:
 #   cp deploy/docker/.env.example deploy/docker/.env
 #   $EDITOR deploy/docker/.env                            # set ROHY_HOSTNAME
-#   docker compose -f deploy/docker/compose.yml up -d --build
+#   docker compose -p rohy -f deploy/docker/compose.yml up -d --build
+#
+# `-p rohy` is worth the keystrokes. Without it Compose names the project
+# after the directory this file sits in — `docker` — so the volumes below
+# become `docker_rohy-db` and `docker_rohy-hf-cache`, a namespace shared
+# with any other stack you run from a folder called `docker/`. A leftover
+# `docker_rohy-db` from an unrelated project gets reused by this one, and
+# the symptom is a container that never turns healthy rather than an
+# error naming the clash. Set it once in .env as COMPOSE_PROJECT_NAME=rohy
+# if you prefer. Choose before the first run: changing it later points
+# Compose at new, empty volumes and the database looks wiped (it isn't —
+# see "Scope the compose project name" in docs/DEPLOY.md to migrate).
 #
 # Two services:
 #   - rohy   : the Node app, persistent DB + HF cache volumes
@@ -43,7 +54,22 @@ services:
       PORT: 4000
       # FRONTEND_URL is the public origin browsers use. Behind Caddy with
       # auto-TLS, that's https://<your-hostname>/rohy.
-      FRONTEND_URL: "${FRONTEND_URL:-https://${ROHY_HOSTNAME:-localhost}/rohy}"
+      #
+      # Left EMPTY on purpose: when it is empty, entrypoint.sh derives it as
+      # https://$ROHY_HOSTNAME/rohy. Compose cannot do that itself —
+      # `${FRONTEND_URL:-https://${ROHY_HOSTNAME:-localhost}/rohy}` nests one
+      # interpolation inside another's default, which Compose rejects
+      # outright ("invalid interpolation format … You may need to escape any
+      # $ with another $"). Escaping to `$${ROHY_HOSTNAME:-localhost}` parses
+      # but is WORSE: `$$` means a literal `$`, so the container would
+      # receive the string "https://${ROHY_HOSTNAME:-localhost}/rohy"
+      # verbatim and Node would use it, unexpanded, as an origin.
+      FRONTEND_URL: "${FRONTEND_URL:-}"
+      # Passed through so the entrypoint can do that derivation. Deliberately
+      # NOT defaulted to localhost here: an empty value is how the entrypoint
+      # tells "operator set no hostname" (a fatal misconfiguration in
+      # production) from "operator chose localhost" (a valid local run).
+      ROHY_HOSTNAME: "${ROHY_HOSTNAME:-}"
       # Trust the proxy chain so rate-limit + X-Forwarded-* work.
       ROHY_TRUST_PROXY: "${ROHY_TRUST_PROXY:-loopback}"
       # First-boot only: seed admin/admin123. REMOVE after first login.

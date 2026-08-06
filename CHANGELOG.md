@@ -9,6 +9,63 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.18] — 2026-08-06
+
+### Fixed
+
+- **`docker compose up` no longer fails on the compose file itself.**
+  Since v2.9.12 the file set
+
+  ```yaml
+  FRONTEND_URL: "${FRONTEND_URL:-https://${ROHY_HOSTNAME:-localhost}/rohy}"
+  ```
+
+  which puts one interpolation inside another's default. Compose has no
+  nested interpolation and rejects the whole file:
+  `invalid interpolation format for services.rohy.environment.FRONTEND_URL`.
+  Every Docker deploy was dead on arrival, and nothing in the repo ran
+  this file, so lint, tests and CI all stayed green.
+
+  The composition itself is the documented contract — `.env.example` has
+  always said `FRONTEND_URL` is derived from `ROHY_HOSTNAME` — so it moved
+  to `entrypoint.sh`, where a shell can express a fallback and a test can
+  execute it. Compose now passes both variables through unmodified.
+
+  Note for anyone who patched this locally: escaping to
+  `$${ROHY_HOSTNAME:-localhost}` makes the error go away but is worse than
+  the error. `$$` is Compose's literal-dollar escape, so the container
+  receives the text `https://${ROHY_HOSTNAME:-localhost}/rohy` verbatim
+  and uses it, unexpanded, as its public origin.
+
+- **Setting no hostname is now fatal instead of silently wrong.** The old
+  default resolved to `https://localhost/rohy` whenever `ROHY_HOSTNAME`
+  was unset, which defeated the entrypoint's own guard against booting
+  production without a known origin. An unset hostname now reaches that
+  guard and the container refuses to start, naming both ways to fix it.
+
+### Changed
+
+- **Documented the compose project name.** With no `name:` in the file,
+  Compose derives the project from its directory — `deploy/docker/` — so
+  resources land under the generic project `docker` (the DB volume is
+  `docker_rohy-db`). A leftover volume of that name from an unrelated
+  stack gets adopted by this one, which shows up as a container that
+  never turns healthy rather than as a collision error. `.env.example`
+  now ships `COMPOSE_PROJECT_NAME=rohy`, the quickstart uses `-p rohy`,
+  and `docs/DEPLOY.md` explains why it must be chosen before the first
+  run — plus how to move the volume if it wasn't. The default is
+  unchanged, so no existing deploy loses sight of its database.
+
+### Added
+
+- **`tests/server/docker-compose-contract.test.js`** — nine checks that
+  parse `compose.yml`, reject nested interpolation and `$$`-escaped
+  values in any environment block, and execute the real `entrypoint.sh`
+  to confirm the derivation, the explicit-override precedence, and the
+  production refusal. The interpolation bug shipped because the only
+  detector was a human typing `docker compose up`; this is that detector.
+  Verified to fail against the v2.9.12 file.
+
 ## [2.9.17] — 2026-08-06
 
 ### Fixed
