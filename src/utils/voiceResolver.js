@@ -116,9 +116,17 @@ function playableOnUsableEngine(voiceId, providers) {
  *   rate: number|undefined,
  *   pitch: number|undefined,
  *   tier: 'override'|'default'|'invalid'|null,
+ *   source: 'case'|'template'|'platform_default'|null,
  *   substituted: boolean,
  *   substitutionReason: 'not_configured'|null
  * }}
+ *
+ * `source` names WHICH level won. `tier` alone cannot answer the question
+ * admins actually ask ("I changed the platform default and nothing
+ * happened — why?"): both a case voice and a persona-template voice report
+ * tier 'override', and either one silently outranks the platform default.
+ * Every diagnostic surface shows the source so that question is answerable
+ * without reading the database.
  */
 export function resolveVoice({ voice = {}, templateVoice = null, voiceSettings = null, language = null, isValid = null } = {}) {
     const playable = typeof isValid === 'function'
@@ -130,14 +138,16 @@ export function resolveVoice({ voice = {}, templateVoice = null, voiceSettings =
     const caseVoice = voice?.case_voice || null;
     const tmplVoice = templateVoice?.case_voice || null;
     const requestedFile = caseVoice || tmplVoice || null;
+    const requestedSource = caseVoice ? 'case' : (tmplVoice ? 'template' : null);
 
-    const result = (file, tier, substitutionReason = null) => ({
+    const result = (file, tier, source, substitutionReason = null) => ({
         file,
         requestedFile,
         provider: file ? guessVoiceProvider(file) : (requestedFile ? guessVoiceProvider(requestedFile) : null),
         rate,
         pitch,
         tier,
+        source,
         substituted: !!substitutionReason,
         substitutionReason
     });
@@ -147,8 +157,8 @@ export function resolveVoice({ voice = {}, templateVoice = null, voiceSettings =
     // An unplayable configured voice never falls through to anything.
     if (requestedFile) {
         return playable(requestedFile)
-            ? result(requestedFile, 'override')
-            : result(null, 'invalid');
+            ? result(requestedFile, 'override', requestedSource)
+            : result(null, 'invalid', requestedSource);
     }
 
     // Nothing configured → the platform's per-language default, announced
@@ -156,10 +166,10 @@ export function resolveVoice({ voice = {}, templateVoice = null, voiceSettings =
     const lang = isKnownLanguage(language) ? language : DEFAULT_LANGUAGE;
     const defaultVoice = voiceSettings?.[`tts_default_voice_${lang}`] || null;
     if (defaultVoice && playable(defaultVoice)) {
-        return result(defaultVoice, 'default', 'not_configured');
+        return result(defaultVoice, 'default', 'platform_default', 'not_configured');
     }
 
-    return result(null, null);
+    return result(null, null, null);
 }
 
 // Re-exported for callers that still need to render a demographic slot label

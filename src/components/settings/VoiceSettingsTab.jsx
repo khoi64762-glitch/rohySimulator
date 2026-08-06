@@ -240,15 +240,26 @@ export default function VoiceSettingsTab() {
                 <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
                 <div>
                     Per-character voices are configured in the{' '}
-                    <strong>case editor</strong> (patient voice) and the{' '}
+                    <strong>case editor</strong> (Avatar &amp; Voice step —
+                    the patient voice) and the{' '}
                     <strong>agent persona editor</strong> (each agent), and
                     every voice plays on the engine it belongs to — there is
                     no platform engine to switch. This tab manages which
                     engines are <strong>enabled</strong>, the per-language{' '}
-                    <strong>default voices</strong> (what plays when a
-                    configured voice can't — missing engine, missing key, or
-                    a paid-service outage), global rate/pitch, and the cloud
-                    API keys. Platform-wide.
+                    <strong>default voices</strong>, global rate/pitch, and
+                    the cloud API keys. Platform-wide.
+                    <br />
+                    <strong className="text-amber-300">
+                        A default voice only speaks for a character that has
+                        NO voice configured.
+                    </strong>{' '}
+                    It is not a fallback: a character whose case or persona
+                    names a voice keeps that voice, and if that voice can't
+                    play here (engine disabled, missing key, outage) the
+                    character goes silent with an error rather than
+                    substituting the default. To change what an existing
+                    patient sounds like, edit the case or its persona — not
+                    this tab.
                 </div>
             </div>
 

@@ -301,6 +301,7 @@ export default function DiagnosticBar() {
                     file: patientResolved.file,
                     provider: patientResolved.provider,
                     tier: patientResolved.tier,
+                    source: patientResolved.source,
                     requestedFile: patientResolved.requestedFile,
                     substituted: patientResolved.substituted
                 });
@@ -319,6 +320,7 @@ export default function DiagnosticBar() {
                         file: r.file,
                         provider: r.provider,
                         tier: r.tier,
+                        source: r.source,
                         requestedFile: r.requestedFile,
                         substituted: r.substituted
                     });
@@ -394,7 +396,10 @@ export default function DiagnosticBar() {
         } else if (speakerVoice) {
             // Static prediction: the voice's own derived engine (Voice 2.0 —
             // there is no platform engine setting).
-            const tierTag = speakerTier ? ` (${speakerTier})` : '';
+            const sourceLabel = voiceSourceLabel(activeSpeakerRow?.source);
+            const tierTag = speakerTier
+                ? ` (${speakerTier}${sourceLabel ? ` · ${sourceLabel}` : ''})`
+                : '';
             parts.push(`TTS: ${activeSpeakerRow?.provider || '?'} · ${speakerVoice}${tierTag}`);
         }
         if (langMismatch) parts.push(`⚠ voice ≠ ${langMismatch.wanted}`);
@@ -503,6 +508,7 @@ export default function DiagnosticBar() {
                             <Row k="active gender" v={activeParticipant?.gender || ''} />
                             <Row k="active resolved voice" v={speakerVoice || '(no voice)'} />
                             <Row k="active voice tier" v={speakerTier || ''} />
+                            <Row k="active voice set in" v={voiceSourceLabel(activeSpeakerRow?.source) || ''} />
                             <Row k="active avatar" v={activeParticipant?.avatar_id || activeParticipant?.avatar_url || ''} />
                         </Section>
                         <Section title="Session">
@@ -732,14 +738,14 @@ export default function DiagnosticBar() {
                                             </td>
                                             <td className="pr-3 py-1 text-neutral-400">{s.provider}</td>
                                             <td className="pr-3 py-1">
-                                                <TierBadge tier={s.tier} />
+                                                <TierBadge tier={s.tier} source={s.source} />
                                             </td>
                                         </tr>
                                     ))}
                                 </tbody>
                             </table>
                             <div className="mt-2 text-[10px] text-neutral-600">
-                                <code>override</code> = the configured <code>case_voice</code> plays on its own engine. <code>default</code> = nothing configured, the platform's language default speaks. Amber ✗ = the configured voice can't play here and playback FAILS (configured voices are never substituted). <code>no voice</code> = nothing configured and no language default.
+                                <code>override</code> = the configured <code>case_voice</code> plays on its own engine; the second word names WHERE it is configured — <code>case</code> (case editor → Avatar &amp; Voice) or <code>persona template</code> (Agents → persona editor). Both outrank the platform default, so changing Settings → Voice will NOT move a speaker shown as <code>override</code>. <code>default</code> = nothing configured, the platform's language default speaks. Amber ✗ = the configured voice can't play here and playback FAILS (configured voices are never substituted). <code>no voice</code> = nothing configured and no language default.
                             </div>
                         </div>
                     )}
@@ -926,7 +932,21 @@ function auditionKey(wire, override) {
     return `${wire.id}::${override?.voice || wire.voice}`;
 }
 
-function TierBadge({ tier }) {
+// Human labels for voiceResolver's `source` — WHICH configuration level won.
+// A case voice and a persona-template voice both report tier 'override' and
+// both outrank the platform default, so the tier alone cannot explain why an
+// admin's change to the platform default appeared to do nothing.
+const SOURCE_LABELS = {
+    case: 'case',
+    template: 'persona template',
+    platform_default: 'platform default'
+};
+
+export function voiceSourceLabel(source) {
+    return SOURCE_LABELS[source] || null;
+}
+
+function TierBadge({ tier, source = null }) {
     if (!tier) return <span className="text-neutral-600 italic">no voice</span>;
     // Only `override` is reachable from voiceResolver today; the others are
     // kept as styling hooks in case a legacy log line surfaces an old tier
@@ -936,9 +956,10 @@ function TierBadge({ tier }) {
         'override': 'bg-emerald-900/40 text-emerald-300 border-emerald-800',
     };
     const cls = palette[tier] || 'bg-neutral-800 text-neutral-300 border-neutral-700';
+    const label = voiceSourceLabel(source);
     return (
         <span className={`px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wider border ${cls}`}>
-            {tier}
+            {label ? `${tier} · ${label}` : tier}
         </span>
     );
 }

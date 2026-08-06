@@ -9,6 +9,34 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.16] — 2026-08-06
+
+### Fixed
+
+- **The Voice settings tab no longer claims the default voice is a
+  fallback.** It said the per-language default plays "when a configured
+  voice can't — missing engine, missing key, or a paid-service outage".
+  That is the opposite of how the platform behaves: a character whose case
+  or persona names a voice keeps that voice, and goes silent with an error
+  if it cannot play. Admins who changed the default expecting a broken
+  cloud voice to be replaced got silence instead. The tab now states the
+  real rule — a default speaks only for a character with no voice
+  configured at all — and points at the case editor and persona editor.
+
+### Changed
+
+- **The case wizard's second step is now labelled "Avatar & Voice"**
+  (was "Avatar") in all six languages. The patient's voice picker has
+  always lived there; the label hid it, so authors looked for a voice
+  setting in the case editor and did not find one.
+- **Voice diagnostics now name where a voice is configured.** The resolver
+  reports a `source` (`case`, `persona template`, `platform default`)
+  alongside the existing tier, and the diagnostic bar shows it on the
+  speaker table, the runtime panel and the compact one-liner. A case voice
+  and a persona-template voice both reported tier `override`, which left
+  "why did changing the platform default do nothing?" unanswerable without
+  reading the database.
+
 ## [2.9.15] — 2026-07-31
 
 ### Fixed
