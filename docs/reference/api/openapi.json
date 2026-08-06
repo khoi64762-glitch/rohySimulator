@@ -9026,7 +9026,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/agents-routes.js:1249",
+        "x-rohy-source": "server/routes/agents-routes.js:1283",
         "x-rohy-auth": [
           "authenticateToken"
         ],
@@ -9060,7 +9060,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/agents-routes.js:1392",
+        "x-rohy-source": "server/routes/agents-routes.js:1426",
         "x-rohy-auth": [
           "authenticateToken"
         ],
@@ -9092,7 +9092,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/agents-routes.js:1336",
+        "x-rohy-source": "server/routes/agents-routes.js:1370",
         "x-rohy-auth": [
           "authenticateToken"
         ],
@@ -9124,7 +9124,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/agents-routes.js:1362",
+        "x-rohy-source": "server/routes/agents-routes.js:1396",
         "x-rohy-auth": [
           "authenticateToken"
         ],
@@ -9158,7 +9158,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/agents-routes.js:1276",
+        "x-rohy-source": "server/routes/agents-routes.js:1310",
         "x-rohy-auth": [
           "authenticateToken"
         ],
@@ -9192,7 +9192,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/agents-routes.js:1173",
+        "x-rohy-source": "server/routes/agents-routes.js:1192",
         "x-rohy-auth": [
           "authenticateToken"
         ],
@@ -9226,7 +9226,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/agents-routes.js:1301",
+        "x-rohy-source": "server/routes/agents-routes.js:1335",
         "x-rohy-auth": [
           "authenticateToken"
         ],
@@ -9799,7 +9799,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/agents-routes.js:1418",
+        "x-rohy-source": "server/routes/agents-routes.js:1452",
         "x-rohy-auth": [
           "authenticateToken"
         ],
@@ -9831,7 +9831,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/agents-routes.js:1444",
+        "x-rohy-source": "server/routes/agents-routes.js:1478",
         "x-rohy-auth": [
           "authenticateToken"
         ],

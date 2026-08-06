@@ -581,6 +581,39 @@ export default function ChatInterface({ activeCase, onSessionStart, restoredSess
         return Math.floor((Date.now() - sessionStartTime) / 60000);
     }, [sessionStartTime]);
 
+    // Overlay the live session state onto a fetched agent row.
+    //
+    // `agents` is fetched ONCE per session load and never written again.
+    // `agentStates` is the live layer: the paging call seeds it and the
+    // ETA-convergence loop refreshes it. Anything asking "what is this
+    // agent's status right now" must read through this overlay.
+    //
+    // Regression this fixes: `currentAgent` came straight off the stale
+    // `agents` array, so `agentStatus` — which gates the countdown card,
+    // the Page button, AND the composer's `disabled` — never moved off
+    // the value it had at page load. Paging the on-call consultant left
+    // agentStatus at 'on-call' forever: no countdown ever rendered, the
+    // Page button stayed (so learners re-paged, resetting the ETA), and
+    // when the agent did arrive the composer stayed disabled. The only
+    // escape was unmounting the chat by leaving the room and returning.
+    // The tab strip read the overlay and did update, so the dot went
+    // green next to a chat box that refused input — which is exactly
+    // what "the waiting is broken" looks like from the learner's side.
+    const withLiveState = useCallback((agent) => {
+        if (!agent) return agent;
+        const live = agentStates[agent.agent_type];
+        if (!live) return agent;
+        // Take the live row wholesale — a null `arrives_at` on it means
+        // "no ETA" (instant arrival), not "fall back to the stale one".
+        return {
+            ...agent,
+            status: live.status || agent.status,
+            paged_at: live.paged_at,
+            arrives_at: live.arrives_at,
+            arrived_at: live.arrived_at
+        };
+    }, [agentStates]);
+
     // Check agent availability based on elapsed time
     const getAgentDisplayStatus = useCallback((agent) => {
         const elapsedMinutes = getElapsedMinutes();
@@ -589,11 +622,20 @@ export default function ChatInterface({ activeCase, onSessionStart, restoredSess
 
     // Handle paging an agent.
     //
-    // The server computes the arrival ETA (clamped to 1–3 min), stamps
-    // `arrives_at` on agent_session_state, and returns it here. We copy
-    // it into local state so the countdown card can render immediately.
-    // We don't schedule a setTimeout to flip the status — the once-per-
-    // second `nowTick` ticker plus the convergence loop below trigger a
+    // The server decides whether this page involves a wait at all and
+    // returns the resulting status. Two shapes come back:
+    //
+    //   instant (the default) : status 'present', arrives_at null —
+    //                           the agent is simply here; no card.
+    //   delayed  (opt-in)     : status 'paged', arrives_at set — we copy
+    //                           it in so the countdown renders at once.
+    //
+    // Trust `result.status`; do NOT assume 'paged'. Hardcoding it here
+    // used to paint a countdown card over an agent the server had
+    // already marked present, and the only thing that cleared it was
+    // the convergence loop finding an `arrives_at` that was null — i.e.
+    // never. For the delayed shape we still schedule no setTimeout: the
+    // once-per-second `nowTick` ticker plus the convergence loop below
     // refresh when the ETA passes, and the server's read paths flip the
     // row to 'present' on read. That means refresh / room switch / chat
     // remount all do the right thing without any extra plumbing.
@@ -605,15 +647,16 @@ export default function ChatInterface({ activeCase, onSessionStart, restoredSess
             const result = await AgentService.pageAgent(sessionId, agentType);
             const arrivesAt = result?.arrives_at || null;
             const pagedAt = new Date().toISOString();
+            const status = result?.status || (arrivesAt ? 'paged' : 'present');
 
             setAgentStates(prev => ({
                 ...prev,
                 [agentType]: {
                     ...(prev[agentType] || {}),
-                    status: 'paged',
+                    status,
                     paged_at: pagedAt,
                     arrives_at: arrivesAt,
-                    arrived_at: null
+                    arrived_at: status === 'present' ? pagedAt : null
                 }
             }));
         } catch (err) {
@@ -1588,7 +1631,7 @@ export default function ChatInterface({ activeCase, onSessionStart, restoredSess
 
     // Get current conversation based on active tab
     const currentMessages = activeTab === 'patient' ? messages : (agentConversations[activeTab] || []);
-    const currentAgent = agents.find(a => a.agent_type === activeTab);
+    const currentAgent = withLiveState(agents.find(a => a.agent_type === activeTab));
     const agentStatus = currentAgent ? getAgentDisplayStatus(currentAgent) : null;
 
     // Render tab button
@@ -1642,7 +1685,7 @@ export default function ChatInterface({ activeCase, onSessionStart, restoredSess
                     above — visibleAgentTabs() drops agent_type==='patient'
                     so the seeded "Default Patient" isn't a duplicate tab. */}
                 {visibleAgentTabs(agents).map(agent => {
-                    const status = agentStates[agent.agent_type]?.status || agent.status || 'absent';
+                    const status = withLiveState(agent).status || 'absent';
                     return renderTab(
                         agent.agent_type,
                         agent.name,

@@ -9,6 +9,83 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.19] — 2026-08-07
+
+### Fixed
+
+- **Paging an agent did nothing visible, and the agent never arrived.**
+  `agents` is fetched once per session and never written again;
+  `agentStates` is the live layer the paging flow and the ETA-convergence
+  loop keep current. `currentAgent` read straight off the stale array, so
+  `agentStatus` — which gates the countdown card, the Call button *and*
+  the composer's `disabled` attribute — never moved off its page-load
+  value.
+
+  From the learner's chair: you press "Call Dr. Chen" and nothing
+  changes, so you press it again, which re-stamps the ETA and pushes the
+  arrival further away. When the consultant does arrive, the convergence
+  loop refreshes `agentStates` only — so the tab dot turns green next to
+  a chat box that still refuses to accept input. The one escape was
+  leaving the room and coming back, which remounted the chat and
+  refetched the list. Status now reads through a single live overlay.
+
+- **"Instant" was unreachable, and asking for it gave the longest wait
+  in the system.** The page handler computed
+  `Math.max(60, Math.min(180, configuredMinSec || 60))`. Two defects in
+  one line: `|| 60` treats a configured **0 as absent** because 0 is
+  falsy, and `Math.max(60, …)` floors it there again regardless. The
+  ceiling had the mirror flaw, turning a configured max of 0 into 180.
+
+  Net effect: `0/0` — the setting that asks for **no** wait — produced a
+  uniform random 60–180 second wait, the widest band the system could
+  generate, so configuring instant was strictly worse than configuring
+  1–2 minutes. Wait times are now honoured literally. What remains is a
+  15-minute ceiling, and it is a typo guard rather than pacing policy.
+
+- **Instant is now a distinct state, not a zero-length countdown.** An
+  instant page writes `present` with no `arrives_at`, so no wait card
+  renders and nothing has to converge — the two mechanisms most likely
+  to strand a learner are simply not involved.
+
+### Changed
+
+- **Agent arrival is instant by default.** Every seeded persona ships
+  `response_time 0/0`, and migration `0042` zeroes existing rows plus the
+  seeded consultant's template config (which shipped 2–5 minutes, i.e.
+  2–3 minutes of every training session spent on a progress bar). A
+  delay is now a deliberate teaching device a case author opts into —
+  and, for the first time, one that behaves as configured. The
+  consultant stays `on-call`: deciding to ask for help is still a
+  decision the learner makes, it just no longer costs wall-clock.
+
+- **`On-call · responds in 1–3 minutes` → `On-call · answers when you
+  call`** across all six languages and the pseudo-locale. The old string
+  described the removed clamp.
+
+### Removed
+
+- **`AgentService.calculateWaitTime()`** — a second, client-side
+  implementation of the arrival delay that only its own unit tests ever
+  called. It returned *minutes* where the live server path returns
+  *seconds* and applied none of the clamping, so wiring it up would have
+  shipped a wait an order of magnitude off. Its tests passed for the
+  entire period the real feature was broken.
+
+### Added
+
+- **`docs/design/agent-behaviour-model.md`** — the four-axis model
+  (availability · knowledge · stance · initiative) for supporting agents,
+  what each proposed scenario needs, the `briefed` knowledge source that
+  would make a handoff mean something, the learner-role gap behind
+  nurse-student cases, and honest effort estimates. Includes a post-mortem
+  of the delay bug above.
+
+- **Coverage for `POST /sessions/:id/agents/:type/page`**
+  (`tests/server/agent-page-wait.test.js`) and the client paging contract
+  (`src/components/chat/ChatInterface.paging.test.jsx`). The endpoint had
+  none, which is why the bug shipped and survived. Both suites were
+  confirmed to fail against the pre-fix code.
+
 ## [2.9.18] — 2026-08-06
 
 ### Fixed

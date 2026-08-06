@@ -260,7 +260,7 @@ describe('AgentService — module shape', () => {
             'getTeamCommunications', 'addTeamCommunication',
             'buildDebriefingContext', 'buildAgentSystemPrompt',
             'sendAgentMessage', 'extractKeyPoints',
-            'isAgentAvailable', 'calculateWaitTime', 'getAgentDisplayStatus',
+            'isAgentAvailable', 'getAgentDisplayStatus',
         ];
         for (const name of expected) {
             expect(typeof AgentService[name], `${name} should be a function`).toBe('function');
@@ -790,22 +790,17 @@ describe('AgentService.isAgentAvailable', () => {
     });
 });
 
-describe('AgentService.calculateWaitTime', () => {
-    it('returns the min when min === max', () => {
-        expect(AgentService.calculateWaitTime({ response_time_min: 5, response_time_max: 5 })).toBe(5);
-    });
-
-    it('returns the min when max <= min', () => {
-        expect(AgentService.calculateWaitTime({ response_time_min: 8, response_time_max: 3 })).toBe(8);
-    });
-
-    it('returns a value within [min, max] when a valid range is given', () => {
-        const agent = { response_time_min: 2, response_time_max: 6 };
-        for (let i = 0; i < 20; i++) {
-            const v = AgentService.calculateWaitTime(agent);
-            expect(v).toBeGreaterThanOrEqual(2);
-            expect(v).toBeLessThanOrEqual(6);
-        }
+// Regression lock: the arrival wait has exactly ONE implementation and
+// it is server-side. `AgentService.calculateWaitTime()` was a rival
+// client-side copy that only this test suite ever called — it returned
+// minutes where the live path returns seconds, and skipped the server's
+// clamping entirely. Its unit tests passed the whole time the feature
+// was broken, which is precisely why they were worth nothing. If this
+// assertion fails, someone has reintroduced a second source of truth
+// for the wait; put it back in POST /sessions/:id/agents/:type/page.
+describe('AgentService wait-time ownership', () => {
+    it('exposes no client-side wait calculation', () => {
+        expect(AgentService.calculateWaitTime).toBeUndefined();
     });
 });
 

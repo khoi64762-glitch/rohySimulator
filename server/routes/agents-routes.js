@@ -1153,14 +1153,33 @@ router.get('/sessions/:sessionId/agents', authenticateToken, async (req, res) =>
 // remount picks up exactly where it left off, instead of dropping the
 // in-memory setTimeout the way the prior client-side timer did.
 //
-// Wait time is clamped to a 1–3 minute band regardless of what the
-// case author configured. The intent is sim pacing: a real consult
-// takes 20+ minutes, but inside a single training session we want the
-// learner to feel the friction without the case grinding to a halt.
-// Per-case `response_time_min/max` are honoured but capped — admins
-// who want true minutes-long waits can adjust the band here later.
-const PAGE_WAIT_MIN_SEC = 60;          // 1 min floor — feels like a page, not a snap
-const PAGE_WAIT_MAX_SEC = 180;         // 3 min ceiling — keeps the sim moving
+// Wait time belongs to the case author. Zero means zero: the agent is
+// there the moment you page them — status 'present', no `arrives_at`,
+// no countdown card, no 'paged' state for anything to converge out of.
+// That is the default for every seeded persona and what the great
+// majority of cases should want. A delay is a deliberate teaching
+// device (see docs/design/agent-behaviour-model.md), not a default.
+//
+// The previous revision made "instant" literally unreachable, in two
+// compounding ways:
+//
+//   const minSec = Math.max(60, Math.min(180, configuredMinSec || 60));
+//
+//   1. `configuredMinSec || 60` — 0 is falsy, so an author who set
+//      "0 minutes" had it silently rewritten to one minute.
+//   2. `Math.max(60, …)` floored it again even if step 1 hadn't.
+//
+// The same `|| PAGE_WAIT_MAX_SEC` on the ceiling turned a configured
+// max of 0 into 180. Net effect: 0/0 — the setting that asks for NO
+// wait — produced a uniform random 60–180s, the widest band in the
+// system, and the seeded consultant's 2/5 produced 120–180s. Every
+// page cost the learner one to three minutes of progress bar, and no
+// configuration could turn it off.
+//
+// What survives is a ceiling, and it is not pacing policy — it is a
+// typo guard, so `500` fat-fingered into a minutes field cannot strand
+// a learner in front of a countdown for eight hours.
+const PAGE_WAIT_CEILING_SEC = 15 * 60;
 
 // `arrives_at` is stored in SQLite's `YYYY-MM-DD HH:MM:SS` shape so
 // the auto-arrival comparison against CURRENT_TIMESTAMP works under
@@ -1175,9 +1194,10 @@ router.post('/sessions/:sessionId/agents/:agentType/page', authenticateToken, as
         const { sessionId, agentType } = req.params;
         if (!await verifySessionOwnership(sessionId, req.user, res, { requireSession: true })) return;
 
-        // Pull the case-agent's configured response window so we honour
-        // a tighter band (e.g. nurse wants "instant") but never let a
-        // legacy 2–5 minute seed exceed our clamp.
+        // Pull the case-agent's configured response window. Absent row
+        // (agent not provisioned on this case) reads as 0/0 = instant,
+        // which is the right failure direction: an unconfigured agent
+        // answers rather than making the learner wait for nothing.
         const agentRow = await new Promise((resolve, reject) => {
             dbAdapter.get(
                 `SELECT ca.response_time_min, ca.response_time_max
@@ -1190,22 +1210,36 @@ router.post('/sessions/:sessionId/agents/:agentType/page', authenticateToken, as
             );
         });
 
-        const configuredMinSec = Math.max(0, (agentRow?.response_time_min || 0) * 60);
-        const configuredMaxSec = Math.max(0, (agentRow?.response_time_max || 0) * 60);
-        const minSec = Math.max(PAGE_WAIT_MIN_SEC, Math.min(PAGE_WAIT_MAX_SEC, configuredMinSec || PAGE_WAIT_MIN_SEC));
-        const maxSec = Math.max(minSec, Math.min(PAGE_WAIT_MAX_SEC, configuredMaxSec || PAGE_WAIT_MAX_SEC));
-        const waitSec = minSec + Math.floor(Math.random() * (maxSec - minSec + 1));
-        const arrivesAtMs = Date.now() + waitSec * 1000;
-        const arrivesAtDb = toSqliteUtc(arrivesAtMs);        // for SQL compare
-        const arrivesAtIso = new Date(arrivesAtMs).toISOString(); // for client
+        // Minutes → seconds. A non-numeric or negative value reads as 0
+        // (instant) rather than NaN, which would poison every comparison
+        // below and produce an `arrives_at` of "Invalid Date".
+        const toSec = (minutes) => Math.max(0, Math.round((Number(minutes) || 0) * 60));
+        const minSec = Math.min(PAGE_WAIT_CEILING_SEC, toSec(agentRow?.response_time_min));
+        const maxSec = Math.min(PAGE_WAIT_CEILING_SEC, Math.max(minSec, toSec(agentRow?.response_time_max)));
+        const waitSec = maxSec > minSec
+            ? minSec + Math.floor(Math.random() * (maxSec - minSec + 1))
+            : minSec;
+
+        // Instant is a genuinely different state, not a zero-length
+        // countdown: we write 'present' with no `arrives_at` at all.
+        // A 0-second 'paged' row would still render the wait card for
+        // one tick and still depend on the convergence loop to clear
+        // it — the two things most likely to strand a learner. Nothing
+        // to converge is the bulletproof version.
+        const instant = waitSec === 0;
+        const arrivesAtMs = instant ? null : Date.now() + waitSec * 1000;
+        const arrivesAtDb = instant ? null : toSqliteUtc(arrivesAtMs);        // for SQL compare
+        const arrivesAtIso = instant ? null : new Date(arrivesAtMs).toISOString(); // for client
+        const status = instant ? 'present' : 'paged';
 
         await new Promise((resolve, reject) => {
             dbAdapter.run(
                 `INSERT INTO agent_session_state (session_id, tenant_id, agent_type, status, paged_at, arrives_at, arrived_at)
-                 VALUES (?, ?, ?, 'paged', CURRENT_TIMESTAMP, ?, NULL)
+                 VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?, CASE WHEN ? IS NULL THEN CURRENT_TIMESTAMP ELSE NULL END)
                  ON CONFLICT(session_id, agent_type) DO UPDATE SET
-                 status = 'paged', paged_at = CURRENT_TIMESTAMP, arrives_at = excluded.arrives_at, arrived_at = NULL`,
-                [sessionId, tenantId(req), agentType, arrivesAtDb],
+                 status = excluded.status, paged_at = CURRENT_TIMESTAMP,
+                 arrives_at = excluded.arrives_at, arrived_at = excluded.arrived_at`,
+                [sessionId, tenantId(req), agentType, status, arrivesAtDb, arrivesAtDb],
                 function(err) {
                     if (err) reject(err);
                     else resolve(this.changes);
@@ -1217,7 +1251,7 @@ router.post('/sessions/:sessionId/agents/:agentType/page', authenticateToken, as
             success: true,
             message: `Agent ${agentType} paged`,
             agent_type: agentType,
-            status: 'paged',
+            status,
             arrives_at: arrivesAtIso,
             wait_seconds: waitSec
         });

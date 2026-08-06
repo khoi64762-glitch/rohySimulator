@@ -137,7 +137,14 @@ You have access to the patient's full record. Base your assessment on the actual
             config: JSON.stringify({
                 typical_availability: 'on-call',
                 can_be_paged: true,
-                response_time: { min: 2, max: 5 },
+                // Instant on purpose. The consultant stays 'on-call' —
+                // deciding to ask for help is the teaching moment — but
+                // paging him costs no wall-clock: he answers the moment
+                // you call. Was { min: 2, max: 5 }, which spent 2–3
+                // minutes of a training session on a progress bar. A
+                // real arrival delay is an opt-in teaching device per
+                // docs/design/agent-behaviour-model.md, not a default.
+                response_time: { min: 0, max: 0 },
                 voice: { gender: 'male', case_voice: 'am_liam' },
                 dos: [
                     'Ask clarifying questions about the presentation',
