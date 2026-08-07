@@ -9,6 +9,343 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.19] — 2026-08-07
+
+### Fixed
+
+- **Paging an agent did nothing visible, and the agent never arrived.**
+  `agents` is fetched once per session and never written again;
+  `agentStates` is the live layer the paging flow and the ETA-convergence
+  loop keep current. `currentAgent` read straight off the stale array, so
+  `agentStatus` — which gates the countdown card, the Call button *and*
+  the composer's `disabled` attribute — never moved off its page-load
+  value.
+
+  From the learner's chair: you press "Call Dr. Chen" and nothing
+  changes, so you press it again, which re-stamps the ETA and pushes the
+  arrival further away. When the consultant does arrive, the convergence
+  loop refreshes `agentStates` only — so the tab dot turns green next to
+  a chat box that still refuses to accept input. The one escape was
+  leaving the room and coming back, which remounted the chat and
+  refetched the list. Status now reads through a single live overlay.
+
+- **"Instant" was unreachable, and asking for it gave the longest wait
+  in the system.** The page handler computed
+  `Math.max(60, Math.min(180, configuredMinSec || 60))`. Two defects in
+  one line: `|| 60` treats a configured **0 as absent** because 0 is
+  falsy, and `Math.max(60, …)` floors it there again regardless. The
+  ceiling had the mirror flaw, turning a configured max of 0 into 180.
+
+  Net effect: `0/0` — the setting that asks for **no** wait — produced a
+  uniform random 60–180 second wait, the widest band the system could
+  generate, so configuring instant was strictly worse than configuring
+  1–2 minutes. Wait times are now honoured literally. What remains is a
+  15-minute ceiling, and it is a typo guard rather than pacing policy.
+
+- **Instant is now a distinct state, not a zero-length countdown.** An
+  instant page writes `present` with no `arrives_at`, so no wait card
+  renders and nothing has to converge — the two mechanisms most likely
+  to strand a learner are simply not involved.
+
+### Changed
+
+- **Agent arrival is instant by default.** Every seeded persona ships
+  `response_time 0/0`, and migration `0042` zeroes existing rows plus the
+  seeded consultant's template config (which shipped 2–5 minutes, i.e.
+  2–3 minutes of every training session spent on a progress bar). A
+  delay is now a deliberate teaching device a case author opts into —
+  and, for the first time, one that behaves as configured. The
+  consultant stays `on-call`: deciding to ask for help is still a
+  decision the learner makes, it just no longer costs wall-clock.
+
+- **`On-call · responds in 1–3 minutes` → `On-call · answers when you
+  call`** across all six languages and the pseudo-locale. The old string
+  described the removed clamp.
+
+### Removed
+
+- **`AgentService.calculateWaitTime()`** — a second, client-side
+  implementation of the arrival delay that only its own unit tests ever
+  called. It returned *minutes* where the live server path returns
+  *seconds* and applied none of the clamping, so wiring it up would have
+  shipped a wait an order of magnitude off. Its tests passed for the
+  entire period the real feature was broken.
+
+### Added
+
+- **`docs/design/agent-behaviour-model.md`** — the four-axis model
+  (availability · knowledge · stance · initiative) for supporting agents,
+  what each proposed scenario needs, the `briefed` knowledge source that
+  would make a handoff mean something, the learner-role gap behind
+  nurse-student cases, and honest effort estimates. Includes a post-mortem
+  of the delay bug above.
+
+- **Coverage for `POST /sessions/:id/agents/:type/page`**
+  (`tests/server/agent-page-wait.test.js`) and the client paging contract
+  (`src/components/chat/ChatInterface.paging.test.jsx`). The endpoint had
+  none, which is why the bug shipped and survived. Both suites were
+  confirmed to fail against the pre-fix code.
+
+## [2.9.18] — 2026-08-06
+
+### Fixed
+
+- **`docker compose up` no longer fails on the compose file itself.**
+  Since v2.9.12 the file set
+
+  ```yaml
+  FRONTEND_URL: "${FRONTEND_URL:-https://${ROHY_HOSTNAME:-localhost}/rohy}"
+  ```
+
+  which puts one interpolation inside another's default. Compose has no
+  nested interpolation and rejects the whole file:
+  `invalid interpolation format for services.rohy.environment.FRONTEND_URL`.
+  Every Docker deploy was dead on arrival, and nothing in the repo ran
+  this file, so lint, tests and CI all stayed green.
+
+  The composition itself is the documented contract — `.env.example` has
+  always said `FRONTEND_URL` is derived from `ROHY_HOSTNAME` — so it moved
+  to `entrypoint.sh`, where a shell can express a fallback and a test can
+  execute it. Compose now passes both variables through unmodified.
+
+  Note for anyone who patched this locally: escaping to
+  `$${ROHY_HOSTNAME:-localhost}` makes the error go away but is worse than
+  the error. `$$` is Compose's literal-dollar escape, so the container
+  receives the text `https://${ROHY_HOSTNAME:-localhost}/rohy` verbatim
+  and uses it, unexpanded, as its public origin.
+
+- **Setting no hostname is now fatal instead of silently wrong.** The old
+  default resolved to `https://localhost/rohy` whenever `ROHY_HOSTNAME`
+  was unset, which defeated the entrypoint's own guard against booting
+  production without a known origin. An unset hostname now reaches that
+  guard and the container refuses to start, naming both ways to fix it.
+
+### Changed
+
+- **Documented the compose project name.** With no `name:` in the file,
+  Compose derives the project from its directory — `deploy/docker/` — so
+  resources land under the generic project `docker` (the DB volume is
+  `docker_rohy-db`). A leftover volume of that name from an unrelated
+  stack gets adopted by this one, which shows up as a container that
+  never turns healthy rather than as a collision error. `.env.example`
+  now ships `COMPOSE_PROJECT_NAME=rohy`, the quickstart uses `-p rohy`,
+  and `docs/DEPLOY.md` explains why it must be chosen before the first
+  run — plus how to move the volume if it wasn't. The default is
+  unchanged, so no existing deploy loses sight of its database.
+
+### Added
+
+- **`tests/server/docker-compose-contract.test.js`** — nine checks that
+  parse `compose.yml`, reject nested interpolation and `$$`-escaped
+  values in any environment block, and execute the real `entrypoint.sh`
+  to confirm the derivation, the explicit-override precedence, and the
+  production refusal. The interpolation bug shipped because the only
+  detector was a human typing `docker compose up`; this is that detector.
+  Verified to fail against the v2.9.12 file.
+
+## [2.9.17] — 2026-08-06
+
+### Fixed
+
+- **The patient room no longer clips the monitor on an iPad in portrait.**
+  The chat column and the monitor column carried 350px and 600px minimum
+  widths inside a viewport that never scrolls, so on any screen under
+  950px the right-hand edge of the monitor — including part of the vitals
+  column — was cut off with no way to reach it. Below 1024px the two now
+  stack: conversation on top, vitals underneath. Desktop layout unchanged.
+- **Vitals boxes no longer shrink and clip their own readings.** Each box
+  in the monitor's vitals column is a fixed-height flex child that hides
+  its overflow, but none of them declared `shrink-0`. In a column shorter
+  than their combined height the browser squeezed them instead of
+  scrolling — the heart-rate box rendered at 25px against its declared
+  96px, showing the bottom half of "110" as if it were the whole reading.
+  A clipped vital that still looks like a number is the worst failure in
+  this list. Reproduced on any short window, not only tablets.
+- **The lab and radiology rooms are usable on a tablet.** Their three
+  columns left the report viewer about 280px wide in portrait, enough to
+  wrap a one-line empty state over ten lines and to overlap the
+  READY/PENDING/VIEWED counters. Below 1024px the panes stack full-width.
+- **Room headers no longer run underneath the capture pill.** The Oyon
+  pill is a fixed overlay centred at the top of the viewport; on a
+  tablet-width header the case title ran beneath it. Titles now stop short
+  of the centre, and "End & Debrief" collapses to its icon.
+- **The body-map legend no longer clips.** Four keys in one non-wrapping
+  row need ~330px and had ~250px; the first and last were cut mid-word.
+- **The case wizard no longer strands an author mid-way.** The step strip
+  put eleven equal-width buttons in one non-shrinking row, so on anything
+  narrower than a desktop the later steps overflowed off-screen; the row
+  now wraps below 1280px. The footer separately treated step 9 as the last
+  (it was, before two steps were added), so "Next" disappeared after
+  Records and Treatments/Agents offered only "Save & Finish" — the last
+  step is now derived from the step list. Regression-locked in
+  `ConfigPanel.test.jsx`.
+- **The physical exam editor stacks below 1024px.** The body map at a
+  third of a tablet's content column was too small to hit a region
+  reliably, and its 500px inner scroller became a scroll trap once
+  stacked.
+
+### Added
+
+- `npm run test:e2e:tablet` — Playwright checks every student-facing room
+  at 820x1180 and 1180x820, asserting no horizontal overflow (the failure
+  mode above: content pushed outside a clipped container is unreachable,
+  not merely ugly) and writing a screenshot per room per viewport to
+  `test-results/tablet-layout/`. Requires `npm run build` first; like the
+  rest of the Playwright suite it is not in CI.
+
+## [2.9.16] — 2026-08-06
+
+### Fixed
+
+- **The Voice settings tab no longer claims the default voice is a
+  fallback.** It said the per-language default plays "when a configured
+  voice can't — missing engine, missing key, or a paid-service outage".
+  That is the opposite of how the platform behaves: a character whose case
+  or persona names a voice keeps that voice, and goes silent with an error
+  if it cannot play. Admins who changed the default expecting a broken
+  cloud voice to be replaced got silence instead. The tab now states the
+  real rule — a default speaks only for a character with no voice
+  configured at all — and points at the case editor and persona editor.
+
+### Changed
+
+- **The case wizard's second step is now labelled "Avatar & Voice"**
+  (was "Avatar") in all six languages. The patient's voice picker has
+  always lived there; the label hid it, so authors looked for a voice
+  setting in the case editor and did not find one.
+- **Voice diagnostics now name where a voice is configured.** The resolver
+  reports a `source` (`case`, `persona template`, `platform default`)
+  alongside the existing tier, and the diagnostic bar shows it on the
+  speaker table, the runtime panel and the compact one-liner. A case voice
+  and a persona-template voice both reported tier `override`, which left
+  "why did changing the platform default do nothing?" unanswerable without
+  reading the database.
+
+## [2.9.15] — 2026-07-31
+
+### Fixed
+
+- **Saving a case no longer fails when the interface is not in English.**
+  Creating or updating a case returned a server error in German, Spanish,
+  Finnish, Italian and Swedish. Authors could edit a case but never save it;
+  English was unaffected, so the fault only appeared once someone worked in
+  another language.
+
+  The patient-gender dropdown stored whatever it displayed. Because the
+  displayed text is translated, choosing "Männlich" tried to store the word
+  "Männlich" in a column that only accepts `Male`, `Female` or `Other`, and the
+  save was rejected at the last possible moment. English worked purely by
+  coincidence — its label for that option is the word "Male", which the column
+  happens to accept.
+
+  Every dropdown of this kind now stores a fixed English value and translates
+  only what you see. The same fault affected the marital-status and persona
+  dropdowns; those did not fail visibly, but they did store the label in
+  whatever language the author happened to be using, so the persona instruction
+  sent to the model changed with the interface language. Both now store a
+  stable value. A case saved before this fix keeps its old value and still
+  shows it in the dropdown rather than appearing blank.
+
+- **A patient's sex is no longer read as male whenever the value is
+  unfamiliar.** The body map and examination manikin decided sex by testing
+  whether the stored value was exactly the English word "female". Anything else
+  — including a correct value in another language — silently produced a male
+  body map, with no error to notice. That decision now lives in one place, and
+  the male default applies only where there genuinely is no distinct anatomy.
+
+- **A rejected save now explains itself.** The failure surfaced as an internal
+  server error carrying raw database text, which said nothing useful and
+  exposed schema internals. Both the create and update paths now check the
+  value first and answer with a plain message naming the accepted values.
+  A value that is merely lower-case (`male`) is corrected rather than refused,
+  so older API clients and imported cases keep working.
+
+### Added
+
+- **A guard so this class of bug cannot return.** The patient-demographic
+  vocabularies live in one shared module (`server/shared/patientDemographics.js`)
+  used by both the editor and the server. A new test fails on any dropdown whose
+  label is translated but whose stored value is left implicit — the exact shape
+  of this bug, which is invisible in review and in every English-language test
+  run. A second test drives a real server in all five languages and locks the
+  rejection behaviour for both create and update.
+
+## [2.9.14] — 2026-07-31
+
+### Changed
+
+- **rohy is now licensed under the Carm Research License v1.4**, replacing MIT
+  and bringing it in line with the rest of the Carm ecosystem (Oyon, ChatOyon,
+  Carm, LAILA). It is free for research, teaching, personal learning and
+  non-profit use — including industry-sponsored and collaboratively funded
+  academic work, which v1.4 places explicitly inside the free grant regardless
+  of funding source. Commercial use requires a paid license. Anything you
+  produce by running rohy on your own data remains entirely yours.
+
+  MIT was not merely a different choice, it was an inaccurate one. rohy
+  git-tracks the vendored `OyonR/` addon — 658 files including its own
+  `LICENSE`, `NOTICE.md` and nine third-party texts — which is licensed under
+  the Carm Research License and forbids sublicensing and resale. The root
+  `LICENSE` was simultaneously granting permission to "sublicense, and/or sell"
+  that same tree. The two statements could not both be true.
+
+  The license text is fetched from the canonical
+  [carm-license](https://github.com/mohsaqr/carm-license) repository at its
+  **version tag**, never `main`, so a routine build cannot silently relicense
+  the product; adopting a future version is a deliberate one-line edit.
+
+### Added
+
+- **`NOTICE.md` — a complete index of everything rohy redistributes**, with
+  every license embedded in full rather than linked, as the Carm license
+  requires. `scripts/licenses.manifest.mjs` is its single source of truth;
+  `npm run license:sync` refreshes every text from its canonical upstream on
+  each build, `npm run license:verify` is the strict release form, and
+  `npm run license:latest` reports when a newer Carm License version exists.
+
+- **`tests/server/license-contract.test.js`** — 54 fully offline assertions
+  covering the whole contract: every manifest entry has real committed text,
+  every text is linked from `NOTICE.md` alongside its live upstream, the
+  version string agrees in every file that names it, the Carm license is
+  pinned to a tag rather than a branch, and the Docker image genuinely
+  carries `LICENSE`, `NOTICE.md` and `licenses/`.
+
+### Fixed
+
+- **The container image no longer ships without its license.**
+  `deploy/docker/Dockerfile` labelled images `MIT` and copied no license file
+  at all. It now copies `LICENSE`, `NOTICE.md` and `licenses/` into the
+  runtime stage, and `.dockerignore` re-includes `NOTICE.md` past the blanket
+  `*.md` exclusion — the same two-gate trap that previously shipped broken
+  images for `Lab_database.json`, `heart.txt` and `CHANGELOG.md`.
+
+### Disclosed
+
+Three obligations that were already true but written down nowhere. None of
+them change how rohy runs; all three matter before you deploy it.
+
+- **Building the image with `INCLUDE_PIPER=1` redistributes GPL-3.0 software.**
+  Piper TTS is `OHF-Voice/piper1-gpl`, and that build variant bakes it into the
+  image. The default build does not, and rohy's own terms are unaffected. The
+  full GPL text now ships at `licenses/piper1-gpl.COPYING.txt`.
+
+- **The default Piper voices are not uniformly MIT.** The voice repository
+  declares MIT, but each voice's `MODEL_CARD` names its own dataset license and
+  several are research-restricted — `en_US-lessac-*`, installed by default,
+  is trained on the CSTR Blizzard 2013 corpus. Check the card for each voice
+  you enable before deploying commercially.
+
+- **The CALIPER paediatric reference ranges are CC BY-NC-SA**, whose
+  non-commercial term is incompatible with a commercial deployment. They are
+  isolated behind their own `data_sources` row by design, so that source can be
+  dropped cleanly without disturbing the adult ranges or the LOINC coding.
+
+`NOTICE.md` also records one unresolved item: the auscultation audio in
+`public/sounds/` is committed and shipped, but its origin and license are not
+recorded anywhere in the repository or its history. It is listed as unresolved
+rather than omitted, because an unknown license is a risk to a redistributor
+and an empty row is more honest than an invented one.
+
 ## [2.9.13] — 2026-07-31
 
 ### Fixed

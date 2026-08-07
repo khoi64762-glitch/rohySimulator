@@ -883,7 +883,7 @@ function MainApp() {
                activeCase={activeCase}
                sessionId={sessionId}
                physicalExam={caseSnapshot?.config?.physical_exam ?? activeCase?.config?.physical_exam ?? null}
-               patientGender={(caseSnapshot?.config?.demographics?.gender ?? activeCase?.config?.demographics?.gender)?.toLowerCase() || 'male'}
+               patientGender={caseSnapshot?.config?.demographics?.gender ?? activeCase?.config?.demographics?.gender}
                onExamPerformed={(exam) => {
                   EventLogger.physicalExamPerformed(
                      exam.regionId,
@@ -938,7 +938,7 @@ function MainApp() {
             always-visible RoomNavigator. PhysicalExamScreen and
             InvestigationsScreen do this implicitly by rendering the nav
             as their last flex-col child. */
-         <div className="flex h-[calc(100vh-72px)] w-screen bg-neutral-950 text-white overflow-hidden">
+         <div className="flex max-lg:flex-col h-[calc(100vh-72px)] w-screen bg-neutral-950 text-white overflow-hidden">
 
          {/* Multi-tab warning banner. Shown when another tab on this origin
              writes to rohy_active_session. last-write-wins applies.
@@ -957,11 +957,19 @@ function MainApp() {
             </div>
          )}
 
-         {/* Left Column (Visual + Chat) - 35% width on large screens */}
-         <div className="w-[35%] min-w-[350px] flex flex-col border-r border-neutral-800 bg-neutral-900">
+         {/* Left Column (Visual + Chat) - 35% width on large screens.
+             Side-by-side, this column's 350px floor and the monitor's 600px
+             floor add up to a 950px minimum inside an `overflow-hidden`
+             viewport — wider than an iPad in portrait (820px), which silently
+             clipped the right edge of the monitor with no way to scroll to
+             it. Below `lg` the two stack instead: conversation on top (it's
+             what the learner drives), vitals underneath. Desktop is
+             untouched. */}
+         <div className="lg:w-[35%] lg:min-w-[350px] max-lg:h-[52%] flex flex-col border-b lg:border-b-0 lg:border-r border-neutral-800 bg-neutral-900">
 
-            {/* Top Left: Patient Visual */}
-            <div className="h-[45%] border-b border-neutral-800 relative">
+            {/* Top Left: Patient Visual — a smaller slice when stacked, so
+                the chat below it keeps a usable number of lines. */}
+            <div className="h-[30%] lg:h-[45%] border-b border-neutral-800 relative">
                <PatientVisual caseData={activeCase} />
 
                {/* Settings menu + language switcher — far-left top corner.
@@ -984,7 +992,11 @@ function MainApp() {
                         title={t('end_debrief_title')}
                      >
                         <StopCircle className="w-4 h-4" />
-                        <span>{t('end_debrief')}</span>
+                        {/* Label hidden below `lg`: this button, the top-left
+                            controls and the centred Oyon pill all share one
+                            narrow band, and the three collided on a tablet.
+                            `title` + aria-label keep it identifiable. */}
+                        <span className="max-lg:sr-only">{t('end_debrief')}</span>
                      </button>
                   </div>
                )}
@@ -1009,8 +1021,9 @@ function MainApp() {
 
          </div>
 
-         {/* Right Column (Monitor) - Remaining width */}
-         <div className="flex-1 h-full min-w-[600px] bg-black relative">
+         {/* Right Column (Monitor) - Remaining width (remaining height when
+             stacked; the 600px floor is a side-by-side constraint only). */}
+         <div className="flex-1 min-h-0 lg:h-full lg:min-w-[600px] bg-black relative">
             <PatientMonitor
                caseParams={activeCase?.config}
                caseData={activeCase}

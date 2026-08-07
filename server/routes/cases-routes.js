@@ -16,6 +16,7 @@ import {
 
 import { logger } from '../logger.js';
 import { caseCodeFor, normalizeCaseLanguage } from '../shared/caseCode.js';
+import { PATIENT_GENDERS, resolvePatientGender } from '../shared/patientDemographics.js';
 import {
     auditSuccess,
     canManageOwnedResource,
@@ -53,6 +54,31 @@ try {
 }
 
 const router = express.Router();
+
+/**
+ * Resolve `config.demographics.gender` for the denormalized, CHECK-constrained
+ * `cases.patient_gender` column — or answer 400 and return null.
+ *
+ * Guards the write rather than trusting the client, because the column's CHECK
+ * is the only thing that used to stop a bad value, and it does so by throwing
+ * SQLITE_CONSTRAINT from inside the driver callback. That surfaced as a 500
+ * carrying raw SQL to the caller ("CHECK constraint failed: patient_gender
+ * IN (…)"), which is both a poor error and a needless disclosure of schema
+ * internals. A translated label from a stale client bundle is a client bug, so
+ * it deserves an honest 4xx naming the accepted values.
+ *
+ * Returns `{ value }` on success (value may be null — absent is legitimate)
+ * and null once it has already responded.
+ */
+function resolvePatientGenderOr400(res, config) {
+    const resolved = resolvePatientGender(config?.demographics?.gender);
+    if (resolved.ok) return { value: resolved.value };
+    res.status(400).json({
+        error: `Unrecognised patient gender "${resolved.received}". Expected one of: ${PATIENT_GENDERS.join(', ')}.`,
+        code: 'invalid_patient_gender',
+    });
+    return null;
+}
 
 // Stamp the visible case code after an INSERT. The audit chain writes on its
 // own DEDICATED sqlite connection (audit-chain.js) and logAudit fires right
@@ -272,7 +298,9 @@ router.post('/cases', authenticateToken, requireEducator, (req, res) => {
     // fallbacks. Reading only the legacy paths left these columns null for
     // editor-created cases — which made the debrief fall back to the case
     // description and show the patient name as the chief complaint (bug #2).
-    const patientGender = config?.demographics?.gender || null;
+    const gender = resolvePatientGenderOr400(res, config);
+    if (!gender) return;
+    const patientGender = gender.value;
     const patientAge = config?.demographics?.age || null;
     const patientName = config?.patient_name || config?.demographics?.name || null;
     const chiefComplaint = config?.structuredHistory?.chiefComplaint || config?.chiefComplaint || null;
@@ -371,7 +399,9 @@ router.put('/cases/:id', authenticateToken, requireEducator, (req, res) => {
     // Extract patient info from config for denormalized storage. Mirror the
     // POST handler: prefer the editor's `config.patient_name` /
     // `config.structuredHistory.chiefComplaint`, fall back to legacy paths.
-    const patientGender = config?.demographics?.gender || null;
+    const gender = resolvePatientGenderOr400(res, config);
+    if (!gender) return;
+    const patientGender = gender.value;
     const patientAge = config?.demographics?.age || null;
     const patientName = config?.patient_name || config?.demographics?.name || null;
     const chiefComplaint = config?.structuredHistory?.chiefComplaint || config?.chiefComplaint || null;

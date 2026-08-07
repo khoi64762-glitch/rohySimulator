@@ -9,6 +9,7 @@ import { BODY_REGIONS, getDefaultFinding, SAMPLE_ABNORMAL_EXAM } from '../../dat
 import { regionLabel } from './examinationLabels';
 import { useToast } from '../../contexts/ToastContext';
 import { usePatientRecord } from '../../services/PatientRecord';
+import { bodyMapGender } from '../../services/patientDemographics';
 
 /**
  * Manikin Panel - Main Physical Examination Interface
@@ -46,10 +47,12 @@ export default function ManikinPanel({
     const [gender, setGender] = useState(patientGender); // male | female
     const [selectedRegion, setSelectedRegion] = useState(null);
 
-    // Sync gender with patientGender prop
+    // Sync gender with patientGender prop. See bodyMapGender() — it centralises
+    // the male-by-default fallback that was previously an unwritten side effect
+    // of a `=== 'female'` comparison.
     React.useEffect(() => {
         if (patientGender) {
-            setGender(patientGender.toLowerCase() === 'female' ? 'female' : 'male');
+            setGender(bodyMapGender(patientGender));
         }
     }, [patientGender]);
     const [selectedExamType, setSelectedExamType] = useState(null);

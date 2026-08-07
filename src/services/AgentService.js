@@ -433,12 +433,15 @@ export const AgentService = {
     }
   },
 
-  calculateWaitTime(agent) {
-    const min = agent.response_time_min || 0;
-    const max = agent.response_time_max || 0;
-    if (max <= min) return min;
-    return Math.floor(Math.random() * (max - min + 1)) + min;
-  },
+  // NOTE: there is deliberately no client-side wait calculation here.
+  // `calculateWaitTime()` used to live at this spot — a second, rival
+  // implementation of the arrival delay that nothing but its own unit
+  // test ever called. It returned MINUTES while the live server path
+  // returns seconds, and it applied none of the server's clamping, so
+  // anyone who found it and wired it up would have shipped a wait an
+  // order of magnitude off. The wait is computed once, server-side, in
+  // POST /sessions/:id/agents/:type/page (server/routes/agents-routes.js)
+  // and reaches the client only as `arrives_at` / `wait_seconds`.
 
   // `label` stays English (logged/tested contract); `labelKey`/`labelParams`
   // are the chat-namespace translation key the UI renders via

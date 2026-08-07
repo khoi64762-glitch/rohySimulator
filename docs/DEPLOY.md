@@ -39,6 +39,42 @@ Pin to an exact tag (not `:latest`) for reproducible deploys. Operators
 who deploy `:latest` get a moving target with every push to `main` once
 we publish more tags.
 
+### Scope the compose project name
+
+The compose file does not pin a project name, so Compose derives one from
+the directory holding the file — `deploy/docker/`, giving the project
+**`docker`**. Every resource is namespaced under it: the DB volume is
+`docker_rohy-db`, not `rohy-db`.
+
+That name is generic enough to collide. Any *other* compose project you
+run from a directory also called `docker/` shares the namespace, and a
+leftover `docker_rohy-db` volume from an earlier stack will be reused by
+this one — which surfaces as a container that never turns healthy rather
+than as a clear error.
+
+Scope it explicitly:
+
+```bash
+docker compose -p rohy -f deploy/docker/compose.yml up -d
+# or, once, in deploy/docker/.env:
+#   COMPOSE_PROJECT_NAME=rohy
+```
+
+Do this from the **first** run. Switching the project name later points
+Compose at differently-named volumes, so an existing database appears
+empty — the data is still in the old volume, but nothing is reading it.
+To move an existing deploy, stop the stack and copy the volume:
+
+```bash
+docker compose -f deploy/docker/compose.yml down
+docker volume create rohy_rohy-db
+docker run --rm -v docker_rohy-db:/from -v rohy_rohy-db:/to alpine \
+    sh -c 'cd /from && cp -a . /to'
+docker compose -p rohy -f deploy/docker/compose.yml up -d
+```
+
+Check what you actually have with `docker volume ls | grep rohy-db`.
+
 ---
 
 ## Production checklist
@@ -174,7 +210,8 @@ Set in `/etc/rohy/env` (systemd) or `deploy/docker/.env` (compose):
 |---|---|---|
 | `NODE_ENV` | `development` | Set to `production` in real deploys. Disables seeded default users. |
 | `PORT` | `3000` (dev) / `4000` (bootstrap) | Express upstream port. Falls through to next free in dev only. |
-| `FRONTEND_URL` | none | Allowed CORS origin in production. Required if your reverse proxy is on a different host. |
+| `FRONTEND_URL` | none — under Docker, derived as `https://$ROHY_HOSTNAME/rohy` | Allowed CORS origin in production. Required if your reverse proxy is on a different host. Under `deploy/docker/`, leave it unset and set `ROHY_HOSTNAME` instead; the entrypoint composes it and logs the result. Set it explicitly only when your proxy serves rohy on a different path or scheme. |
+| `ROHY_HOSTNAME` | `localhost` (Caddy) / unset (app) | Docker compose only. The public hostname Caddy serves and the basis for the derived `FRONTEND_URL`. Setting neither this nor `FRONTEND_URL` makes the container refuse to boot in production rather than guess an origin and fail later with CORS 500s. |
 | `JWT_EXPIRY` | `4h` | Token TTL. Roles/status refresh from `users` on every request anyway. |
 | `ROHY_DB` | platform-default | Override the SQLite file location. Use this for non-default install paths. |
 | `OYON_ENABLED` | `1` | Disable Oyon routes (`0`) — Settings tab shows a friendly panel, binary bundles still ship. |

@@ -1,6 +1,6 @@
 # Rohy — AI Virtual Patient Simulation Platform
 
-![License](https://img.shields.io/badge/license-MIT-green)
+![License](https://img.shields.io/badge/license-Carm%20Research%20v1.4-green)
 ![Status](https://img.shields.io/badge/status-active-brightgreen)
 ![Stack](https://img.shields.io/badge/stack-React%2019%20%7C%20Node%20%7C%20SQLite-blue)
 ![Tests](https://img.shields.io/badge/tests-vitest%20%2B%20playwright-success)
@@ -451,4 +451,28 @@ The talking-avatars stack is also distributed as a **standalone embeddable kit**
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+Carm Research License v1.4 — full text embedded at [`LICENSE`](LICENSE), synced
+from the canonical [mohsaqr/carm-license](https://github.com/mohsaqr/carm-license)
+repository.
+
+Free for research, teaching, personal learning and non-profit use — including
+industry-sponsored and collaboratively funded academic work, which the license
+places explicitly inside the free grant regardless of funding source. A paid
+license is required for commercial use. Anything you produce by running rohy on
+your own data — case exports, analytics, reports — is yours, without restriction.
+
+Every third-party component rohy ships carries its full license text, embedded
+under [`licenses/`](licenses/) for rohy's own dependencies and under
+[`OyonR/licenses/`](OyonR/licenses/) for the vendored Oyon addon, all indexed in
+[`NOTICE.md`](NOTICE.md). Three things there are worth knowing before you deploy:
+
+- Building the Docker image with `INCLUDE_PIPER=1` **redistributes GPL-3.0
+  software** (Piper TTS). The default build does not.
+- The default Piper voices are **not uniformly MIT** — several are trained on
+  research-restricted corpora. Check each voice's `MODEL_CARD`.
+- The CALIPER paediatric reference ranges are **CC BY-NC-SA**, so a commercial
+  deployment must drop that data source. It is isolated behind its own
+  `data_sources` row precisely so it can be dropped cleanly.
+
+For paid licensing, institutional agreements, or inquiries:
+[saqr@saqr.me](mailto:saqr@saqr.me) · [saqr.me](https://saqr.me)

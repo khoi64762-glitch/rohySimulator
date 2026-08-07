@@ -45,6 +45,24 @@ import { LLM_PROVIDERS, defaultModelFor } from '../../services/llmCatalogue';
 import ModelSelect from './ModelSelect';
 import { friendlyLlmError } from '../../utils/llmErrorMessage';
 import { SCENARIO_TEMPLATES, scaleScenarioTimeline } from '../../data/scenarioTemplates';
+import { MARITAL_STATUSES, PATIENT_GENDERS, PERSONA_TYPES } from '../../services/patientDemographics';
+
+/**
+ * Keeps a stored value selectable when it is not one of the canonical options.
+ *
+ * Cases authored before the dropdowns carried explicit `value` attributes may
+ * hold a translated label ("Sposato", "Ängstlich") instead of the English one.
+ * Without this the select would match no option and render BLANK — the author
+ * would see an empty field, and the stale value would survive untouched in the
+ * config because nothing had changed it. Showing it keeps the data visible and
+ * lets the next save converge it onto a canonical value.
+ *
+ * Renders nothing in the normal case, which is every case created since.
+ */
+function LegacyValueOption({ value, canonical }) {
+    if (!value || canonical.includes(value)) return null;
+    return <option value={value}>{value}</option>;
+}
 
 // Bug 1 (16.5.2026): the old "Open Body Map Editor" button linked out to
 // /?debug=bodymap, an auth-bypassing branch deliberately gated to
@@ -671,7 +689,7 @@ export default function ConfigPanel({ onClose, onLoadCase, fullPage = false, ini
                     role gating lives on each SECTIONS item's `visible`; a
                     group with no visible items renders neither its label nor
                     body. */}
-                <div className="rohy-admin-sidebar w-48 min-h-0 overflow-y-auto border-r border-neutral-800 flex flex-col py-3">
+                <div className="rohy-admin-sidebar w-36 lg:w-48 flex-none min-h-0 overflow-y-auto border-r border-neutral-800 flex flex-col py-3">
                     {/* Simulation — not a tab: returns to the running simulation. */}
                     <button
                         type="button"
@@ -707,7 +725,11 @@ export default function ConfigPanel({ onClose, onLoadCase, fullPage = false, ini
                 </div>
 
                 {/* Content Area */}
-                <div className="rohy-admin-page flex-1 p-8 overflow-y-auto">
+                {/* `min-w-0` matters more than the padding: without it a flex
+                    child refuses to shrink below its content, so one wide
+                    table or button row inside a tab pushed the whole panel
+                    sideways instead of scrolling within itself. */}
+                <div className="rohy-admin-page flex-1 min-w-0 p-4 lg:p-8 overflow-y-auto">
 
                     {/* --- TEMP SETTINGS OVERVIEW --- Card-page prototype; all existing tabs remain unchanged. */}
                     {activeTab === 'overview' && (
@@ -3528,8 +3550,8 @@ PERSONALITY: You are anxious but cooperative. You're worried this might be a hea
                     </div>
                 )}
 
-                <div className="flex items-center justify-between mb-4">
-                    <div className="flex-1 mr-4">
+                <div className="flex flex-wrap items-center gap-y-2 justify-between mb-4">
+                    <div className="flex-1 min-w-[16rem] mr-4">
                         <div className="flex items-center gap-3 mb-1">
                             <h3 className="text-lg font-bold text-white whitespace-nowrap">{t('wizard_case_title')}</h3>
                             <input
@@ -3572,8 +3594,16 @@ PERSONALITY: You are anxious but cooperative. You're worried this might be a hea
                     </div>
                 </div>
 
-                {/* Clickable Step Navigation */}
-                <div className="flex gap-1">
+                {/* Clickable Step Navigation.
+                    Eleven steps do not fit one non-shrinking row on anything
+                    narrower than a desktop: `flex-1` cannot shrink a button
+                    below its label's min-content width, so on an iPad the
+                    later steps used to overflow off-screen with no way to
+                    reach them — an author who opened a middle step was
+                    cornered. Below `xl` the row wraps to as many lines as it
+                    needs and buttons size to their content; from `xl` up the
+                    original single equal-width row is unchanged. */}
+                <div className="flex flex-wrap xl:flex-nowrap gap-1">
                     {WIZARD_STEPS.map((s, _idx) => (
                         <button
                             key={s.num}
@@ -3582,7 +3612,7 @@ PERSONALITY: You are anxious but cooperative. You're worried this might be a hea
                                 await onSave();
                                 setStep(s.num);
                             }}
-                            className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${step === s.num
+                            className={`flex-none xl:flex-1 min-w-0 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-all ${step === s.num
                                 ? 'bg-teal-600 text-white shadow-lg shadow-teal-900/30'
                                 : step > s.num
                                     ? 'bg-green-900/30 text-green-300 hover:bg-green-900/50 border border-green-700/50'
@@ -3590,7 +3620,7 @@ PERSONALITY: You are anxious but cooperative. You're worried this might be a hea
                                 }`}
                         >
                             <span>{s.icon}</span>
-                            <span className="hidden sm:inline">{s.title}</span>
+                            <span className="hidden sm:inline truncate">{s.title}</span>
                             <span className="sm:hidden">{s.num}</span>
                         </button>
                     ))}
@@ -3700,9 +3730,16 @@ PERSONALITY: You are anxious but cooperative. You're worried this might be a hea
                                             className="input-dark"
                                         >
                                             <option value="">{t('demo_select')}</option>
-                                            <option>{t('demo_gender_male')}</option>
-                                            <option>{t('demo_gender_female')}</option>
-                                            <option>{t('demo_gender_other')}</option>
+                                            {/* The value is the STORED value and must stay English:
+                                                cases.patient_gender is CHECK-constrained to exactly
+                                                these three strings. Without an explicit value an
+                                                <option> submits its translated label, which is why
+                                                saving a case used to 500 in every non-English locale.
+                                                See server/shared/patientDemographics.js. */}
+                                            <option value="Male">{t('demo_gender_male')}</option>
+                                            <option value="Female">{t('demo_gender_female')}</option>
+                                            <option value="Other">{t('demo_gender_other')}</option>
+                                            <LegacyValueOption value={caseData.config?.demographics?.gender} canonical={PATIENT_GENDERS} />
                                         </select>
                                     </div>
                                 </div>
@@ -3810,11 +3847,14 @@ PERSONALITY: You are anxious but cooperative. You're worried this might be a hea
                                         className="input-dark"
                                     >
                                         <option value="">{t('demo_select')}</option>
-                                        <option>{t('demo_marital_single')}</option>
-                                        <option>{t('demo_marital_married')}</option>
-                                        <option>{t('demo_marital_divorced')}</option>
-                                        <option>{t('demo_marital_widowed')}</option>
-                                        <option>{t('demo_marital_separated')}</option>
+                                        {/* English values, translated labels — the stored string is
+                                            read as prose into the case context sent to the model. */}
+                                        <option value="Single">{t('demo_marital_single')}</option>
+                                        <option value="Married">{t('demo_marital_married')}</option>
+                                        <option value="Divorced">{t('demo_marital_divorced')}</option>
+                                        <option value="Widowed">{t('demo_marital_widowed')}</option>
+                                        <option value="Separated">{t('demo_marital_separated')}</option>
+                                        <LegacyValueOption value={caseData.config?.demographics?.maritalStatus} canonical={MARITAL_STATUSES} />
                                     </select>
                                 </div>
                             </div>
@@ -3911,14 +3951,20 @@ PERSONALITY: You are anxious but cooperative. You're worried this might be a hea
                                         onChange={e => updateConfig('persona_type', e.target.value)}
                                         className="input-dark"
                                     >
-                                        <option>{t('persona_standard')}</option>
-                                        <option>{t('persona_difficult')}</option>
-                                        <option>{t('persona_anxious')}</option>
-                                        <option>{t('persona_depressed')}</option>
-                                        <option>{t('persona_elderly')}</option>
-                                        <option>{t('persona_pediatric')}</option>
-                                        <option>{t('persona_noncompliant')}</option>
-                                        <option>{t('persona_drugseeking')}</option>
+                                        {/* English values, translated labels. The persona string is
+                                            injected into the patient system prompt as prose
+                                            (ChatInterface: `config.persona_type` → "you are …"), so a
+                                            localized value would have quietly changed the model's
+                                            instructions along with the UI language. */}
+                                        <option value="Standard Simulated Patient">{t('persona_standard')}</option>
+                                        <option value="Difficult/Angry Patient">{t('persona_difficult')}</option>
+                                        <option value="Anxious Patient">{t('persona_anxious')}</option>
+                                        <option value="Depressed Patient">{t('persona_depressed')}</option>
+                                        <option value="Elderly/Confused Patient">{t('persona_elderly')}</option>
+                                        <option value="Pediatric Proxy (Parent)">{t('persona_pediatric')}</option>
+                                        <option value="Non-compliant Patient">{t('persona_noncompliant')}</option>
+                                        <option value="Drug-seeking Patient">{t('persona_drugseeking')}</option>
+                                        <LegacyValueOption value={caseData.config?.persona_type} canonical={PERSONA_TYPES} />
                                     </select>
                                 </div>
                                 <div>
@@ -4775,7 +4821,7 @@ PERSONALITY: You are anxious but cooperative. You're worried this might be a hea
                     <PhysicalExamEditor
                         caseData={caseData}
                         setCaseData={setCaseData}
-                        patientGender={caseData.config?.demographics?.gender?.toLowerCase() || 'male'}
+                        patientGender={caseData.config?.demographics?.gender}
                     />
                 )}
 
@@ -4836,10 +4882,15 @@ PERSONALITY: You are anxious but cooperative. You're worried this might be a hea
 
             </div>
 
-            {/* Footer Actions */}
-            <div className="pt-4 border-t border-neutral-800 flex justify-between mt-4">
+            {/* Footer Actions.
+                `lastStep` used to be the literal 9 while WIZARD_STEPS grew to
+                11: "Next" vanished after Records, and Treatments/Agents
+                offered only "Save & Finish", so the linear path through the
+                wizard dead-ended two steps early. Derive it from the array so
+                adding a step can never strand one again. */}
+            <div className="pt-4 border-t border-neutral-800 flex flex-wrap gap-2 justify-between items-center mt-4">
                 <button onClick={onCancel} className="text-neutral-500 hover:text-white px-4">{t('btn_cancel')}</button>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                     {step > 1 && (
                         <button
                             onClick={async () => {
@@ -4854,7 +4905,7 @@ PERSONALITY: You are anxious but cooperative. You're worried this might be a hea
                     )}
 
                     {/* Save Progress button on all steps except last */}
-                    {step < 9 && (
+                    {step < WIZARD_STEPS.length && (
                         <button
                             onClick={onSave}
                             className="px-4 py-2 bg-blue-700 hover:bg-blue-600 rounded font-bold text-sm flex items-center gap-2 shadow-lg shadow-blue-900/20"
@@ -4863,7 +4914,7 @@ PERSONALITY: You are anxious but cooperative. You're worried this might be a hea
                         </button>
                     )}
 
-                    {step < 9 ? (
+                    {step < WIZARD_STEPS.length ? (
                         <button
                             onClick={async () => {
                                 // Auto-save before moving forward

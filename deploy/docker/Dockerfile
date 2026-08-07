@@ -125,7 +125,7 @@ ARG INCLUDE_PIPER
 
 LABEL org.opencontainers.image.source="https://github.com/mohsaqr/rohySimulator"
 LABEL org.opencontainers.image.description="rohy — Virtual Patient Simulation Platform"
-LABEL org.opencontainers.image.licenses="MIT"
+LABEL org.opencontainers.image.licenses="LicenseRef-Carm-Research-License"
 
 # Runtime essentials only. python3 stays in case the operator wants to
 # re-run install-piper.sh inside a running container; sqlite3 makes
@@ -172,6 +172,17 @@ COPY --from=builder --chown=node:node /workspace/rohy/heart.txt ./heart.txt
 # `release_notes_unavailable` in the container. (.dockerignore re-includes it
 # past the blanket `*.md` exclusion.)
 COPY --from=builder --chown=node:node /workspace/rohy/CHANGELOG.md ./CHANGELOG.md
+# Licensing artifacts. The Carm Research License requires third-party notices
+# to travel with every copy, so an image without these ships in breach — and
+# that bites hardest when the image is built with INCLUDE_PIPER=1, which
+# redistributes GPL-3.0 software (see NOTICE.md). Same two-gate trap as
+# CHANGELOG.md above: NOTICE.md also needs the `!NOTICE.md` re-include in
+# .dockerignore to survive the blanket `*.md` exclusion. LICENSE has no
+# extension and is never excluded; `licenses/` is a directory, likewise.
+# tests/server/license-contract.test.js pins all three.
+COPY --from=builder --chown=node:node /workspace/rohy/LICENSE ./LICENSE
+COPY --from=builder --chown=node:node /workspace/rohy/NOTICE.md ./NOTICE.md
+COPY --from=builder --chown=node:node /workspace/rohy/licenses ./licenses
 COPY --from=builder --chown=node:node /workspace/dynajs /opt/dynajs
 
 # rohy's package.json declares dynajs at "file:../dynajs". Recreate that

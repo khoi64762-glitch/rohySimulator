@@ -45,13 +45,32 @@ if [ -z "${JWT_SECRET:-}" ]; then
 fi
 
 # 2. FRONTEND_URL ----------------------------------------------------------
+# Derive it from ROHY_HOSTNAME when the operator didn't set it explicitly.
+# This lives here rather than in compose.yml because Compose has no nested
+# interpolation: `${FRONTEND_URL:-https://${ROHY_HOSTNAME:-localhost}/rohy}`
+# is a parse error, and the `$$`-escaped form silently passes the literal
+# text through. A shell can express the fallback properly, so it does.
+#
+# Note the asymmetry with the caddy service, which defaults ROHY_HOSTNAME to
+# `localhost`: Caddy needs a concrete site address to boot at all, whereas an
+# unset hostname here means we genuinely do not know the public origin — and
+# guessing `localhost` in production is exactly the silent CORS failure the
+# check below exists to prevent.
+if [ -z "${FRONTEND_URL:-}" ] && [ -n "${ROHY_HOSTNAME:-}" ]; then
+    FRONTEND_URL="https://${ROHY_HOSTNAME}/rohy"
+    export FRONTEND_URL
+    echo "[entrypoint] FRONTEND_URL not set — derived $FRONTEND_URL from ROHY_HOSTNAME."
+    echo "[entrypoint] Set FRONTEND_URL explicitly if your proxy serves rohy on another path or scheme."
+fi
+
 # Mirror the validateEnv.js policy: required in production, warn elsewhere.
 if [ "${NODE_ENV:-production}" = "production" ] && [ -z "${FRONTEND_URL:-}" ]; then
     echo "[entrypoint] FATAL: FRONTEND_URL is not set." >&2
     echo "[entrypoint] Browsers reaching this container will see CORS 500s on every asset." >&2
     echo "[entrypoint] Fix one of these in your compose file or .env:" >&2
-    echo "[entrypoint]   FRONTEND_URL=https://your-deploy/rohy" >&2
-    echo "[entrypoint]   FRONTEND_URL=http://localhost:4000     # dev only" >&2
+    echo "[entrypoint]   ROHY_HOSTNAME=your-deploy               # FRONTEND_URL is derived from it" >&2
+    echo "[entrypoint]   FRONTEND_URL=https://your-deploy/rohy   # or set the origin outright" >&2
+    echo "[entrypoint]   FRONTEND_URL=http://localhost:4000      # dev only" >&2
     exit 1
 fi
 

@@ -250,3 +250,66 @@ describe('re-exported identity helpers (deep coverage lives server-side)', () =>
         expect(typeof deriveSlot('female', 30)).toBe('string');
     });
 });
+
+// Regression lock: `source` names WHICH configuration level won.
+// Reported 2026-08-06 — an admin changed the platform default voice from a
+// Google voice to a kokoro one and the patient kept speaking Google (and
+// then went silent when Google failed), because the winning voice lived on
+// the persona template, not on the platform. `tier` said 'override' for
+// both the case level and the template level, so no surface could answer
+// "where is this voice actually set?". `source` is that answer.
+describe('source: which configuration level won', () => {
+    it('a case voice reports source "case"', () => {
+        const r = resolveVoice({
+            voice: { case_voice: 'af_bella' },
+            templateVoice: { case_voice: 'am_michael' },
+            voiceSettings: mkSettings()
+        });
+        expect(r.file).toBe('af_bella');
+        expect(r.tier).toBe('override');
+        expect(r.source).toBe('case');
+    });
+
+    it('a persona-template voice reports source "template" — it still outranks the platform default', () => {
+        const r = resolveVoice({
+            voice: {},
+            templateVoice: { case_voice: 'en-US-Chirp3-HD-Charon' },
+            voiceSettings: mkSettings({ defaults: { en: 'af_heart' } }),
+            language: 'en'
+        });
+        expect(r.file).toBe('en-US-Chirp3-HD-Charon');
+        expect(r.tier).toBe('override');
+        expect(r.source).toBe('template');   // NOT the platform default
+    });
+
+    it('the platform default reports source "platform_default"', () => {
+        const r = resolveVoice({
+            voice: {},
+            templateVoice: {},
+            voiceSettings: mkSettings({ defaults: { en: 'af_heart' } }),
+            language: 'en'
+        });
+        expect(r.file).toBe('af_heart');
+        expect(r.tier).toBe('default');
+        expect(r.source).toBe('platform_default');
+    });
+
+    it('an unplayable configured voice keeps the source that requested it', () => {
+        const r = resolveVoice({
+            voice: {},
+            templateVoice: { case_voice: 'en-US-Chirp3-HD-Charon' },
+            voiceSettings: mkSettings({ usable: ['kokoro'], defaults: { en: 'af_heart' } }),
+            language: 'en'
+        });
+        expect(r.file).toBeNull();           // silence, never a substitution
+        expect(r.tier).toBe('invalid');
+        expect(r.source).toBe('template');   // …and we can say whose fault it is
+    });
+
+    it('nothing configured and no default reports a null source', () => {
+        const r = resolveVoice({ voice: {}, voiceSettings: mkSettings(), language: 'en' });
+        expect(r.file).toBeNull();
+        expect(r.tier).toBeNull();
+        expect(r.source).toBeNull();
+    });
+});

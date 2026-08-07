@@ -1,14 +1,14 @@
 {
   "name": "rohy",
   "private": true,
-  "version": "2.9.13",
+  "version": "2.9.19",
   "description": "Virtual Patient Simulation Platform for Medical Education",
   "author": {
     "name": "Mohammed Saqr",
     "email": "mohammed.saqr@uef.fi",
     "url": "https://www.saqr.me"
   },
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "type": "module",
   "scripts": {
     "dev": "concurrently \"npm run server\" \"npm run client\"",
@@ -18,8 +18,11 @@
     "setup:oyon": "bash OyonR/scripts/download-models.sh && npm run verify:oyon",
     "verify:oyon": "node scripts/verify-oyon-install.mjs",
     "install:piper": "bash server/scripts/install-piper.sh",
+    "license:sync": "node scripts/sync-licenses.mjs",
+    "license:verify": "node scripts/sync-licenses.mjs --strict && vitest run --project=server tests/server/license-contract.test.js",
+    "license:latest": "node scripts/check-license-version.mjs",
     "postinstall": "npm run setup:oyon",
-    "prebuild": "npm run verify:oyon",
+    "prebuild": "npm run verify:oyon && npm run license:sync",
     "production": "NODE_ENV=production node server/server.js",
     "build": "{ npm run docs:build || echo '[build] docs:build failed — continuing without the docs site'; } && vite build --base=/rohy/ && rm -rf frontend && mkdir -p frontend && cp -rf dist/. frontend/",
     "lint": "eslint .",
@@ -31,6 +34,7 @@
     "test:server": "vitest run --project=server",
     "test:client": "vitest run --project=client",
     "test:e2e": "playwright test",
+    "test:e2e:tablet": "playwright test tests/e2e/tablet-layout.spec.js",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:install": "playwright install --with-deps chromium",
     "bench": "NODE_OPTIONS='--max-old-space-size=4096' vitest bench --run",

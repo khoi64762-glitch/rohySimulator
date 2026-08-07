@@ -1325,7 +1325,12 @@ export default function PatientMonitor({ _caseParams, caseData, sessionId, isAdm
                {/* Channel 1: ECG — a gaze attention target (AoiRegion), so
                    analytics can answer "was the trainee watching the trace?"
                    via aoi_dwell_ms.ecg_trace. Same div, same layout. */}
-               <AoiRegion id="ecg_trace" className="h-32 min-h-[160px] border-b border-neutral-800/50 relative group">
+               {/* Below `lg` the monitor shares the screen's height with the
+                   chat column instead of owning the full viewport, so the
+                   three traces have to fit in roughly half of it. 96px still
+                   resolves a QRS complex; the 160px floor would push the
+                   third channel off the bottom. */}
+               <AoiRegion id="ecg_trace" className="h-32 min-h-[160px] max-lg:h-24 max-lg:min-h-[96px] border-b border-neutral-800/50 relative group">
                   <div className="absolute top-2 left-3 z-10 font-mono text-sm font-bold text-green-500 select-none">
                      II <span className="text-xs font-normal opacity-70 ml-1">1mV</span>
                   </div>
@@ -1334,7 +1339,7 @@ export default function PatientMonitor({ _caseParams, caseData, sessionId, isAdm
                </AoiRegion>
 
                {/* Channel 2: PLETH */}
-               <div className="h-32 border-b border-neutral-800/50 relative">
+               <div className="h-32 max-lg:h-24 border-b border-neutral-800/50 relative">
                   <div className="absolute top-2 left-3 z-10 font-mono text-sm font-bold text-sky-500 select-none">
                      PLETH
                   </div>
@@ -1342,7 +1347,7 @@ export default function PatientMonitor({ _caseParams, caseData, sessionId, isAdm
                </div>
 
                {/* Channel 3: RESP */}
-               <div className="h-32 border-b border-neutral-800/50 relative">
+               <div className="h-32 max-lg:h-24 border-b border-neutral-800/50 relative">
                   <div className="absolute top-2 left-3 z-10 font-mono text-sm font-bold text-amber-500 select-none">
                      RESP <span className="text-xs font-normal opacity-70 ml-1">Imp</span>
                   </div>
@@ -1358,10 +1363,16 @@ export default function PatientMonitor({ _caseParams, caseData, sessionId, isAdm
             {/* VITALS (RIGHT SIDEBAR) — a gaze attention target (AoiRegion):
                 dwell on the numeric HR/SpO2/NIBP/RESP/TEMP column lands in
                 aoi_dwell_ms.vitals_values. Same div, same layout. */}
+            {/* Every box below carries `shrink-0`. Without it they are flex
+                children that shrink when the column is shorter than their
+                combined height — and because each box clips its own content,
+                the reading inside silently loses its top half rather than the
+                column scrolling. Measured at 25px instead of 96px on an iPad
+                in portrait; the same squeeze happens on any short window. */}
             <AoiRegion id="vitals_values" className="w-64 bg-neutral-900/50 backdrop-blur-sm border-l border-neutral-800 flex flex-col shrink-0 overflow-y-auto">
 
                {/* HR Box */}
-               <div className="h-24 border-b border-neutral-800 p-3 flex flex-col justify-center relative overflow-hidden">
+               <div className="h-24 shrink-0 border-b border-neutral-800 p-3 flex flex-col justify-center relative overflow-hidden">
                   <div className="absolute top-1.5 left-3 text-green-500 font-bold text-xs flex items-center gap-1">
                      <Heart className="w-3 h-3" /> HR
                   </div>
@@ -1374,7 +1385,7 @@ export default function PatientMonitor({ _caseParams, caseData, sessionId, isAdm
                </div>
 
                {/* SpO2 Box */}
-               <div className="h-32 border-b border-neutral-800 p-4 flex flex-col justify-center relative">
+               <div className="h-32 max-lg:h-24 max-lg:p-3 shrink-0 border-b border-neutral-800 p-4 flex flex-col justify-center relative">
                   <div className="absolute top-2 left-3 text-sky-500 font-bold text-sm">SpO2</div>
                   <div className="text-right">
                      <div className="text-5xl font-mono font-bold tracking-tighter text-sky-500">
@@ -1388,7 +1399,7 @@ export default function PatientMonitor({ _caseParams, caseData, sessionId, isAdm
                </div>
 
                {/* NIBP Box */}
-               <div className="h-32 border-b border-neutral-800 p-4 flex flex-col justify-center relative">
+               <div className="h-32 max-lg:h-24 max-lg:p-3 shrink-0 border-b border-neutral-800 p-4 flex flex-col justify-center relative">
                   <div className="absolute top-2 left-3 text-red-500 font-bold text-sm">NIBP</div>
                   <div className="text-right mt-2">
                      <div className="text-4xl font-mono font-bold tracking-tighter text-red-100 leading-none">
@@ -1404,7 +1415,7 @@ export default function PatientMonitor({ _caseParams, caseData, sessionId, isAdm
                </div>
 
                {/* RESP Box */}
-               <div className="h-32 border-b border-neutral-800 p-4 flex flex-col justify-center relative">
+               <div className="h-32 max-lg:h-24 max-lg:p-3 shrink-0 border-b border-neutral-800 p-4 flex flex-col justify-center relative">
                   <div className="absolute top-2 left-3 text-amber-500 font-bold text-sm">RESP</div>
                   <div className="text-right">
                      <div className="text-5xl font-mono font-bold tracking-tighter text-amber-500">
@@ -1415,7 +1426,7 @@ export default function PatientMonitor({ _caseParams, caseData, sessionId, isAdm
                </div>
 
                {/* Temperature Box */}
-               <div className="h-32 border-b border-neutral-800 p-4 flex flex-col justify-center relative">
+               <div className="h-32 max-lg:h-24 max-lg:p-3 shrink-0 border-b border-neutral-800 p-4 flex flex-col justify-center relative">
                   <div className="absolute top-2 left-3 text-orange-500 font-bold text-sm">TEMP</div>
                   <div className="text-right">
                      <div className="text-4xl font-mono font-bold tracking-tighter text-orange-100">
@@ -1429,7 +1440,7 @@ export default function PatientMonitor({ _caseParams, caseData, sessionId, isAdm
                </div>
 
                {/* EtCO2 Box */}
-               <div className="h-24 border-b border-neutral-800 p-3 flex flex-col justify-center relative">
+               <div className="h-24 shrink-0 border-b border-neutral-800 p-3 flex flex-col justify-center relative">
                   <div className="absolute top-1.5 left-3 text-yellow-500 font-bold text-xs">EtCO<sub className="text-[9px]">2</sub></div>
                   <div className="text-right">
                      <div className="text-4xl font-mono font-bold tracking-tighter leading-none text-yellow-500">

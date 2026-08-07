@@ -40,7 +40,7 @@
   "no_stt_language": "Keine STT-Sprache konfiguriert. Legen Sie eine unter Einstellungen → Stimme & Avatar fest, bevor Sie die Sprechtaste drücken.",
   "no_voice_configured_agent": "Für diese Agenten-Persona ist keine Stimme konfiguriert. Legen Sie eine unter Einstellungen → Agenten-Personas fest.",
   "no_voice_configured_case": "Keine Stimme konfiguriert. Legen Sie eine Fallstimme im Fall-Editor oder eine Standardstimme für die Patienten-Persona fest.",
-  "on_call_responds": "Bereitschaft · antwortet in 1–3 Minuten",
+  "on_call_responds": "Bereitschaft · antwortet auf Ihren Ruf",
   "patient_generic": "der Patient",
   "patient_label": "Patient",
   "patient_speaking": "Patient spricht …",

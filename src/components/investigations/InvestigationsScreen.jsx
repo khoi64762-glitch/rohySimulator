@@ -160,12 +160,17 @@ export default function InvestigationsScreen({
     return (
         <div className="h-screen w-screen bg-gradient-to-br from-slate-800 via-slate-900 to-slate-950 text-slate-100 flex flex-col overflow-hidden">
             <header className="flex items-center justify-between px-6 py-3 bg-slate-950/80 backdrop-blur border-b border-slate-800/80 shadow-lg shadow-black/20">
-                <div className="flex items-center gap-3">
-                    <TitleIcon className={`w-6 h-6 ${theme.accentTextSolid}`} />
-                    <div className="flex items-baseline gap-2 text-sm">
-                        <span className="font-semibold text-slate-100 text-base">{t(theme.labelKey)}</span>
-                        <span className="text-slate-500">·</span>
-                        <span className="text-slate-300">{caseTitle}</span>
+                {/* The Oyon capture pill is a `fixed` overlay centred at the
+                    top of the viewport. On a desktop it floats over empty
+                    header space; on a tablet the header is narrow enough that
+                    the case title ran underneath it. Cap the title block so
+                    it always stops short of the centre. */}
+                <div className="flex items-center gap-3 min-w-0 max-lg:max-w-[40%]">
+                    <TitleIcon className={`w-6 h-6 shrink-0 ${theme.accentTextSolid}`} />
+                    <div className="flex items-baseline gap-2 text-sm min-w-0">
+                        <span className="font-semibold text-slate-100 text-base whitespace-nowrap">{t(theme.labelKey)}</span>
+                        <span className="text-slate-500 max-lg:hidden">·</span>
+                        <span className="text-slate-300 truncate max-lg:hidden">{caseTitle}</span>
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -188,8 +193,15 @@ export default function InvestigationsScreen({
                 ~3cm and the search box overflowed. Pulling the worklist
                 into its own right column gives the catalogue room to
                 breathe and surfaces "what's queued" more prominently. */}
-            <div className="flex-1 min-h-0 grid grid-cols-[minmax(260px,1fr)_minmax(0,3fr)_minmax(280px,1fr)] gap-px bg-slate-800/60">
-                <aside className="flex flex-col bg-slate-900/40 overflow-hidden">
+            {/* Below `lg` the three columns cannot all be useful at once:
+                the two rails alone claim 540px of an iPad's 820, leaving the
+                report viewer ~280px — narrow enough that its own empty-state
+                sentence wrapped to ten lines and the READY/PENDING/VIEWED
+                counters collided. Stacked, each pane gets the full width and
+                the row scrolls, in the order the work happens: order from the
+                catalogue, read the report, check the worklist. */}
+            <div className="flex-1 min-h-0 grid gap-px bg-slate-800/60 max-lg:grid-cols-1 max-lg:auto-rows-min max-lg:overflow-y-auto lg:grid-cols-[minmax(260px,1fr)_minmax(0,3fr)_minmax(280px,1fr)]">
+                <aside className="flex flex-col bg-slate-900/40 overflow-hidden max-lg:h-[70vh]">
                     <InvestigationCatalogue
                         kind={activeKind}
                         theme={theme}
@@ -208,7 +220,7 @@ export default function InvestigationsScreen({
                     />
                 </aside>
 
-                <main className="relative bg-slate-900/30 overflow-hidden flex flex-col">
+                <main className="relative bg-slate-900/30 overflow-hidden flex flex-col max-lg:min-h-[60vh]">
                     {/* Ghost watermark fills the middle column behind the
                         scrolling content. Sits outside the scroller so it
                         stays put as the student scrolls pills + expanded
@@ -281,7 +293,7 @@ export default function InvestigationsScreen({
                     </div>
                 </main>
 
-                <aside className="flex flex-col bg-slate-900/40 overflow-hidden border-l border-slate-800">
+                <aside className="flex flex-col bg-slate-900/40 overflow-hidden lg:border-l border-slate-800 max-lg:h-[50vh] max-lg:border-t">
                     <InvestigationWorklist
                         kind={activeKind}
                         theme={theme}
