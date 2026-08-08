@@ -1,9 +1,9 @@
 {
-  "_comment": "Heads come from two sources: (1) met4citizen/TalkingHead demo set (MIT) — the original 6 GLBs. (2) Microsoft RocketBox (MIT, github.com/microsoft/Microsoft-Rocketbox) — converted via FBX2glTF + custom post-process that injects textures (1024px PNG) and remaps the AA_VI_NN_* / AK_NN_* blendshape names to the Oculus naming our PatientAvatar expects (viseme_PP, eyeBlinkLeft, etc). Non-viseme/non-blink shapes are pruned for size. The reproducible RocketBox pipeline lives in scripts/rocketbox-convert/. `all` is the flat picker catalogue used by the case editor; the per-gender/age buckets are the demographic auto-pick fallback when a case has no avatar_id (see PatientAvatar.jsx:81 pickHeadFile).",
+  "_comment": "Heads come from two sources: (1) met4citizen/TalkingHead demo set (MIT) — the original 6 GLBs. (2) Microsoft RocketBox (MIT, github.com/microsoft/Microsoft-Rocketbox) — converted via FBX2glTF + custom post-process that injects textures (1024px PNG) and remaps the AA_VI_NN_* / AK_NN_* blendshape names to the Oculus naming our PatientAvatar expects (viseme_PP, eyeBlinkLeft, etc). Non-viseme/non-blink shapes are pruned for size. The reproducible RocketBox pipeline lives in scripts/rocketbox-convert/. `all` is the flat picker catalogue used by the case editor; the per-gender/age buckets are the demographic auto-pick fallback when a case has no avatar_id (see PatientAvatar.jsx:81 pickHeadFile). NOTE: brunette-t.glb is a texture-reduced copy of brunette.glb (identical Wolf3D_Head geometry) — it is NOT an elderly head and must never be labelled as one; no genuinely elderly female head exists in this set, so female.elderly honestly reuses brunette.glb (mirroring male.elderly reusing rb_male_adult_15.glb).",
   "all": [
     { "id": "avatarsdk.glb",            "label": "AvatarSDK — male",          "gender": "male",   "age": "adult" },
     { "id": "brunette.glb",             "label": "Brunette — middle-aged",    "gender": "female", "age": "middle" },
-    { "id": "brunette-t.glb",           "label": "Brunette — elderly",        "gender": "female", "age": "elderly" },
+    { "id": "brunette-t.glb",           "label": "Brunette — middle-aged (light textures)", "gender": "female", "age": "middle" },
     { "id": "vroid.glb",                "label": "VRoid — young",             "gender": "female", "age": "young" },
     { "id": "avaturn.glb",              "label": "Avaturn — young",           "gender": "female", "age": "young" },
     { "id": "mpfb.glb",                 "label": "MPFB — middle-aged",        "gender": "female", "age": "middle" },
@@ -33,7 +33,7 @@
   "female": {
     "young":   ["vroid.glb", "avaturn.glb"],
     "middle":  ["brunette.glb", "mpfb.glb", "rb_female_adult_02.glb", "rb_female_adult_05.glb", "rb_female_adult_07.glb", "rb_female_adult_10.glb", "rb_business_female_03.glb", "rb_female_adult_01.glb", "rb_female_adult_08.glb", "rb_female_adult_17.glb", "rb_business_female_02.glb"],
-    "elderly": ["brunette-t.glb"]
+    "elderly": ["brunette.glb"]
   },
   "male": {
     "young":   ["rb_male_adult_03.glb"],

@@ -9,6 +9,22 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.24] — 2026-08-08
+
+### Fixed
+
+- **"Brunette — middle-aged" and "Brunette — elderly" were the same 3D
+  head** (tester bug report 2.9.15 #1). `brunette-t.glb` is a
+  texture-reduced copy of `brunette.glb` with identical geometry — not
+  an older person — and it was also the only entry in the
+  `female.elderly` auto-pick bucket, giving every elderly female patient
+  a mislabeled face. It is now labeled honestly ("middle-aged, light
+  textures", kept so saved cases referencing it don't lose their
+  avatar), and `female.elderly` falls back to the full-quality
+  `brunette.glb` — mirroring how the male side already handles the
+  missing-elderly-head gap. Four manifest-integrity regression tests
+  now lock bucket/label consistency.
+
 ## [2.9.23] — 2026-08-08
 
 ### Fixed

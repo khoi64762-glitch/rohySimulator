@@ -5,6 +5,7 @@ import {
     pickDemographicAvatar,
     resolveAvatarId,
 } from './resolveAvatar.js';
+import shippedManifest from '../../public/avatars/heads/manifest.json';
 
 const manifest = {
     all: [
@@ -138,5 +139,52 @@ describe('avatar option filtering', () => {
             'male-elderly.glb',
             'legacy-neutral.glb',
         ]);
+    });
+});
+
+describe('shipped head manifest integrity (public/avatars/heads/manifest.json)', () => {
+    const genderBucketIds = ['male', 'female'].flatMap(gender =>
+        ['young', 'middle', 'elderly'].map(age => ({
+            bucket: `${gender}.${age}`,
+            ids: shippedManifest[gender]?.[age] ?? [],
+        })));
+    const allBucketIds = [
+        ...genderBucketIds,
+        { bucket: 'child', ids: shippedManifest.child ?? [] },
+        { bucket: 'fallback', ids: shippedManifest.fallback ?? [] },
+    ];
+
+    it('lists every auto-pick bucket id in the picker catalogue (all)', () => {
+        const known = new Set((shippedManifest.all ?? []).map(a => a.id));
+        const unknown = allBucketIds.flatMap(({ bucket, ids }) =>
+            ids.filter(id => !known.has(id)).map(id => `${bucket}:${id}`));
+        expect(unknown).toEqual([]);
+    });
+
+    it('keeps every demographic auto-pick bucket non-empty so pickDemographicAvatar never falls through to the cross-gender fallback list', () => {
+        const empty = allBucketIds.filter(({ ids }) => ids.length === 0).map(({ bucket }) => bucket);
+        expect(empty).toEqual([]);
+    });
+
+    // Regression lock: brunette-t.glb was a texture-reduced duplicate mislabeled elderly (bug report 2.9.15 #1)
+    it('never presents brunette-t.glb (a texture-reduced copy of brunette.glb) as an elderly head', () => {
+        const twin = (shippedManifest.all ?? []).find(a => a.id === 'brunette-t.glb');
+        if (twin) {
+            expect(twin.age).not.toBe('elderly');
+            expect(twin.label).not.toMatch(/elderly/i);
+        }
+        expect(shippedManifest.female?.elderly ?? []).not.toContain('brunette-t.glb');
+    });
+
+    // Regression lock: brunette-t.glb was a texture-reduced duplicate mislabeled elderly (bug report 2.9.15 #1)
+    it('gives no two picker entries the same gender+age demographic with indistinguishable labels', () => {
+        const byDemographic = (shippedManifest.all ?? []).reduce((acc, entry) => {
+            const key = `${entry.gender ?? 'any'}:${entry.age ?? 'any'}`;
+            (acc[key] ??= []).push(entry.label);
+            return acc;
+        }, {});
+        const clashes = Object.entries(byDemographic).flatMap(([key, labels]) =>
+            labels.length === new Set(labels).size ? [] : [key]);
+        expect(clashes).toEqual([]);
     });
 });
