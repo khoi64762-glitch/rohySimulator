@@ -9,6 +9,20 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.25] — 2026-08-08
+
+### Fixed
+
+- **Lesson-editor image/video/file uploads always failed with "Something
+  went wrong"** (tester bug report 2.9.15 #12). The vendored lessons
+  module's auth shim was stubbed to `null` (wrongly assuming rohy is
+  cookie-only), so its raw upload XHR carried no `Authorization` and no
+  `X-CSRF-Token` — the cookie path then failed CSRF with a 403 the toast
+  swallowed. The shim now reads the real bearer token, the XHR attaches
+  both headers, endpoints resolve through `apiUrl()` (base-path safe
+  under `/rohy/`), and the server's actual error message reaches the
+  toast. Seven regression tests lock the wire shape.
+
 ## [2.9.24] — 2026-08-08
 
 ### Fixed
