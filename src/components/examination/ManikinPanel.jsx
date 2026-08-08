@@ -10,6 +10,7 @@ import { regionLabel } from './examinationLabels';
 import { useToast } from '../../contexts/ToastContext';
 import { usePatientRecord } from '../../services/PatientRecord';
 import { bodyMapGender } from '../../services/patientDemographics';
+import { apiPost } from '../../services/apiClient';
 
 /**
  * Manikin Panel - Main Physical Examination Interface
@@ -30,6 +31,9 @@ import { bodyMapGender } from '../../services/patientDemographics';
  *                 Format: { regionId: { examType: { finding, abnormal } } }
  * - onExamPerformed: callback when an exam is performed (for logging/analytics)
  * - patientGender: 'male' or 'female' (optional, defaults to 'male')
+ * - sessionId: optional; when present each performed exam is persisted to
+ *              POST /sessions/:id/exam-findings so the case-summary modal
+ *              (and analytics) can read the findings back later.
  */
 export default function ManikinPanel({
     isOpen,
@@ -37,7 +41,8 @@ export default function ManikinPanel({
     embedded = false,
     physicalExam = null, // If null, uses default findings
     onExamPerformed,
-    patientGender = 'male'
+    patientGender = 'male',
+    sessionId = null
 }) {
     const { t } = useTranslation('examination');
     const toast = useToast();
@@ -153,6 +158,23 @@ export default function ManikinPanel({
             onExamPerformed(logEntry);
         }
 
+        // Persist to the session record (bug report 2.9.15 #16): the server
+        // has carried POST /sessions/:id/exam-findings + the
+        // physical_exam_findings table since day one, but no client ever
+        // called it — so the case-summary modal's GET always came back empty.
+        // Best-effort fire-and-forget, matching how PatientMonitor persists
+        // vitals snapshots: a network blip must never break the exam
+        // interaction. The endpoint is idempotent on
+        // (session, body_region, exam_type), so repeats are safe.
+        if (sessionId) {
+            apiPost(`/sessions/${sessionId}/exam-findings`, {
+                body_region: selectedRegion,
+                exam_type: examType,
+                finding: logEntry.finding,
+                is_abnormal: abnormal,
+            }).catch(err => console.warn('[ManikinPanel] exam finding persist failed:', err.message));
+        }
+
         // Record to PatientRecord
         examined(selectedRegion, examType, finding);
         if (finding) {
@@ -161,7 +183,7 @@ export default function ManikinPanel({
                 significance: abnormal ? 'Abnormal finding' : 'Normal finding'
             });
         }
-    }, [selectedRegion, examData, onExamPerformed, examined, elicited]);
+    }, [selectedRegion, examData, onExamPerformed, examined, elicited, sessionId]);
 
     // Handle clicking on a log entry
     const handleSelectExam = useCallback((entry) => {

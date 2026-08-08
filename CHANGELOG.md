@@ -9,6 +9,24 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.33] — 2026-08-08
+
+### Fixed
+
+- **"View full case summary" was missing History, Initial vital signs,
+  and Examination findings** (tester bug report 2.9.15 #16). Three
+  independent causes: (1) the modal read history keys nothing ever
+  wrote — it now resolves through a shared `resolveCaseHistory()` built
+  on the prompt builder's existing alias table, covering both
+  `structuredHistory` and `clinicalRecords.history` shapes; (2) the
+  vitals section implemented none of the monitor's fallback chain —
+  it now mirrors it (initialVitals → earliest scenario frame → legacy
+  flat config); (3) exam findings were fetched from an endpoint no
+  client ever wrote to — performing an exam now persists the finding
+  (best-effort, non-blocking) and the renderer reads the real
+  `body_region`/`finding` columns. ManikinPanel previously never even
+  knew the session id; it is now threaded through PhysicalExamScreen.
+
 ## [2.9.32] — 2026-08-08
 
 ### Added

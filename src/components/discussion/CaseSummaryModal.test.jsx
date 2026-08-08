@@ -98,3 +98,124 @@ describe('CaseSummaryModal — treatments debrief (bug report 2.9.15 #10)', () =
         expect(screen.queryByText('No expected treatments were missed.')).toBeNull();
     });
 });
+
+// Regression lock: history, initial vitals and exam findings were all missing
+// from the case summary (bug report 2.9.15 #16). Three independent causes:
+//   1. History read structuredHistory.historyOfPresentIllness /
+//      .pastMedicalHistory — keys nothing in the repo ever writes — and read
+//      structuredHistory only, while seeded/imported cases carry only
+//      clinicalRecords.history (hpi / pastMedical).
+//   2. Vitals read cfg.initialVitals || cfg.initial_vitals only, ignoring the
+//      scenario-first-frame and legacy-flat fallbacks PatientMonitor uses, so
+//      scenario-only cases hid the whole section.
+//   3. Exam findings rendered f.region_id / f.finding_text, but
+//      physical_exam_findings rows carry body_region / finding.
+describe('CaseSummaryModal — history, vitals, exam findings (bug report 2.9.15 #16)', () => {
+    it('renders history from a clinicalRecords.history-only case', async () => {
+        mockEndpoints({ debrief: null });
+        renderWithProviders(
+            <CaseSummaryModal
+                activeCase={{
+                    id: 'case-1',
+                    name: 'STEMI',
+                    config: {
+                        clinicalRecords: {
+                            history: {
+                                chiefComplaint: 'Crushing chest pain for 2 hours',
+                                hpi: 'Acute onset substernal chest pain radiating to the left arm.',
+                                pastMedical: 'T2DM, HTN, hyperlipidemia',
+                            },
+                        },
+                    },
+                }}
+                sessionId="sess-1"
+                onClose={() => {}}
+            />
+        );
+
+        expect(await screen.findByText('Crushing chest pain for 2 hours')).toBeTruthy();
+        expect(screen.getByText('Acute onset substernal chest pain radiating to the left arm.')).toBeTruthy();
+        expect(screen.getByText('T2DM, HTN, hyperlipidemia')).toBeTruthy();
+    });
+
+    it('renders history from a structuredHistory-only case (wizard key aliases)', async () => {
+        mockEndpoints({ debrief: null });
+        renderWithProviders(
+            <CaseSummaryModal
+                activeCase={{
+                    id: 'case-2',
+                    name: 'Sepsis',
+                    config: {
+                        structuredHistory: {
+                            chiefComplaint: 'Fever and confusion',
+                            hpi: 'Two days of fever, rigors and worsening confusion.',
+                            pmh: 'CKD stage 3',
+                        },
+                    },
+                }}
+                sessionId="sess-1"
+                onClose={() => {}}
+            />
+        );
+
+        expect(await screen.findByText('Fever and confusion')).toBeTruthy();
+        expect(screen.getByText('Two days of fever, rigors and worsening confusion.')).toBeTruthy();
+        expect(screen.getByText('CKD stage 3')).toBeTruthy();
+    });
+
+    it('renders initial vitals from a scenario-first-frame-only case', async () => {
+        mockEndpoints({ debrief: null });
+        renderWithProviders(
+            <CaseSummaryModal
+                activeCase={{
+                    id: 'case-3',
+                    name: 'Shock',
+                    config: {},
+                    // Frames deliberately out of order — the resolver must pick
+                    // the earliest frame, like PatientMonitor does.
+                    scenario: {
+                        timeline: [
+                            { time: 120, params: { hr: 150, spo2: 84 } },
+                            { time: 0, params: { hr: 128, spo2: 91 } },
+                        ],
+                    },
+                }}
+                sessionId="sess-1"
+                onClose={() => {}}
+            />
+        );
+
+        expect(await screen.findByText('Initial vital signs')).toBeTruthy();
+        expect(screen.getByText('128 bpm')).toBeTruthy();
+        expect(screen.getByText('91%')).toBeTruthy();
+    });
+
+    it('renders exam findings from rows shaped {body_region, finding}', async () => {
+        apiFetchMock.mockImplementation((path) => {
+            if (path.endsWith('/exam-findings')) {
+                // Shape of the real GET: SELECT * over physical_exam_findings.
+                return Promise.resolve({
+                    findings: [{
+                        id: 1,
+                        body_region: 'chest',
+                        exam_type: 'auscultation',
+                        finding: 'Bilateral basilar crackles',
+                        is_abnormal: 1,
+                    }],
+                });
+            }
+            return Promise.resolve({});
+        });
+        renderWithProviders(
+            <CaseSummaryModal
+                activeCase={{ id: 'case-4', name: 'CHF', config: {} }}
+                sessionId="sess-1"
+                onClose={() => {}}
+            />
+        );
+
+        expect(await screen.findByText('Bilateral basilar crackles')).toBeTruthy();
+        expect(screen.getByText('chest')).toBeTruthy();
+        expect(screen.queryByText('No examinations recorded.')).toBeNull();
+    });
+});

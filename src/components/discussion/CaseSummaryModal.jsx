@@ -3,11 +3,42 @@ import { useTranslation } from 'react-i18next';
 import { X, Activity, Award, FlaskConical, Pill, Stethoscope, Image as ImageIcon } from 'lucide-react';
 import { apiFetch } from '../../services/apiClient';
 import { parseConfig } from '../../utils/parseConfig.js';
+import { resolveCaseHistory } from '../../utils/casePromptContext.js';
 
 async function safeFetch(path) {
     try {
         return await apiFetch(path);
     } catch { return null; }
+}
+
+// Initial-vitals resolution mirrors PatientMonitor's priority chain (the
+// "Load initial vitals and scenario from case data" effect in
+// src/components/monitor/PatientMonitor.jsx): initialVitals → scenario
+// first-frame params → legacy flat config keys (hr/spo2/rr/temp/sbp/dbp/etco2).
+// Duplicated locally rather than extracted because the monitor's chain is
+// pinned by source-contract tests — keep the two in sync if either changes.
+// (bug report 2.9.15 #16: the modal read only initialVitals, so scenario-only
+// and legacy-flat cases hid the whole section.)
+function resolveInitialVitals(activeCase, cfg) {
+    const configured = cfg.initialVitals || cfg.initial_vitals;
+    if (configured && Object.keys(configured).length > 0) return configured;
+
+    const timeline = activeCase?.scenario?.timeline;
+    const firstFrame = Array.isArray(timeline) && timeline.length > 0
+        ? [...timeline].sort((a, b) => a.time - b.time)[0]
+        : null;
+    if (firstFrame?.params && Object.keys(firstFrame.params).length > 0) return firstFrame.params;
+
+    const legacy = {
+        hr: cfg.hr,
+        spo2: cfg.spo2,
+        rr: cfg.rr,
+        temp: cfg.temp,
+        bpSys: cfg.sbp ?? cfg.bpSys,
+        bpDia: cfg.dbp ?? cfg.bpDia,
+        etco2: cfg.etco2,
+    };
+    return Object.fromEntries(Object.entries(legacy).filter(([, value]) => value != null));
 }
 
 // Pulls together the case context + everything the session captured so the
@@ -38,10 +69,13 @@ export default function CaseSummaryModal({ activeCase, sessionId, onClose }) {
 
     const cfg = parseConfig(activeCase?.config);
     const demographics = cfg.demographics || {};
-    const history = cfg.structuredHistory || {};
-    // Configs store initial vitals under `initialVitals` (camelCase); accept the
-    // legacy `initial_vitals` snake_case too for older rows.
-    const initial = cfg.initialVitals || cfg.initial_vitals || {};
+    // Bug report 2.9.15 #16: this used to read cfg.structuredHistory only, via
+    // keys (historyOfPresentIllness / pastMedicalHistory) nothing ever wrote —
+    // so History rendered empty for every case. resolveCaseHistory merges
+    // structuredHistory (all key aliases) with the canonical runtime mirror
+    // clinicalRecords.history, same as the AI prompt builders.
+    const history = resolveCaseHistory(cfg);
+    const initial = resolveInitialVitals(activeCase, cfg);
     // Prefer structured chief complaint, then the denormalized column. Never
     // the case description — see PatientSummaryCard for why (bug #2).
     const chiefComplaint = history.chiefComplaint || activeCase?.chief_complaint || null;
@@ -76,8 +110,8 @@ export default function CaseSummaryModal({ activeCase, sessionId, onClose }) {
 
                     <Section title={t('section_history')} icon={<Stethoscope className="w-4 h-4" />}>
                         <Row label={t('chief_complaint')} value={chiefComplaint} block />
-                        <Row label={t('hpi')} value={history.historyOfPresentIllness} block />
-                        <Row label={t('label_pmh')} value={history.pastMedicalHistory} block />
+                        <Row label={t('hpi')} value={history.hpi} block />
+                        <Row label={t('label_pmh')} value={history.pmh} block />
                         <Row label={t('label_medications')} value={history.medications} block />
                         <Row label={t('label_allergies')} value={history.allergies} block />
                     </Section>
@@ -100,11 +134,16 @@ export default function CaseSummaryModal({ activeCase, sessionId, onClose }) {
                     ) : (
                         <>
                             <Section title={t('section_exam_findings')} icon={<Stethoscope className="w-4 h-4" />}>
+                                {/* Bug report 2.9.15 #16: physical_exam_findings rows carry
+                                    `body_region` and `finding` (see the INSERT in
+                                    server/routes/cases-routes.js) — the old region_id /
+                                    finding_text keys never existed, so every row rendered
+                                    blank. */}
                                 <FindingsList items={data.exams?.findings || data.exams?.exam_findings} render={(f, i) => (
                                     <li key={f.id ?? i} className="text-sm text-slate-200">
-                                        <span className="font-medium text-slate-100">{f.region_id || f.region || f.exam_type}</span>
-                                        {f.exam_type && f.region_id ? ` — ${f.exam_type}` : ''}
-                                        {f.finding_text && <>: <span className="text-slate-300">{f.finding_text}</span></>}
+                                        <span className="font-medium text-slate-100">{f.body_region || f.exam_type}</span>
+                                        {f.exam_type && f.body_region ? ` — ${f.exam_type}` : ''}
+                                        {f.finding && <>: <span className="text-slate-300">{f.finding}</span></>}
                                     </li>
                                 )} empty={t('no_exams_recorded')} />
                             </Section>

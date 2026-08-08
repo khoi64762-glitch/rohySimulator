@@ -75,6 +75,7 @@ export default function PhysicalExamScreen({
                     physicalExam={physicalExam}
                     patientGender={patientGender}
                     onExamPerformed={onExamPerformed}
+                    sessionId={sessionId}
                 />
             </div>
 

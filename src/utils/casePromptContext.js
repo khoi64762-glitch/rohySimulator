@@ -32,6 +32,33 @@ const STRUCTURED_FIELDS = [
     { key: 'additionalNotes', label: 'Additional Notes for AI', aliases: ['additionalNotes', 'aiNotes'] },
 ];
 
+// Resolve a case config's history to one flat object keyed by the canonical
+// STRUCTURED_FIELDS keys (chiefComplaint, hpi, pmh, medications, allergies, …),
+// regardless of which shape the case was authored/stored in:
+//
+//   - wizard cases write `structuredHistory` (with historical key aliases like
+//     historyOfPresentIllness / pastMedicalHistory),
+//   - seeded/imported cases carry only the canonical runtime mirror
+//     `clinicalRecords.history` (keys hpi / pastMedical / …).
+//
+// structuredHistory wins, clinicalRecords.history fills the gaps — the same
+// precedence the prompt builders in this file use. Only non-empty fields are
+// present in the result. Shared with CaseSummaryModal (bug report 2.9.15 #16),
+// which previously read keys nothing ever wrote and read structuredHistory only.
+export function resolveCaseHistory(config = {}) {
+    const structured = (config?.structuredHistory && typeof config.structuredHistory === 'object')
+        ? config.structuredHistory : {};
+    const clinicalHistory = (config?.clinicalRecords?.history && typeof config.clinicalRecords.history === 'object')
+        ? config.clinicalRecords.history : {};
+    const resolved = {};
+    for (const field of STRUCTURED_FIELDS) {
+        const value = firstValue(structured, field.aliases)
+            || (field.clinicalKey ? clean(clinicalHistory[field.clinicalKey]) : '');
+        if (value) resolved[field.key] = value;
+    }
+    return resolved;
+}
+
 // Allergies are authored in two places — the demographics tab and the
 // structured-history tab. Historically only the structured-history value
 // reached the prompt, so demographics-tab entries were silently dropped.
@@ -273,6 +300,9 @@ function formatClinicalRecords(config = {}, { respectAiAccess = true } = {}) {
         if (meds) sections.push(['Current Medications', meds]);
     }
 
+    // The Records → Radiology UI surface was removed (bug report 2.9.15 #6 —
+    // no authoring path could populate it), but imported/hand-authored case
+    // JSON with clinicalRecords.radiology is still honoured here for AI context.
     if (allowed('radiology', false) && Array.isArray(records.radiology) && records.radiology.length) {
         const radiology = formatRadiologyAsMarkdown(records.radiology);
         if (radiology) sections.push(['Radiology Studies', radiology]);
