@@ -49,7 +49,7 @@ const onCallConsultant = {
     status: 'absent',
     availability_type: 'on-call',
     available_from_minute: 0,
-    enabled: 1,
+    enabled: true,
     config: JSON.stringify({}),
 };
 

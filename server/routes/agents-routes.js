@@ -1111,6 +1111,11 @@ router.get('/sessions/:sessionId/agents', authenticateToken, async (req, res) =>
 
         const parsed = agents.map(a => ({
             agent_type: a.agent_type,
+            // The query already filters `ca.enabled = 1`, so this is always
+            // true — but the client checks `agent.enabled` explicitly, and an
+            // absent field reads as disabled (every agent showed "Not
+            // Available"). Keep the contract honest.
+            enabled: a.enabled === 1,
             name: a.name_override || a.template_name,
             role_title: a.role_title,
             avatar_url: a.avatar_url,

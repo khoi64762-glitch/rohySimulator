@@ -269,4 +269,20 @@ describe('POST /sessions/:id/agents/:type/page — arrival timing', () => {
         expect(nurse.status).toBe('present');
         expect(nurse.arrives_at).toBeFalsy();
     });
+
+    // Regression lock: session-agents projection omitted 'enabled'; client
+    // treated undefined as disabled (bug report 2.9.15 #11). The query only
+    // returns rows with ca.enabled = 1, so every listed agent must carry an
+    // explicit boolean true — never undefined.
+    it('includes enabled: true on every listed session agent', async () => {
+        const res = await fetch(`${server.baseUrl}/api/sessions/${sessionId}/agents`, {
+            headers: { authorization: `Bearer ${token}` }
+        });
+        expect(res.status).toBe(200);
+        const { agents } = await res.json();
+        expect(agents.length).toBeGreaterThan(0);
+        agents.forEach((a) => {
+            expect(a.enabled).toBe(true);
+        });
+    });
 });

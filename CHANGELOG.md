@@ -9,6 +9,20 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.22] — 2026-08-08
+
+### Fixed
+
+- **Enabled AI agents showed "Not Available" during simulation — no Call
+  button, dead composer** (tester bug report 2.9.15 #11). The
+  session-agents endpoint's hand-built projection never included
+  `enabled`; the client treats an absent field as disabled, so every
+  agent was unreachable even though the SQL only returns enabled ones.
+  The projection now emits `enabled: true` and a server regression test
+  pins the field; the 2.9.19 paging test's fixture (which hardcoded a
+  shape the server never produced, masking this) now matches the real
+  wire format.
+
 ## [2.9.21] — 2026-08-08
 
 ### Fixed
