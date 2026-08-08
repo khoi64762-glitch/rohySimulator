@@ -16,11 +16,15 @@ const RECORD_TABS = [
 // Note: `labs` was removed in 2026-05 — there is no `clinicalRecords.labs`
 // data field, so the flag was dead UI. Lab results during a session live in
 // the lab_results table and are exposed through a different surface.
+// `radiology` followed in 2026-08 for the same reason (bug report 2.9.15 #6,
+// delete decision): no authoring UI or schema can populate
+// `clinicalRecords.radiology`, so the checkbox gated a field that could never
+// have data. Imported/hand-authored case JSON carrying radiology records is
+// still honoured by the AI prompt builder and the radiology order fallback.
 const DEFAULT_AI_ACCESS = {
     history: true,
     physicalExam: true,
     medications: true,
-    radiology: false,
     procedures: true,
     notes: false
 };
@@ -181,7 +185,6 @@ export default function ClinicalRecordsEditor({ caseData, _setCaseData, updateCo
                         { key: 'history', label: t('ai_access_history') },
                         { key: 'physicalExam', label: t('ai_access_physical_exam') },
                         { key: 'medications', label: t('ai_access_medications') },
-                        { key: 'radiology', label: t('ai_access_radiology') },
                         { key: 'procedures', label: t('ai_access_procedures') },
                         { key: 'notes', label: t('ai_access_notes') }
                     ].map(item => (

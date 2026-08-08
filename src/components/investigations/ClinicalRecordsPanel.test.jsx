@@ -91,3 +91,18 @@ describe('ClinicalRecordsPanel — History accordion groups', () => {
         expect(screen.getByText(/No history information available/i)).toBeInTheDocument();
     });
 });
+
+describe('ClinicalRecordsPanel — tab list', () => {
+    // Regression lock: Records radiology tab was a permanently-grey stub — deleted per product decision (bug report 2.9.15 #6)
+    it('renders history/physical/medications/procedures/notes tabs and no radiology tab', () => {
+        // Empty config: the tab strip renders regardless of case content, and
+        // without history data no accordion headers compete for button names.
+        renderWithProviders(<ClinicalRecordsPanel caseConfig={{}} />);
+        expect(screen.getByRole('button', { name: /^History$/ })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /^Past Physical Exam$/ })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /^Medications$/ })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /^Procedures$/ })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /^Notes$/ })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /Radiology/i })).not.toBeInTheDocument();
+    });
+});

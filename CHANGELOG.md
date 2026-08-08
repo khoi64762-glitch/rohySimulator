@@ -9,6 +9,18 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.31] — 2026-08-08
+
+### Removed
+
+- **The permanently-grey Records → Radiology stub** (tester bug report
+  2.9.15 #6, product decision: delete rather than implement). The
+  student tab and the authoring AI-access checkbox gated a field —
+  `clinicalRecords.radiology` — that no UI could ever populate. The
+  data reads stay: imported or hand-authored case JSON containing past
+  radiology records still feeds the AI prompt and radiology order
+  resolution.
+
 ## [2.9.30] — 2026-08-08
 
 ### Added

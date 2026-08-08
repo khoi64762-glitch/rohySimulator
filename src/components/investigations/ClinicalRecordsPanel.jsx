@@ -1,23 +1,25 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FileText, Stethoscope, Pill, Image, Syringe, ClipboardList, ChevronDown, ChevronUp, ChevronRight, X, ZoomIn } from 'lucide-react';
+import { FileText, Stethoscope, Pill, Syringe, ClipboardList, ChevronDown, ChevronUp, ChevronRight } from 'lucide-react';
 import { HISTORY_GROUPS as CANONICAL_HISTORY_GROUPS } from '../../data/historyGroups';
 import EventLogger from '../../services/eventLogger';
 
 // Tab id → readable label for the analytics event (mirrors RECORD_TABS).
 const RECORD_TAB_LABELS = {
     history: 'History', physical: 'Past Physical Exam', medications: 'Medications',
-    radiology: 'Radiology', procedures: 'Procedures', notes: 'Notes',
+    procedures: 'Procedures', notes: 'Notes',
 };
 
 // `labelKey` is the i18n key (namespace: investigations) for the visible
 // tab label; the analytics label above stays hardcoded English so events
 // remain comparable across UI languages.
+// Note: the Radiology tab was deleted per product decision (bug report
+// 2.9.15 #6) — `clinicalRecords.radiology` has no authoring UI or schema
+// writer, so the tab was a permanently-grey stub for every case.
 const RECORD_TABS = [
     { id: 'history', labelKey: 'tab_history', icon: FileText },
     { id: 'physical', labelKey: 'tab_physical', icon: Stethoscope },
     { id: 'medications', labelKey: 'tab_medications', icon: Pill },
-    { id: 'radiology', labelKey: 'tab_radiology', icon: Image },
     { id: 'procedures', labelKey: 'tab_procedures', icon: Syringe },
     { id: 'notes', labelKey: 'tab_notes', icon: ClipboardList }
 ];
@@ -55,13 +57,10 @@ export default function ClinicalRecordsPanel({ caseConfig, initialTab = 'history
     const toggleHistoryGroup = (key) => {
         setOpenHistoryGroups(prev => ({ ...prev, [key]: !prev[key] }));
     };
-    const [viewingImage, setViewingImage] = useState(null);
-
     const records = caseConfig?.clinicalRecords || {};
     const history = records.history || {};
     const physicalExam = records.physicalExam || {};
     const medications = records.medications || [];
-    const radiology = records.radiology || [];
     const procedures = records.procedures || [];
     const notes = records.notes || [];
 
@@ -74,8 +73,6 @@ export default function ClinicalRecordsPanel({ caseConfig, initialTab = 'history
                 return Object.values(physicalExam).some(v => v && v.trim());
             case 'medications':
                 return medications.length > 0;
-            case 'radiology':
-                return radiology.length > 0;
             case 'procedures':
                 return procedures.length > 0;
             case 'notes':
@@ -257,65 +254,6 @@ export default function ClinicalRecordsPanel({ caseConfig, initialTab = 'history
                     </div>
                 )}
 
-                {/* RADIOLOGY TAB */}
-                {activeTab === 'radiology' && (
-                    <div>
-                        {radiology.length > 0 ? (
-                            <div className="space-y-4">
-                                {radiology.map((study, idx) => (
-                                    <div key={study.id || idx} className="bg-neutral-800/50 rounded-lg border border-neutral-700 overflow-hidden">
-                                        <div className="px-3 py-2 bg-neutral-800 flex items-center justify-between">
-                                            <div className="flex items-center gap-2">
-                                                <Image className="w-4 h-4 text-cyan-400" />
-                                                <span className="text-sm font-medium text-white">{study.type}</span>
-                                                {study.name && (
-                                                    <span className="text-xs text-neutral-400">- {study.name}</span>
-                                                )}
-                                            </div>
-                                            {study.date && (
-                                                <span className="text-xs text-neutral-500">{study.date}</span>
-                                            )}
-                                        </div>
-                                        <div className="p-3">
-                                            {study.imageUrl && (
-                                                <div
-                                                    className="relative mb-3 group cursor-pointer"
-                                                    onClick={() => setViewingImage(study.imageUrl)}
-                                                >
-                                                    <img
-                                                        src={study.imageUrl}
-                                                        alt={study.type}
-                                                        className="max-h-48 rounded border border-neutral-600 object-contain mx-auto"
-                                                    />
-                                                    <div className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded">
-                                                        <ZoomIn className="w-8 h-8 text-white" />
-                                                    </div>
-                                                </div>
-                                            )}
-                                            {study.findings && (
-                                                <div className="mb-2">
-                                                    <h5 className="text-xs font-bold text-neutral-400 uppercase">{t('findings')}</h5>
-                                                    <p className="text-sm text-neutral-300">{study.findings}</p>
-                                                </div>
-                                            )}
-                                            {study.interpretation && (
-                                                <div>
-                                                    <h5 className="text-xs font-bold text-neutral-400 uppercase">{t('interpretation')}</h5>
-                                                    <p className="text-sm text-neutral-300">{study.interpretation}</p>
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        ) : (
-                            <div className="text-center py-8 text-neutral-500">
-                                {t('no_radiology')}
-                            </div>
-                        )}
-                    </div>
-                )}
-
                 {/* PROCEDURES TAB */}
                 {activeTab === 'procedures' && (
                     <div>
@@ -396,27 +334,6 @@ export default function ClinicalRecordsPanel({ caseConfig, initialTab = 'history
                     </div>
                 )}
             </div>
-
-            {/* Image Viewer Modal */}
-            {viewingImage && (
-                <div
-                    className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
-                    onClick={() => setViewingImage(null)}
-                >
-                    <button
-                        className="absolute top-4 right-4 text-white hover:text-neutral-300"
-                        onClick={() => setViewingImage(null)}
-                    >
-                        <X className="w-8 h-8" />
-                    </button>
-                    <img
-                        src={viewingImage}
-                        alt={t('full_size_view')}
-                        className="max-w-full max-h-full object-contain"
-                        onClick={(e) => e.stopPropagation()}
-                    />
-                </div>
-            )}
         </div>
     );
 }
