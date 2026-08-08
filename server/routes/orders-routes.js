@@ -1738,7 +1738,7 @@ router.get('/sessions/:sessionId/available-treatments', authenticateToken, (req,
                 });
 
                 // Merge master data with case-specific configuration
-                const treatments = effects.map(effect => {
+                let treatments = effects.map(effect => {
                     const key = `${effect.treatment_type}:${effect.treatment_name}`;
                     const caseOverride = caseTreatmentMap[key];
 
@@ -1753,6 +1753,24 @@ router.get('/sessions/:sessionId/available-treatments', authenticateToken, (req,
                         custom_effect_override: caseOverride?.custom_effect_override ? JSON.parse(caseOverride.custom_effect_override) : null
                     };
                 });
+
+                // Bug report 2.9.15 #7/#9: the grading key (expected/contraindicated
+                // flags, points, feedback) and hidden treatments must never reach
+                // students — even without UI badges the payload is readable in
+                // DevTools. Educators and above keep the full rows for case preview.
+                if (!hasRoleAtLeast(req.user, ROLE_RANKS.educator)) {
+                    treatments = treatments
+                        .filter(t => !!t.is_available)
+                        .map(t => {
+                            const safe = { ...t };
+                            delete safe.is_expected;
+                            delete safe.is_contraindicated;
+                            delete safe.points_if_ordered;
+                            delete safe.feedback_if_ordered;
+                            delete safe.feedback_if_missed;
+                            return safe;
+                        });
+                }
 
                 // Group by type - use treatment_type values as keys for consistency
                 const grouped = {
@@ -2252,6 +2270,21 @@ router.get('/sessions/:sessionId/active-effects', authenticateToken, async (req,
     });
 });
 
+// Bug report 2.9.15 #8: is_available / is_expected / is_contraindicated are
+// three independent BOOLEAN columns, so conflicting combinations used to be
+// storable. Normalisation rule (mirrored by the CaseTreatmentConfig UI):
+// hidden wins — a hidden treatment is neither expected nor contraindicated;
+// if both expected and contraindicated arrive on a visible treatment, the
+// safety flag (contraindicated) wins.
+function normalizeCaseTreatmentFlags(t) {
+    const is_available = (t.is_available ?? true) ? 1 : 0;
+    let is_expected = t.is_expected ? 1 : 0;
+    const is_contraindicated = t.is_contraindicated ? 1 : 0;
+    if (!is_available) return { is_available: 0, is_expected: 0, is_contraindicated: 0 };
+    if (is_expected && is_contraindicated) is_expected = 0;
+    return { is_available, is_expected, is_contraindicated };
+}
+
 // PUT /api/cases/:caseId/treatments - Configure case treatments (admin)
 router.put('/cases/:caseId/treatments', authenticateToken, requireEducator, (req, res) => {
     const { caseId } = req.params;
@@ -2298,14 +2331,15 @@ router.put('/cases/:caseId/treatments', authenticateToken, requireEducator, (req
             let pending = treatments.length;
 
             treatments.forEach(t => {
+                const flags = normalizeCaseTreatmentFlags(t);
                 dbAdapter.run(insertSql, [
                     caseId,
                     t.treatment_type,
                     t.medication_id || null,
                     t.treatment_name,
-                    t.is_available ?? 1,
-                    t.is_expected ?? 0,
-                    t.is_contraindicated ?? 0,
+                    flags.is_available,
+                    flags.is_expected,
+                    flags.is_contraindicated,
                     t.points_if_ordered ?? 0,
                     t.feedback_if_ordered || null,
                     t.feedback_if_missed || null,

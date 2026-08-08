@@ -284,12 +284,18 @@ export default function CaseTreatmentConfig({ caseId, caseTreatments = [], onUpd
                                         </div>
                                     )}
 
-                                    {/* Configuration Options */}
+                                    {/* Configuration Options — a mutually exclusive status:
+                                        expected | contraindicated | hidden | neutral.
+                                        Each handler writes all three flags so the stored row
+                                        can never carry a conflicting combination
+                                        (bug report 2.9.15 #8; the PUT handler enforces the
+                                        same invariant server-side). */}
                                     <div className="grid grid-cols-3 gap-2">
                                         <button
                                             onClick={() => updateTreatmentConfig(treatment, {
                                                 is_expected: !(config?.is_expected),
-                                                is_contraindicated: false
+                                                is_contraindicated: false,
+                                                is_available: true
                                             })}
                                             className={`px-3 py-2 rounded text-xs font-bold transition-colors ${
                                                 config?.is_expected
@@ -303,7 +309,8 @@ export default function CaseTreatmentConfig({ caseId, caseTreatments = [], onUpd
                                         <button
                                             onClick={() => updateTreatmentConfig(treatment, {
                                                 is_contraindicated: !(config?.is_contraindicated),
-                                                is_expected: false
+                                                is_expected: false,
+                                                is_available: true
                                             })}
                                             className={`px-3 py-2 rounded text-xs font-bold transition-colors ${
                                                 config?.is_contraindicated
@@ -316,7 +323,9 @@ export default function CaseTreatmentConfig({ caseId, caseTreatments = [], onUpd
                                         </button>
                                         <button
                                             onClick={() => updateTreatmentConfig(treatment, {
-                                                is_available: !(config?.is_available ?? true)
+                                                is_available: !(config ? config.is_available : true),
+                                                is_expected: false,
+                                                is_contraindicated: false
                                             })}
                                             className={`px-3 py-2 rounded text-xs font-bold transition-colors ${
                                                 config && !config.is_available

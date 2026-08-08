@@ -13,7 +13,7 @@ model.
 | `PUT` | `/api/cases/:caseId/labs` | `authenticateToken, requireEducator` | `server/routes/orders-routes.js:586` |
 | `DELETE` | `/api/cases/:caseId/labs/:labId` | `authenticateToken, requireEducator` | `server/routes/orders-routes.js:762` |
 | `PUT` | `/api/cases/:caseId/labs/:labId` | `authenticateToken, requireEducator` | `server/routes/orders-routes.js:688` |
-| `PUT` | `/api/cases/:caseId/treatments` | `authenticateToken, requireEducator` | `server/routes/orders-routes.js:2256` |
+| `PUT` | `/api/cases/:caseId/treatments` | `authenticateToken, requireEducator` | `server/routes/orders-routes.js:2289` |
 | `GET` | `/api/cases/:id/investigations` | `authenticateToken` | `server/routes/orders-routes.js:48` |
 | `POST` | `/api/investigations` | `authenticateToken, requireEducator` | `server/routes/orders-routes.js:62` |
 | `GET` | `/api/labs/all` | `authenticateToken` | `server/routes/orders-routes.js:344` |
@@ -31,17 +31,17 @@ model.
 | `GET` | `/api/radiology-database` | `authenticateToken` | `server/routes/orders-routes.js:1376` |
 | `POST` | `/api/sessions/:id/order` | `authenticateToken` | `server/routes/orders-routes.js:77` |
 | `GET` | `/api/sessions/:id/orders` | `authenticateToken` | `server/routes/orders-routes.js:129` |
-| `GET` | `/api/sessions/:sessionId/active-effects` | `authenticateToken` | `server/routes/orders-routes.js:2150` |
-| `POST` | `/api/sessions/:sessionId/administer/:orderId` | `authenticateToken` | `server/routes/orders-routes.js:1897` |
+| `GET` | `/api/sessions/:sessionId/active-effects` | `authenticateToken` | `server/routes/orders-routes.js:2168` |
+| `POST` | `/api/sessions/:sessionId/administer/:orderId` | `authenticateToken` | `server/routes/orders-routes.js:1915` |
 | `GET` | `/api/sessions/:sessionId/available-labs` | `authenticateToken` | `server/routes/orders-routes.js:816` |
 | `GET` | `/api/sessions/:sessionId/available-radiology` | `authenticateToken` | `server/routes/orders-routes.js:1411` |
 | `GET` | `/api/sessions/:sessionId/available-treatments` | `authenticateToken` | `server/routes/orders-routes.js:1705` |
-| `PUT` | `/api/sessions/:sessionId/discontinue/:orderId` | `authenticateToken` | `server/routes/orders-routes.js:2089` |
+| `PUT` | `/api/sessions/:sessionId/discontinue/:orderId` | `authenticateToken` | `server/routes/orders-routes.js:2107` |
 | `GET` | `/api/sessions/:sessionId/lab-results` | `authenticateToken` | `server/routes/orders-routes.js:1264` |
 | `PUT` | `/api/sessions/:sessionId/labs/:labId` | `authenticateToken, requireEducator` | `server/routes/orders-routes.js:1309` |
 | `POST` | `/api/sessions/:sessionId/order-labs` | `authenticateToken` | `server/routes/orders-routes.js:957` |
 | `POST` | `/api/sessions/:sessionId/order-radiology` | `authenticateToken` | `server/routes/orders-routes.js:1501` |
-| `POST` | `/api/sessions/:sessionId/order-treatment` | `authenticateToken` | `server/routes/orders-routes.js:1775` |
+| `POST` | `/api/sessions/:sessionId/order-treatment` | `authenticateToken` | `server/routes/orders-routes.js:1793` |
 | `GET` | `/api/sessions/:sessionId/radiology-orders` | `authenticateToken` | `server/routes/orders-routes.js:1461` |
-| `GET` | `/api/sessions/:sessionId/treatment-orders` | `authenticateToken` | `server/routes/orders-routes.js:2124` |
-| `GET` | `/api/treatment-effects` | `authenticateToken` | `server/routes/orders-routes.js:2337` |
+| `GET` | `/api/sessions/:sessionId/treatment-orders` | `authenticateToken` | `server/routes/orders-routes.js:2142` |
+| `GET` | `/api/treatment-effects` | `authenticateToken` | `server/routes/orders-routes.js:2371` |

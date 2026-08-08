@@ -9,6 +9,27 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.28] — 2026-08-08
+
+### Fixed
+
+- **Students received the treatment answer key** (tester bug report
+  2.9.15 #7, plus #8 and #9). The available-treatments payload carried
+  `is_expected`, `is_contraindicated`, points and both feedback texts to
+  every authenticated caller — readable in DevTools even without the
+  "Expected"/"CI" badges the panel also rendered. Below educator rank
+  the payload now drops the grading fields AND hidden treatments
+  (#9 — `is_available` was authored, stored, transmitted and then
+  ignored); the badges and pre-order row tinting are gone, which also
+  kills the stray "00" (React renders integer SQLite booleans — two
+  adjacent `{0 && …}` guards printed literal zeros).
+
+- **Hide + Expected/Contraindicated could be selected together**
+  (#8). The three flags are now a mutually exclusive status in the
+  authoring UI, enforced server-side by a normalization guard on save:
+  hidden clears both statuses; if expected and contraindicated both
+  arrive, the safety flag (contraindicated) wins.
+
 ## [2.9.27] — 2026-08-08
 
 ### Fixed

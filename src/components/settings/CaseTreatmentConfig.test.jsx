@@ -134,3 +134,71 @@ describe('CaseTreatmentConfig apiFetch migration', () => {
         await waitFor(() => expect(toast.error).toHaveBeenCalledWith('forbidden'));
     });
 });
+
+// Regression lock: Hide was not mutually exclusive with Expected/Contraindicated (bug report 2.9.15 #8)
+//
+// The three toggles used to write their booleans independently: Hide only
+// flipped is_available, so {is_available: false, is_expected: true} was a
+// reachable — and savable — combination. The status is now mutually
+// exclusive (expected | contraindicated | hidden | neutral): every handler
+// writes all three flags.
+describe('CaseTreatmentConfig mutual exclusion (bug report 2.9.15 #8)', () => {
+    async function expandAspirin() {
+        renderWithProviders(
+            <CaseTreatmentConfig caseId="case-1" caseTreatments={[]} />,
+            { withAuth: false, withNotifications: false, withToast: false }
+        );
+        fireEvent.click(await screen.findByText('Aspirin'));
+    }
+
+    async function savedTreatment() {
+        fireEvent.click(screen.getByRole('button', { name: /save treatment config/i }));
+        await waitFor(() => {
+            expect(treatmentCalls().some(([, init]) => init?.method === 'PUT')).toBe(true);
+        });
+        const [, init] = treatmentCalls().find(([, callInit]) => callInit?.method === 'PUT');
+        return JSON.parse(init.body).treatments[0];
+    }
+
+    it('selecting Hide clears Expected', async () => {
+        await expandAspirin();
+
+        fireEvent.click(screen.getByRole('button', { name: 'Expected' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Hide' }));
+
+        expect(await savedTreatment()).toMatchObject({
+            treatment_name: 'Aspirin',
+            is_available: false,
+            is_expected: false,
+            is_contraindicated: false,
+        });
+    });
+
+    it('selecting Contraindicated after Hide restores availability', async () => {
+        await expandAspirin();
+
+        fireEvent.click(screen.getByRole('button', { name: 'Hide' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Contraindicated' }));
+
+        expect(await savedTreatment()).toMatchObject({
+            treatment_name: 'Aspirin',
+            is_available: true,
+            is_expected: false,
+            is_contraindicated: true,
+        });
+    });
+
+    it('Expected and Contraindicated clear each other', async () => {
+        await expandAspirin();
+
+        fireEvent.click(screen.getByRole('button', { name: 'Expected' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Contraindicated' }));
+
+        expect(await savedTreatment()).toMatchObject({
+            treatment_name: 'Aspirin',
+            is_available: true,
+            is_expected: false,
+            is_contraindicated: true,
+        });
+    });
+});

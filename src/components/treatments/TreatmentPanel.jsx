@@ -90,8 +90,11 @@ export default function TreatmentPanel({ sessionId, _caseId, onEffectsUpdate }) 
         }
     };
 
-    // Filter treatments by search query
+    // Filter treatments by search query. Treatments hidden for the case
+    // (is_available 0/false) are already dropped server-side for students;
+    // filter defensively here too — the flag arrives as a SQLite 0/1 integer.
     const filteredTreatments = (treatments[activeCategory] || []).filter(t => {
+        if (t.is_available === 0 || t.is_available === false) return false;
         if (!searchQuery) return true;
         return t.treatment_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                t.description?.toLowerCase().includes(searchQuery.toLowerCase());
@@ -240,7 +243,11 @@ export default function TreatmentPanel({ sessionId, _caseId, onEffectsUpdate }) 
                     </button>
                 </div>
 
-                {is_contraindicated && (
+                {/* Educator preview only: students never receive is_contraindicated
+                    (server strips it), so the guard is absent → falsy for them.
+                    !! coercion: SQLite booleans arrive as 0/1 and {0 && …} renders
+                    a literal "0" in JSX. */}
+                {!!is_contraindicated && (
                     <div className="flex items-center gap-2 p-2 bg-red-900/30 border border-red-600 rounded text-red-300 text-sm">
                         <AlertTriangle className="w-4 h-4" />
                         <span>{t('contraindicated_warning')}</span>
@@ -551,10 +558,6 @@ export default function TreatmentPanel({ sessionId, _caseId, onEffectsUpdate }) 
                                     className={`w-full text-left p-3 rounded border transition-all ${
                                         isSelected
                                             ? `bg-${color}-900/30 border-${color}-600`
-                                            : treatment.is_contraindicated
-                                            ? 'bg-red-900/10 border-red-800/50 hover:bg-red-900/20'
-                                            : treatment.is_expected
-                                            ? 'bg-green-900/10 border-green-800/50 hover:bg-green-900/20'
                                             : 'bg-neutral-800/50 border-neutral-700 hover:bg-neutral-800'
                                     }`}
                                 >
@@ -562,12 +565,6 @@ export default function TreatmentPanel({ sessionId, _caseId, onEffectsUpdate }) 
                                         <div>
                                             <div className="font-medium text-white flex items-center gap-2">
                                                 {treatment.treatment_name}
-                                                {treatment.is_contraindicated && (
-                                                    <span className="text-xs px-1.5 py-0.5 bg-red-600/30 text-red-300 rounded">{t('badge_ci')}</span>
-                                                )}
-                                                {treatment.is_expected && (
-                                                    <span className="text-xs px-1.5 py-0.5 bg-green-600/30 text-green-300 rounded">{t('badge_expected')}</span>
-                                                )}
                                             </div>
                                             {treatment.description && (
                                                 <p className="text-xs text-neutral-400 mt-1">{treatment.description}</p>
