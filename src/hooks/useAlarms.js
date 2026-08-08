@@ -40,6 +40,34 @@ export const useAlarms = (vitals, sessionId) => {
     const lastFireRef = useRef(new Map()); // alarmKey → ts of last *transition* fire
     const activeKeysRef = useRef(new Set()); // alarmKeys currently alive (for resolve detection)
 
+    // The hook unmounts with PatientMonitor on every room switch. Without
+    // persistence the refs above reset, every still-breaching vital counts
+    // as a "first fire" again, and the alarm audio replays each time the
+    // learner returns to the patient room. Fire-state is parked per session
+    // in sessionStorage (per-tab, gone when the tab closes) and restored on
+    // mount so only genuinely new breaches fire.
+    const fireStateKey = sessionId != null ? `rohy_alarm_fire_state:${sessionId}` : null;
+    useEffect(() => {
+        if (!fireStateKey) return;
+        try {
+            const raw = sessionStorage.getItem(fireStateKey);
+            if (raw) {
+                const { keys, fires } = JSON.parse(raw);
+                activeKeysRef.current = new Set(Array.isArray(keys) ? keys : []);
+                lastFireRef.current = new Map(Array.isArray(fires) ? fires : []);
+            }
+        } catch { /* corrupt entry — fall back to fresh state */ }
+    }, [fireStateKey]);
+    const persistFireState = useCallback(() => {
+        if (!fireStateKey) return;
+        try {
+            sessionStorage.setItem(fireStateKey, JSON.stringify({
+                keys: Array.from(activeKeysRef.current),
+                fires: Array.from(lastFireRef.current.entries()),
+            }));
+        } catch { /* storage blocked — worst case is one re-fire after remount */ }
+    }, [fireStateKey]);
+
     // Load user thresholds from backend; merge over defaults.
     useEffect(() => {
         let cancelled = false;
@@ -79,6 +107,7 @@ export const useAlarms = (vitals, sessionId) => {
         if (!vitals || !thresholdsLoaded) return;
         const now = Date.now();
         const seen = new Set();
+        let fireStateDirty = false;
 
         Object.entries(vitals).forEach(([vital, value]) => {
             const t = thresholds[vital];
@@ -127,6 +156,7 @@ export const useAlarms = (vitals, sessionId) => {
                 });
                 lastFireRef.current.set(key, now);
                 activeKeysRef.current.add(key);
+                fireStateDirty = true;
             }
         });
 
@@ -148,8 +178,10 @@ export const useAlarms = (vitals, sessionId) => {
             resolve(key);
             activeKeysRef.current.delete(key);
             lastFireRef.current.delete(key);
+            fireStateDirty = true;
         }
-    }, [vitals, thresholds, thresholdsLoaded, notify, resolve, sessionId, acked]);
+        if (fireStateDirty) persistFireState();
+    }, [vitals, thresholds, thresholdsLoaded, notify, resolve, sessionId, acked, persistFireState]);
 
     useEffect(() => {
         check();

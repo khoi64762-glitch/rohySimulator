@@ -121,6 +121,23 @@ export const STORAGE_REGISTRY = Object.freeze({
         purpose: 'Double-submit CSRF token (audit #4 / CSRF). Client JS reads, server validates against X-CSRF-Token header.',
         lifetime: 'cookie',
     },
+    // ── Session/scenario wall-clock anchors ─────────────────────────────────
+    rohy_scenario_anchor: {
+        owner: 'src/utils/sessionAnchors.js (used by PatientMonitor.jsx)',
+        purpose: 'Wall-clock anchor {sessionId, scenarioId, startMs, offsetSec, playing} '
+            + 'so the vitals trajectory resumes at its true position after a room '
+            + 'switch or refresh instead of replaying from t=0. Reads are '
+            + 'sessionId-scoped, so a stale value from an ended session is inert.',
+        lifetime: 'logout',
+    },
+    rohy_alarm_fire_state: {
+        keyBuilder: (sessionId) => `rohy_alarm_fire_state:${sessionId}`,
+        owner: 'src/hooks/useAlarms.js',
+        purpose: 'Per-session alarm fire-state (sessionStorage, NOT localStorage) so a '
+            + 'monitor remount does not re-fire audio for still-breaching vitals. '
+            + 'Per-tab and gone when the tab closes; keys are sessionId-scoped.',
+        lifetime: 'derived',
+    },
     // ── Notifications (managed by notifications/persistence.js) ─────────────
     rohy_notification_prefs: {
         keyBuilder: (userIdOrAnon) => `rohy_notification_prefs:${userIdOrAnon}`,

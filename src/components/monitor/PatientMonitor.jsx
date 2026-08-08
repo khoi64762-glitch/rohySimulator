@@ -19,6 +19,14 @@ import { usePatientRecord } from '../../services/PatientRecord';
 import AoiRegion from '../oyon/AoiRegion';
 import { requestAvatarGlance } from '../oyon/studentPresence';
 import { formatDate, formatTime, formatDateTime } from '../../utils/formatters';
+// Wall-clock anchoring for the session clock + scenario timeline — see
+// src/utils/sessionAnchors.js for why ticks recompute instead of increment.
+import {
+   parseUtcTimestamp,
+   readScenarioAnchor,
+   writeScenarioAnchor,
+   anchorSeconds,
+} from '../../utils/sessionAnchors';
 
 /**
  * ECG GENERATION
@@ -338,8 +346,13 @@ export default function PatientMonitor({ _caseParams, caseData, sessionId, isAdm
    // Toggle to disable override tracking entirely
    const [trackOverrides, setTrackOverrides] = useState(true);
 
-   // Session timer state
+   // Session timer state. The displayed value is DERIVED from a wall-clock
+   // anchor (server start_time once fetched, mount time until then / when
+   // there is no session) — never incremented — so it survives the remounts
+   // room switching causes and keeps counting across page refreshes.
    const [elapsedTime, setElapsedTime] = useState(0);
+   const sessionStartMsRef = useRef(null);
+   const mountStartMsRef = useRef(Date.now());
 
    // Platform settings for monitor visibility
    const [monitorSettings, setMonitorSettings] = useState({
@@ -441,13 +454,16 @@ export default function PatientMonitor({ _caseParams, caseData, sessionId, isAdm
       prevVitalsRef.current = displayVitals;
    }, [displayVitals]);
 
-   // Session timer — increments by 1 each second.
+   // Session timer — recomputes from the anchor each second (never
+   // increments), so a remount or refresh resumes at the true elapsed time.
    useEffect(() => {
-      const timer = setInterval(() => {
-         setElapsedTime(prev => prev + 1);
-      }, 1000);
+      const compute = () => Math.max(0, Math.floor(
+         (Date.now() - (sessionStartMsRef.current ?? mountStartMsRef.current)) / 1000
+      ));
+      setElapsedTime(compute());
+      const timer = setInterval(() => setElapsedTime(compute()), 1000);
       return () => clearInterval(timer);
-   }, []);
+   }, [sessionId]);
 
    // Load platform settings for monitor visibility
    useEffect(() => {
@@ -478,6 +494,36 @@ export default function PatientMonitor({ _caseParams, caseData, sessionId, isAdm
    const [activeScenario, setActiveScenario] = useState(null); // 'mi_progression', etc.
    const [scenarioTime, setScenarioTime] = useState(0); // seconds
    const [scenarioPlaying, setScenarioPlaying] = useState(false);
+
+   // Wall-clock anchor behind the three states above. Every start/pause/
+   // resume/stop flows through applyScenarioAnchor so the persisted anchor
+   // and the React state can never disagree; the engine derives the current
+   // scenario time from the anchor, so a remount or refresh resumes the
+   // trajectory where it really is instead of replaying from t=0.
+   const scenarioAnchorRef = useRef(null);
+   const applyScenarioAnchor = (anchor) => {
+      scenarioAnchorRef.current = anchor;
+      writeScenarioAnchor(anchor);
+      if (anchor) {
+         setActiveScenario(anchor.scenarioId);
+         setScenarioTime(Math.floor(anchorSeconds(anchor)));
+         setScenarioPlaying(anchor.playing);
+      } else {
+         setActiveScenario(null);
+         setScenarioTime(0);
+         setScenarioPlaying(false);
+      }
+   };
+   const startScenarioAnchored = (scenarioId, startMs = Date.now()) => {
+      applyScenarioAnchor({ sessionId: sessionId ?? null, scenarioId, startMs, offsetSec: 0, playing: true });
+   };
+   const toggleScenarioPlayingAnchored = () => {
+      const anchor = scenarioAnchorRef.current;
+      if (!anchor) { setScenarioPlaying(prev => !prev); return; }
+      applyScenarioAnchor(anchor.playing
+         ? { ...anchor, playing: false, offsetSec: anchorSeconds(anchor) }
+         : { ...anchor, playing: true, startMs: Date.now(), offsetSec: anchor.offsetSec });
+   };
 
    // Load Scenarios into State (to allow custom additions)
    const [scenarioList, setScenarioList] = useState(defaultSettings.scenarios);
@@ -557,12 +603,18 @@ export default function PatientMonitor({ _caseParams, caseData, sessionId, isAdm
    // Stage-4 ChatInterface fix. Snapshot is immutable for the session.
    const [caseSnapshot, setCaseSnapshot] = useState(null);
    useEffect(() => {
+      sessionStartMsRef.current = null;
+      mountStartMsRef.current = Date.now();
       if (!sessionId) { setCaseSnapshot(null); return; }
       let cancelled = false;
       (async () => {
          try {
             const data = await apiFetch(`/sessions/${sessionId}`);
             if (cancelled) return;
+            // Anchor the session clock to the server's start_time so the
+            // elapsed display survives remounts and page refreshes.
+            const startMs = parseUtcTimestamp(data?.session?.start_time);
+            if (startMs) sessionStartMsRef.current = startMs;
             const raw = data?.session?.case_snapshot;
             if (!raw) return;
             const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
@@ -678,11 +730,18 @@ export default function PatientMonitor({ _caseParams, caseData, sessionId, isAdm
                   return [...filtered, caseScenario];
                });
 
-               // Auto-start if configured
-               if (scenarioSource.autoStart) {
-                  setActiveScenario(caseScenario.id);
-                  setScenarioTime(0);
-                  setScenarioPlaying(true);
+               // A saved anchor for THIS session + scenario means the
+               // trajectory is already running (room switch, page refresh,
+               // or this effect's snapshot-arrival re-run) — resume it at
+               // its true position instead of restarting from t=0.
+               const saved = readScenarioAnchor(sessionId);
+               if (saved && saved.scenarioId === caseScenario.id) {
+                  applyScenarioAnchor(saved);
+               } else if (scenarioSource.autoStart) {
+                  // Fresh auto-start: anchor to the session's server start
+                  // time when we have it, so the scenario timeline and the
+                  // session clock share one time base.
+                  startScenarioAnchored(caseScenario.id, sessionStartMsRef.current ?? Date.now());
                }
             }
          }
@@ -719,9 +778,7 @@ export default function PatientMonitor({ _caseParams, caseData, sessionId, isAdm
       };
 
       setScenarioList(prev => [...prev, newScenario]);
-      setActiveScenario(id);
-      setScenarioTime(0);
-      setScenarioPlaying(true);
+      startScenarioAnchored(id);
       setShowBuilder(false);
    };
 
@@ -776,7 +833,13 @@ export default function PatientMonitor({ _caseParams, caseData, sessionId, isAdm
 
       const interval = setInterval(() => {
          setScenarioTime(t => {
-            const nextTime = t + 1;
+            // Derive the position from the wall-clock anchor rather than
+            // incrementing: a throttled background tab or a remount then
+            // lands on the true time instead of lagging or restarting.
+            const anchor = scenarioAnchorRef.current;
+            const nextTime = anchor && anchor.playing && anchor.scenarioId === activeScenario
+               ? Math.max(t, Math.floor(anchorSeconds(anchor)))
+               : t + 1;
             const scenario = scenarioList.find(s => s.id === activeScenario);
             if (!scenario) return nextTime;
 
@@ -885,7 +948,16 @@ export default function PatientMonitor({ _caseParams, caseData, sessionId, isAdm
                // tears down. Schedule the stop outside the setScenarioTime
                // updater because mutating other state inside it is forbidden.
                if (nextTime >= toFrame.time + 2) {
-                  setTimeout(() => setScenarioPlaying(false), 0);
+                  setTimeout(() => {
+                     const a = scenarioAnchorRef.current;
+                     if (a && a.playing) {
+                        // Freeze the anchor too, or a remount would resume
+                        // a scenario that already completed.
+                        applyScenarioAnchor({ ...a, playing: false, offsetSec: anchorSeconds(a) });
+                     } else {
+                        setScenarioPlaying(false);
+                     }
+                  }, 0);
                }
             }
 
@@ -1533,7 +1605,7 @@ export default function PatientMonitor({ _caseParams, caseData, sessionId, isAdm
                            <div className="mb-4 space-y-3">
                               <div className="flex items-center gap-2 bg-black/40 p-2 rounded">
                                  <button
-                                    onClick={() => setScenarioPlaying(!scenarioPlaying)}
+                                    onClick={toggleScenarioPlayingAnchored}
                                     className={`p-2 rounded-full ${scenarioPlaying ? 'bg-red-500/20 text-red-500' : 'bg-green-500/20 text-green-500'}`}
                                     aria-label={scenarioPlaying ? t('pause_scenario') : t('resume_scenario')}
                                     title={scenarioPlaying ? t('pause_scenario') : t('resume_scenario')}
@@ -1547,11 +1619,7 @@ export default function PatientMonitor({ _caseParams, caseData, sessionId, isAdm
                                     </div>
                                  </div>
                                  <button
-                                    onClick={() => {
-                                       setScenarioPlaying(false);
-                                       setScenarioTime(0);
-                                       setActiveScenario(null);
-                                    }}
+                                    onClick={() => applyScenarioAnchor(null)}
                                     className="text-xs text-neutral-500 hover:text-white underline"
                                  >
                                     {t('stop_reset')}
@@ -1691,9 +1759,7 @@ export default function PatientMonitor({ _caseParams, caseData, sessionId, isAdm
                                  key={s.id}
                                  onClick={() => {
                                     if (activeScenario === s.id) return;
-                                    setActiveScenario(s.id);
-                                    setScenarioTime(0);
-                                    setScenarioPlaying(true);
+                                    startScenarioAnchored(s.id);
                                  }}
                                  className={`w-full text-left p-3 rounded-md border text-sm transition-all ${activeScenario === s.id ? 'bg-purple-900/30 border-purple-500 text-white' : 'bg-neutral-800 border-neutral-700 text-neutral-400 hover:border-neutral-500'}`}
                               >

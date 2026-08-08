@@ -428,9 +428,11 @@ describe('PatientMonitor — Stage-1 (follow-on) snapshot binding regression loc
         expect(src).toMatch(/caseSnapshot\?\.scenario\s*\?\?\s*caseData\.scenario/);
         // case_snapshot is fetched from the session endpoint.
         expect(src).toMatch(/case_snapshot/);
-        // autoStart wires through to setScenarioPlaying(true).
+        // autoStart wires through to the anchored start (which sets
+        // playing: true on the persisted anchor — see sessionAnchors.js).
         expect(src).toMatch(/scenarioSource\.autoStart/);
-        expect(src).toMatch(/setScenarioPlaying\(true\)/);
+        expect(src).toMatch(/startScenarioAnchored/);
+        expect(src).toMatch(/playing:\s*true/);
     });
 
     it('still functions (uses live caseData.scenario) when no snapshot is returned', async () => {
@@ -521,13 +523,16 @@ describe('PatientMonitor — Stage-5 auto-stop after last frame', () => {
             path.resolve(__dirname, 'PatientMonitor.jsx'),
             'utf8'
         );
-        // The schedule call exists.
+        // The schedule call exists (direct fallback when no anchor is set).
         expect(src).toMatch(/setScenarioPlaying\(false\)/);
         // It is gated on the +2 second condition.
         expect(src).toMatch(/toFrame\.time\s*\+\s*2/);
         // And it is wrapped in a setTimeout (deferred outside the state
-        // updater per the comment block at lines 893-896).
-        expect(src).toMatch(/setTimeout\(\s*\(\)\s*=>\s*setScenarioPlaying\(false\)/);
+        // updater). The anchored path must also freeze the persisted anchor
+        // (playing: false at the current position) or a remount would
+        // resume a scenario that already completed.
+        expect(src).toMatch(/if\s*\(nextTime\s*>=\s*toFrame\.time\s*\+\s*2\)\s*\{\s*setTimeout\(/);
+        expect(src).toMatch(/playing:\s*false,\s*offsetSec:\s*anchorSeconds\(a\)/);
     });
 
     it('does NOT auto-stop eagerly when last frame is far out (source contract)', async () => {
@@ -546,11 +551,12 @@ describe('PatientMonitor — Stage-5 auto-stop after last frame', () => {
         // Auto-stop is gated on time-past-last-frame.
         expect(src).toMatch(/nextTime\s*>=\s*toFrame\.time\s*\+\s*2/);
         // It is wrapped in setTimeout so the state update is deferred.
-        expect(src).toMatch(/setTimeout\(\s*\(\)\s*=>\s*setScenarioPlaying\(false\)/);
+        expect(src).toMatch(/if\s*\(nextTime\s*>=\s*toFrame\.time\s*\+\s*2\)\s*\{\s*setTimeout\(/);
         // It does NOT fire unconditionally on mount or every tick.
         const eagerStops = src.match(/setScenarioPlaying\(false\)/g) || [];
-        // Two known callsites: the auto-stop and the manual cancel button.
-        // If a third unconditional one is added, this test should be revisited.
+        // Two known callsites: applyScenarioAnchor's stop branch and the
+        // auto-stop's no-anchor fallback. If a third unconditional one is
+        // added, this test should be revisited.
         expect(eagerStops.length).toBeLessThanOrEqual(3);
     });
 });

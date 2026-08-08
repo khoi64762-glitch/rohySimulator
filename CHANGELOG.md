@@ -9,6 +9,29 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.21] — 2026-08-08
+
+### Fixed
+
+- **The session clock reset to 0 on every room switch, and the vital-sign
+  scenario replayed from the beginning** (tester bug report 2.9.15 #14).
+  `PatientMonitor` unmounts whenever the learner leaves the patient room,
+  and both the clock and the scenario position were plain counters inside
+  it. Both are now wall-clock anchored and *recomputed* each tick instead
+  of incremented: the clock anchors to the server's `sessions.start_time`,
+  and the scenario timeline persists an anchor
+  (`{sessionId, scenarioId, startMs, offsetSec, playing}` — see
+  `src/utils/sessionAnchors.js`, declared in the storage registry) so
+  room switches, page refreshes, pause/resume, and background-tab timer
+  throttling all land on the true position. Anchor reads are
+  sessionId-scoped, so stale anchors from ended sessions are inert.
+
+- **Alarms re-fired their audio every time the learner returned to the
+  patient room.** `useAlarms` fire-state died with the unmount, so every
+  still-breaching vital counted as a brand-new breach. Fire-state now
+  parks per session in sessionStorage (per-tab, self-pruning) and is
+  restored on mount — only genuinely new breaches sound.
+
 ## [2.9.20] — 2026-08-08
 
 ### Fixed
