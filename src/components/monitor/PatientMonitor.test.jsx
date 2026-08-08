@@ -338,6 +338,34 @@ describe('PatientMonitor — NotificationCenter migration regression lock', () =
     });
 });
 
+describe('PatientMonitor — top-bar controls (source contract)', () => {
+    it('renders the settings gear only for admins; non-admins keep just the bell', async () => {
+        // Regression lock: student saw two buttons opening the identical alarms-only drawer (bug report 2.9.15 #17)
+        // CONTRACT: non-admins have exactly one controls tab ('alarms'),
+        // already reachable via the bell, so the gear must be gated on
+        // isAdmin — otherwise both buttons open a byte-identical panel.
+        // We lock the source shape: the gear render is guarded by
+        // `{isAdmin && (` and its click handler opens 'rhythm' explicitly
+        // (never the old `isAdmin ? 'rhythm' : 'alarms'` ternary).
+        const fs = await import('node:fs');
+        const path = await import('node:path');
+        const src = fs.readFileSync(
+            path.resolve(__dirname, 'PatientMonitor.jsx'),
+            'utf8'
+        );
+        // The gear button block is wrapped in an isAdmin guard.
+        expect(src).toMatch(
+            /\{isAdmin && \(\s*<button\s*onClick=\{\(\) => handleControlsOpen\('rhythm'\)\}/
+        );
+        // The old always-rendered gear handler must not come back.
+        expect(src).not.toMatch(
+            /handleControlsOpen\(isAdmin \? 'rhythm' : 'alarms'\)/
+        );
+        // The bell stays unconditional for everyone.
+        expect(src).toMatch(/handleControlsOpen\('alarms'\)/);
+    });
+});
+
 describe('PatientMonitor — Stage-1 vitals persistence (deadband)', () => {
     it('POSTs to /sessions/:id/vitals on first mount with active sessionId', async () => {
         // CONTRACT: the very first vitals snapshot is always persisted

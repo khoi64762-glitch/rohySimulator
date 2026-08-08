@@ -9,6 +9,16 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.23] — 2026-08-08
+
+### Fixed
+
+- **The monitor's "Alarm" bell and "Monitor settings" gear opened the
+  exact same window for students** (tester bug report 2.9.15 #17).
+  Non-admins have exactly one drawer tab (alarms), so the gear was a
+  duplicate of the bell; it is now rendered for admins only, where it
+  opens on the rhythm tab. A source-contract test locks the rule.
+
 ## [2.9.22] — 2026-08-08
 
 ### Fixed

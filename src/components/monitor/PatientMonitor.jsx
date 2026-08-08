@@ -1366,25 +1366,29 @@ export default function PatientMonitor({ _caseParams, caseData, sessionId, isAdm
                   )}
                </button>
 
-               <button
-                  // Open the settings panel on a real first tab, not whatever
-                  // tab was last active. Without an explicit tab this inherited
-                  // the previous activeTab (often 'alarms'), making the gear and
-                  // the bell open identical-looking panels (bug 04.06.2026 #3).
-                  // Students only have the alarms tab, so they land there.
-                  onClick={() => handleControlsOpen(isAdmin ? 'rhythm' : 'alarms')}
-                  className={`p-2 rounded-md transition-colors shadow-lg relative ${
-                     savedSettings
-                        ? 'bg-purple-600 hover:bg-purple-500 text-white shadow-purple-900/20'
-                        : 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-900/20'
-                  }`}
-                  title={savedSettings ? t('monitor_settings_custom') : t('monitor_settings')}
-               >
-                  <Settings className="w-5 h-5" />
-                  {savedSettings && (
-                     <span className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-neutral-900"></span>
-                  )}
-               </button>
+               {/* The gear is admin-only. Non-admins have exactly one drawer
+                   tab ('alarms'), already reachable via the bell — rendering
+                   the gear too gave students two buttons opening a
+                   byte-identical panel (bug report 2.9.15 #17; the earlier
+                   explicit-tab fix for bug 04.06.2026 #3 only helped admins).
+                   For admins the gear opens on the first real tab, 'rhythm',
+                   so it never inherits a stale activeTab. */}
+               {isAdmin && (
+                  <button
+                     onClick={() => handleControlsOpen('rhythm')}
+                     className={`p-2 rounded-md transition-colors shadow-lg relative ${
+                        savedSettings
+                           ? 'bg-purple-600 hover:bg-purple-500 text-white shadow-purple-900/20'
+                           : 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-900/20'
+                     }`}
+                     title={savedSettings ? t('monitor_settings_custom') : t('monitor_settings')}
+                  >
+                     <Settings className="w-5 h-5" />
+                     {savedSettings && (
+                        <span className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-neutral-900"></span>
+                     )}
+                  </button>
+               )}
             </div>
          </div>
 
