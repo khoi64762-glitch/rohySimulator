@@ -9,6 +9,30 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.29] — 2026-08-08
+
+### Fixed
+
+- **Configured lab tests ignored the case's default wait time, and the
+  catalogue disagreed with the worklist about pending times** (tester
+  bug report 2.9.15 #4). Three causes, all fixed: (1) every added lab
+  was eagerly stamped with a concrete 3-minute turnaround, so the case
+  default could never apply — unset is now stored as NULL ("follow the
+  case default") and the editor shows the effective default as a
+  placeholder; (2) an author's per-test "Immediate" (0) was silently
+  discarded by the resolver — an explicit 0 now means instant,
+  end-to-end; (3) the catalogue rendered the stored raw value while the
+  worklist rendered the server-computed remainder — available-labs now
+  returns `effective_turnaround_minutes` from the same resolver the
+  order path uses, and both surfaces render it.
+
+- **Ordering a lab stamped the order-time resolved wait into the shared
+  case row** — including a student's "Order instantly" 0, which under
+  the new contract would have made that test instant for every future
+  learner. Materialization now stores the author's value (or NULL), and
+  migration 0043 resets historical stamped 0s to NULL (no authored 0
+  ever produced instant behavior, so nothing real is lost).
+
 ## [2.9.28] — 2026-08-08
 
 ### Fixed

@@ -678,7 +678,10 @@ export default function OrdersDrawer({ caseId, sessionId, onViewResult, caseData
                                                             />
                                                             <div className="flex-1 min-w-0">
                                                                 <div className="text-sm font-bold text-white truncate">{lab.test_name}</div>
-                                                                <div className="text-xs text-neutral-400">{lab.test_group} - {lab.turnaround_minutes ?? DEFAULT_TURNAROUND_MINUTES}min</div>
+                                                                {/* effective_turnaround_minutes is the server-resolved wait (case
+                                                                    default / instant applied) — the same number the worklist counts
+                                                                    down, so the two surfaces agree (bug report 2.9.15 #4). */}
+                                                                <div className="text-xs text-neutral-400">{lab.test_group} - {lab.effective_turnaround_minutes ?? lab.turnaround_minutes ?? DEFAULT_TURNAROUND_MINUTES}min</div>
                                                             </div>
                                                             {ordered && <span className="text-xs text-blue-400">{t('ordered_badge')}</span>}
                                                         </label>
@@ -722,7 +725,7 @@ export default function OrdersDrawer({ caseId, sessionId, onViewResult, caseData
                                                                                 className="w-4 h-4"
                                                                             />
                                                                             <span className="text-sm text-white flex-1">{lab.test_name}</span>
-                                                                            <span className="text-xs text-neutral-500">{lab.turnaround_minutes ?? DEFAULT_TURNAROUND_MINUTES}m</span>
+                                                                            <span className="text-xs text-neutral-500">{lab.effective_turnaround_minutes ?? lab.turnaround_minutes ?? DEFAULT_TURNAROUND_MINUTES}m</span>
                                                                         </label>
                                                                     );
                                                                 })}

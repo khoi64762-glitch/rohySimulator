@@ -143,6 +143,12 @@ export default function InvestigationCatalogue({
 
 function CatalogueRow({ item, kind, theme, isSelected, alreadyOrdered, onToggle }) {
     const { t } = useTranslation('investigations');
+    // Prefer the server-computed effective wait (case default / instant
+    // applied by the same resolver the order endpoint runs) so this chip
+    // always agrees with the worklist countdown; the raw stored value is a
+    // fallback for payloads that don't carry it (radiology). 0 = instant →
+    // falsy → no chip, the existing instant treatment.
+    const turnaroundMinutes = item.effective_turnaround_minutes ?? item.turnaround_minutes;
     const railClass = alreadyOrdered
         ? 'border-l-cyan-600/60'
         : isSelected
@@ -170,9 +176,9 @@ function CatalogueRow({ item, kind, theme, isSelected, alreadyOrdered, onToggle 
                     {item.body_region && kind === 'radiology' && (
                         <span className="text-slate-500">{item.body_region}</span>
                     )}
-                    {item.turnaround_minutes ? (
+                    {turnaroundMinutes ? (
                         <span className="inline-flex items-center gap-1">
-                            <span className="text-slate-500">{t('turnaround_short', { minutes: item.turnaround_minutes })}</span>
+                            <span className="text-slate-500">{t('turnaround_short', { minutes: turnaroundMinutes })}</span>
                         </span>
                     ) : null}
                     {alreadyOrdered && (

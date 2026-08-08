@@ -26,15 +26,30 @@ function positiveMinutes(value) {
 }
 
 /**
+ * An AUTHOR-configured per-test value — finite and >= 0. Zero is a real
+ * configuration ("Immediate" in the authoring editor), NOT an absent one:
+ * only null/undefined mean "unset, follow the case default". Rejecting 0
+ * here was bug report 2.9.15 #4 — an educator's Immediate button silently
+ * fell through to the case default.
+ */
+function configuredMinutes(value) {
+    return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+/**
  * Priority (highest first):
  *   1. requestOverride === 0           student clicked "Order instantly"
  *   2. caseConfig.investigations.instantResults === true
  *                                      educator pinned the case to instant
  *   3. requestOverride > 0             explicit per-order value
- *   4. testDefault > 0                 per-test value (case_investigations
- *                                      row or radiology master DB)
+ *   4. testDefault >= 0                per-test value (case_investigations
+ *                                      row or radiology master DB); an
+ *                                      explicit 0 means "instant", while
+ *                                      null/undefined means "unset — follow
+ *                                      the case default"
  *   5. caseConfig.investigations.defaultTurnaround > 0
- *                                      case-level default
+ *                                      case-level default (0 here means
+ *                                      "per test", i.e. unset)
  *   6. DEFAULT_TURNAROUND_MINUTES (3)  final fallback
  *
  * Student instant beats case-level instant: the button is a learner-side
@@ -46,7 +61,7 @@ export function resolveTurnaroundMinutes({ requestOverride, caseConfig, testDefa
     if (positiveMinutes(requestOverride)) {
         return Math.min(requestOverride, MAX_REQUEST_OVERRIDE_MINUTES);
     }
-    if (positiveMinutes(testDefault)) return testDefault;
+    if (configuredMinutes(testDefault)) return testDefault;
     const caseDefault = caseConfig?.investigations?.defaultTurnaround;
     if (positiveMinutes(caseDefault)) return caseDefault;
     return DEFAULT_TURNAROUND_MINUTES;

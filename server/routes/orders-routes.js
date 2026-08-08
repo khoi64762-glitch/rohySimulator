@@ -65,7 +65,7 @@ router.post('/investigations', authenticateToken, requireEducator, (req, res) =>
     const sql = `INSERT INTO case_investigations (case_id, investigation_type, test_name, result_data, image_url, turnaround_minutes, tenant_id) 
                  VALUES (?, ?, ?, ?, ?, ?, ?)`;
     
-    dbAdapter.run(sql, [case_id, investigation_type, test_name, JSON.stringify(result_data), image_url, turnaround_minutes || DEFAULT_TURNAROUND_MINUTES, tenantId(req)], function(err) {
+    dbAdapter.run(sql, [case_id, investigation_type, test_name, JSON.stringify(result_data), image_url, turnaround_minutes ?? null, tenantId(req)], function(err) {
         if (err) {
             return res.status(500).json({ error: err.message });
         }
@@ -84,8 +84,11 @@ router.post('/sessions/:id/order', authenticateToken, async (req, res) => {
 
     if (!await verifySessionOwnership(sessionId, req.user, res, { requireSession: true })) return;
 
+    // COALESCE is load-bearing: turnaround_minutes may be NULL (= "follow the
+    // case default"), and `'+' || NULL || ' minutes'` makes datetime() return
+    // NULL — an order that never becomes ready and can never be re-ordered.
     const sql = `INSERT INTO investigation_orders (session_id, investigation_id, available_at, tenant_id)
-                 VALUES (?, ?, datetime('now', '+' || (SELECT turnaround_minutes FROM case_investigations WHERE id = ? AND tenant_id = ?) || ' minutes'), ?)`;
+                 VALUES (?, ?, datetime('now', '+' || COALESCE((SELECT turnaround_minutes FROM case_investigations WHERE id = ? AND tenant_id = ?), ${DEFAULT_TURNAROUND_MINUTES}) || ' minutes'), ?)`;
 
     const stmt = dbAdapter.prepare(sql);
     let inserted = 0;
@@ -508,7 +511,10 @@ router.post('/cases/:caseId/labs', authenticateToken, requireEducator, (req, res
         unit,
         normal_samples,
         is_abnormal,
-        turnaround_minutes = DEFAULT_TURNAROUND_MINUTES
+        // null/undefined = "follow the case default" (resolved at order
+        // time); an explicit 0 = "instant". Defaulting to a concrete number
+        // here froze every saved lab at 3 minutes (bug report 2.9.15 #4).
+        turnaround_minutes = null
     } = req.body;
 
     if (!test_name) {
@@ -654,7 +660,10 @@ router.put('/cases/:caseId/labs', authenticateToken, requireEducator, (req, res)
                             lab.gender_category ?? null, lab.min_value ?? null,
                             lab.max_value ?? null, lab.current_value ?? null,
                             lab.unit ?? null, JSON.stringify(lab.normal_samples || []),
-                            lab.is_abnormal ? 1 : 0, lab.turnaround_minutes ?? DEFAULT_TURNAROUND_MINUTES, tenantId(req)
+                            // Preserve "unset" (NULL = follow the case
+                            // default) instead of freezing DEFAULT into the
+                            // row on every bulk save.
+                            lab.is_abnormal ? 1 : 0, lab.turnaround_minutes ?? null, tenantId(req)
                         ], (insertErr) => {
                             if (insertErr && !failed) {
                                 failed = true;
@@ -832,7 +841,14 @@ router.get('/sessions/:sessionId/available-labs', authenticateToken, async (req,
 
         const caseConfig = resolveSessionCaseConfig(session);
         const defaultLabsEnabled = caseConfig.investigations?.defaultLabsEnabled !== false;
-        
+
+        // What an order placed right now (with no per-order override) would
+        // actually wait — the same resolver the order endpoints run. The
+        // catalogue must display THIS, not the stored per-test number:
+        // showing the raw row value while the worklist counts down the
+        // resolver's answer is bug report 2.9.15 #4.
+        const effectiveTurnaround = (testDefault) => resolveTurnaroundMinutes({ caseConfig, testDefault });
+
         // Get configured abnormal labs for this case
         const labsSql = `
             SELECT 
@@ -869,7 +885,12 @@ router.get('/sessions/:sessionId/available-labs', authenticateToken, async (req,
                         unit: lab.unit || '',
                         normal_samples: lab.normal_samples || [],
                         is_abnormal: lab.is_abnormal || false,
-                        turnaround_minutes: lab.turnaround_minutes || DEFAULT_TURNAROUND_MINUTES,
+                        // null/undefined = "follow the case default"; an
+                        // explicit 0 = "instant". The old `|| DEFAULT` here
+                        // erased both (falsy-zero, same class as v2.9.19's
+                        // agent-wait fix).
+                        turnaround_minutes: lab.turnaround_minutes ?? null,
+                        effective_turnaround_minutes: effectiveTurnaround(lab.turnaround_minutes),
                         source: 'config'
                     };
                 }
@@ -886,6 +907,7 @@ router.get('/sessions/:sessionId/available-labs', authenticateToken, async (req,
                 configuredMap[lab.test_name] = {
                     ...lab,
                     normal_samples: normalSamples,
+                    effective_turnaround_minutes: effectiveTurnaround(lab.turnaround_minutes),
                     source: 'database'
                 };
             });
@@ -937,6 +959,11 @@ router.get('/sessions/:sessionId/available-labs', authenticateToken, async (req,
                                 normal_samples: genderSpecific.normal_samples,
                                 is_abnormal: false,
                                 turnaround_minutes: genderSpecific.turnaround_minutes ?? DEFAULT_TURNAROUND_MINUTES,
+                                // Order-time parity: the default-lab order path
+                                // calls getTurnaround() with NO per-test value
+                                // (Bug 5 fix), so the displayed wait must
+                                // resolve the same way.
+                                effective_turnaround_minutes: effectiveTurnaround(),
                                 source: 'default'
                             });
                         }
@@ -1183,7 +1210,14 @@ router.post('/sessions/:sessionId/order-labs', authenticateToken, (req, res) => 
                             configLab.unit || '',
                             JSON.stringify(configLab.normal_samples || []),
                             configLab.is_abnormal ? 1 : 0,
-                            getTurnaround(configLab.turnaround_minutes),
+                            // Store the AUTHOR's per-test value (null = follow
+                            // the case default), never the order-time resolved
+                            // number. Stamping getTurnaround(...) here baked a
+                            // student's instant override — or the current case
+                            // default — into the shared case row, so every
+                            // later session (and any later change to the case
+                            // default) was stuck with it.
+                            configLab.turnaround_minutes ?? null,
                             tenantId(req)
                         ], function(err) {
                             completedOps++;
@@ -1221,15 +1255,16 @@ router.post('/sessions/:sessionId/order-labs', authenticateToken, (req, res) => 
                             genderSpecific.unit,
                             JSON.stringify(genderSpecific.normal_samples),
                             0,
-                            // Default-database labs must follow the documented
-                            // compressed-pacing default (DEFAULT_TURNAROUND_MINUTES,
-                            // or the educator's case-level / instant override) —
-                            // NOT a hardcoded 30, which made every default lab
-                            // take 30 wall-clock minutes and appear to "never
-                            // arrive" unless ordered instantly. Passing no
-                            // per-test value lets the resolver fall through to
-                            // the case default / DEFAULT_TURNAROUND_MINUTES.
-                            getTurnaround(),
+                            // Default-database labs have no author-configured
+                            // per-test value — store NULL so every order (this
+                            // one and future sessions') resolves through the
+                            // case default / DEFAULT_TURNAROUND_MINUTES at
+                            // order time. The previous getTurnaround() stamp
+                            // baked the order-time resolution (including a
+                            // student's instant override 0) into the shared
+                            // case row, which under the explicit-0-is-instant
+                            // contract would make the test instant forever.
+                            null,
                             tenantId(req)
                         ], function(err) {
                             completedOps++;

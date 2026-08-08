@@ -135,7 +135,10 @@ export default function LabInvestigationEditor({ caseData, setCaseData, patientG
             unit: selectedTest.unit,
             normal_samples: selectedTest.normal_samples,
             is_abnormal: presetType !== 'normal',
-            turnaround_minutes: DEFAULT_TURNAROUND_MINUTES,
+            // null = "follow the case default", resolved at order time. Stamping
+            // a concrete number here froze every added lab at that value and
+            // made the case-level "Default wait time" a no-op (bug 2.9.15 #4).
+            turnaround_minutes: null,
             preset: presetType
         };
 
@@ -192,7 +195,8 @@ export default function LabInvestigationEditor({ caseData, setCaseData, patientG
                     unit: selectedTest.unit,
                     normal_samples: selectedTest.normal_samples,
                     is_abnormal: false,
-                    turnaround_minutes: DEFAULT_TURNAROUND_MINUTES,
+                    // null = "follow the case default", resolved at order time.
+                    turnaround_minutes: null,
                     preset: 'normal',
                     panel_group: groupName // Mark as part of panel
                 });
@@ -286,7 +290,8 @@ export default function LabInvestigationEditor({ caseData, setCaseData, patientG
                             unit: selectedTest.unit,
                             normal_samples: selectedTest.normal_samples,
                             is_abnormal: testConfig.preset !== 'normal',
-                            turnaround_minutes: DEFAULT_TURNAROUND_MINUTES,
+                            // null = "follow the case default", resolved at order time.
+                            turnaround_minutes: null,
                             preset: testConfig.preset || 'abnormal',
                             template_source: templateKey
                         });
@@ -992,6 +997,12 @@ export default function LabInvestigationEditor({ caseData, setCaseData, patientG
                                                     getValueStatus={getValueStatus}
                                                     getStatusColor={getStatusColor}
                                                     getStatusBadge={getStatusBadge}
+                                                    caseDefaultTurnaround={
+                                                        caseData.config?.investigations?.instantResults
+                                                            ? 0
+                                                            : (caseData.config?.investigations?.defaultTurnaround
+                                                                || DEFAULT_TURNAROUND_MINUTES)
+                                                    }
                                                 />
                                             ))}
                                         </div>
@@ -1018,7 +1029,11 @@ function LabValueCard({
     onRemove,
     getValueStatus,
     _getStatusColor,
-    getStatusBadge
+    getStatusBadge,
+    // What an unset (null) per-test turnaround resolves to at order time —
+    // the case-level default. Shown as the Custom input's placeholder so the
+    // teacher sees the effective wait without a number being persisted.
+    caseDefaultTurnaround
 }) {
     const { t } = useTranslation('authoring_labs');
     const status = getValueStatus(lab.current_value, lab.min_value, lab.max_value);
@@ -1224,8 +1239,18 @@ function LabValueCard({
                     <input
                         type="number"
                         min="0"
-                        value={lab.turnaround_minutes ?? DEFAULT_TURNAROUND_MINUTES}
-                        onChange={(e) => onUpdateValue('turnaround_minutes', parseInt(e.target.value) || 0)}
+                        // null = "follow the case default": show that default as a
+                        // placeholder only. Rendering it as a value used to persist
+                        // a literal 3 on every added lab, which made the case-level
+                        // "Default wait time" a no-op (bug report 2.9.15 #4). A
+                        // number is stored only once the teacher actually types
+                        // one; clearing the field returns the test to the default.
+                        value={lab.turnaround_minutes ?? ''}
+                        placeholder={String(caseDefaultTurnaround ?? DEFAULT_TURNAROUND_MINUTES)}
+                        onChange={(e) => onUpdateValue(
+                            'turnaround_minutes',
+                            e.target.value === '' ? null : Math.max(0, parseInt(e.target.value, 10) || 0)
+                        )}
                         className="w-16 px-2 py-1 bg-neutral-900 border border-neutral-700 rounded text-white text-xs focus:border-purple-500 focus:outline-none"
                     />
                     <span className="text-xs text-neutral-500">{t('label_minutes')}</span>
