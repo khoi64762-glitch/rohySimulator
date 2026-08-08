@@ -2579,7 +2579,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/orders-routes.js:2324",
+        "x-rohy-source": "server/routes/orders-routes.js:2404",
         "x-rohy-auth": [
           "authenticateToken",
           "requireEducator"
@@ -8924,7 +8924,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/orders-routes.js:2203",
+        "x-rohy-source": "server/routes/orders-routes.js:2283",
         "x-rohy-auth": [
           "authenticateToken"
         ],
@@ -9845,6 +9845,40 @@
         ]
       }
     },
+    "/api/sessions/{sessionId}/treatment-debrief": {
+      "get": {
+        "summary": "Get /sessions/:sessionId/treatment-debrief",
+        "tags": [
+          "orders"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation error (envelope via server/redaction.js)"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Insufficient role"
+          }
+        },
+        "x-rohy-source": "server/routes/orders-routes.js:2219",
+        "x-rohy-auth": [
+          "authenticateToken"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/sessions/{sessionId}/treatment-orders": {
       "get": {
         "summary": "Get /sessions/:sessionId/treatment-orders",
@@ -10723,7 +10757,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/orders-routes.js:2406",
+        "x-rohy-source": "server/routes/orders-routes.js:2486",
         "x-rohy-auth": [
           "authenticateToken"
         ],

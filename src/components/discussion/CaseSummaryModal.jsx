@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { X, Activity, FlaskConical, Pill, Stethoscope, Image as ImageIcon } from 'lucide-react';
+import { X, Activity, Award, FlaskConical, Pill, Stethoscope, Image as ImageIcon } from 'lucide-react';
 import { apiFetch } from '../../services/apiClient';
 import { parseConfig } from '../../utils/parseConfig.js';
 
@@ -15,7 +15,7 @@ async function safeFetch(path) {
 // Uses the existing read-only session endpoints — no new backend work.
 export default function CaseSummaryModal({ activeCase, sessionId, onClose }) {
     const { t } = useTranslation('discussion');
-    const [data, setData] = useState({ labs: null, treatments: null, exams: null, radiology: null });
+    const [data, setData] = useState({ labs: null, treatments: null, exams: null, radiology: null, debrief: null });
     const [loading, setLoading] = useState(!!sessionId);
 
     useEffect(() => {
@@ -26,9 +26,10 @@ export default function CaseSummaryModal({ activeCase, sessionId, onClose }) {
             safeFetch(`/sessions/${sessionId}/treatment-orders`),
             safeFetch(`/sessions/${sessionId}/exam-findings`),
             safeFetch(`/sessions/${sessionId}/radiology-orders`),
-        ]).then(([labs, treatments, exams, radiology]) => {
+            safeFetch(`/sessions/${sessionId}/treatment-debrief`),
+        ]).then(([labs, treatments, exams, radiology, debrief]) => {
             if (!cancelled) {
-                setData({ labs, treatments, exams, radiology });
+                setData({ labs, treatments, exams, radiology, debrief });
                 setLoading(false);
             }
         });
@@ -128,14 +129,53 @@ export default function CaseSummaryModal({ activeCase, sessionId, onClose }) {
                             </Section>
 
                             <Section title={t('section_treatments')} icon={<Pill className="w-4 h-4" />}>
-                                <FindingsList items={data.treatments?.orders || data.treatments?.treatment_orders} render={(t, i) => (
-                                    <li key={t.id ?? i} className="text-sm text-slate-200">
-                                        <span className="font-medium text-slate-100">{t.treatment_name || t.name}</span>
-                                        {t.dose && <> — {t.dose}{t.unit || ''}</>}
-                                        {t.route && <span className="text-slate-400 ml-1">({t.route})</span>}
+                                {/* Bug report 2.9.15 #10 (bonus): treatment_orders rows carry the
+                                    name in `treatment_item` — reading treatment_name rendered every
+                                    row blank. (The row param was also shadowing i18n's t().) */}
+                                <FindingsList items={data.treatments?.orders || data.treatments?.treatment_orders} render={(o, i) => (
+                                    <li key={o.id ?? i} className="text-sm text-slate-200">
+                                        <span className="font-medium text-slate-100">{o.treatment_item || o.treatment_name || o.name}</span>
+                                        {o.dose && <> — {o.dose}{o.unit || ''}</>}
+                                        {o.route && <span className="text-slate-400 ml-1">({o.route})</span>}
                                     </li>
                                 )} empty={t('no_treatments_administered')} />
                             </Section>
+
+                            {data.debrief && (
+                                <Section title={t('section_treatment_debrief')} icon={<Award className="w-4 h-4" />}>
+                                    <div className="text-sm font-semibold text-slate-100">
+                                        {t('debrief_total_points', { points: data.debrief.total_points ?? 0 })}
+                                    </div>
+                                    <FindingsList items={data.debrief.ordered} render={(o, i) => (
+                                        <li key={i} className="text-sm text-slate-200">
+                                            <span className="font-medium text-slate-100">{o.treatment_item}</span>
+                                            {o.points_awarded > 0 && (
+                                                <span className="ml-2 px-1.5 py-0.5 rounded text-xs bg-emerald-900/40 text-emerald-300 border border-emerald-800/50">
+                                                    {t('debrief_points_chip', { points: o.points_awarded })}
+                                                </span>
+                                            )}
+                                            {o.feedback && <div className="text-slate-300">{o.feedback}</div>}
+                                        </li>
+                                    )} empty={t('no_treatments_administered')} />
+                                    <div className="pt-2 border-t border-slate-700">
+                                        <div className="text-xs uppercase font-semibold text-slate-400 mb-1">{t('debrief_missed_heading')}</div>
+                                        {data.debrief.pending ? (
+                                            <div className="text-sm text-slate-400 italic">{t('debrief_missed_pending')}</div>
+                                        ) : (Array.isArray(data.debrief.missed) && data.debrief.missed.length > 0 ? (
+                                            <ul className="space-y-1.5">
+                                                {data.debrief.missed.map((m, i) => (
+                                                    <li key={i} className="text-sm text-slate-200">
+                                                        <span className="font-medium text-amber-300">{m.treatment_name}</span>
+                                                        {m.feedback_if_missed && <div className="text-slate-300">{m.feedback_if_missed}</div>}
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        ) : (
+                                            <div className="text-sm text-slate-400 italic">{t('debrief_none_missed')}</div>
+                                        ))}
+                                    </div>
+                                </Section>
+                            )}
                         </>
                     )}
                 </div>

@@ -2199,6 +2199,86 @@ router.get('/sessions/:sessionId/treatment-orders', authenticateToken, async (re
     });
 });
 
+// GET /api/sessions/:sessionId/treatment-debrief - Treatment points + feedback debrief
+//
+// Bug report 2.9.15 #10: teachers configure points_if_ordered,
+// feedback_if_ordered and feedback_if_missed, but nothing ever summed
+// points_awarded across a session or rendered the feedback texts — and no
+// code path at all computed "expected but not ordered". This endpoint is
+// the single tidy source the debrief summary reads.
+//
+// Anti-leak gate (the lesson of bug #7): available-treatments strips the
+// grading key for students, and the consultant room is reachable MID-session
+// (visiting it does not end the session) — so the missed-expected list,
+// which names the un-ordered answers, must never leave the server while the
+// session is still in progress. While live we return only total_points and
+// the learner's own ordered rows (they already placed those orders) with
+// `pending: true`; the full missed list is released only once the session
+// row is ended (status completed/abandoned or end_time set). This is a
+// server-side gate, not a UI courtesy.
+router.get('/sessions/:sessionId/treatment-debrief', authenticateToken, async (req, res) => {
+    const { sessionId } = req.params;
+    if (!await verifySessionOwnership(sessionId, req.user, res, { requireSession: true })) return;
+
+    dbAdapter.get('SELECT case_id, status, end_time FROM sessions WHERE id = ? AND tenant_id = ?', [sessionId, tenantId(req)], (err, session) => {
+        if (err) return res.status(500).json({ error: err.message });
+        if (!session) return res.status(404).json({ error: 'Session not found' });
+
+        dbAdapter.all(
+            `SELECT treatment_type, treatment_item, dose, route, points_awarded, feedback
+             FROM treatment_orders WHERE session_id = ? AND tenant_id = ?
+             ORDER BY ordered_at ASC, id ASC`,
+            [sessionId, tenantId(req)],
+            (err, orders) => {
+                if (err) return res.status(500).json({ error: err.message });
+
+                const total_points = orders.reduce((sum, o) => sum + (Number(o.points_awarded) || 0), 0);
+                const ordered = orders.map(o => ({
+                    treatment_item: o.treatment_item,
+                    dose: o.dose,
+                    route: o.route,
+                    points_awarded: Number(o.points_awarded) || 0,
+                    feedback: o.feedback || null,
+                }));
+
+                const sessionEnded = !!session.end_time
+                    || session.status === 'completed'
+                    || session.status === 'abandoned';
+                if (!sessionEnded) {
+                    (req.log || routesOrdersLog).debug('treatment debrief served pending (session in progress)', { session_id: sessionId });
+                    return res.json({ pending: true, total_points, ordered, missed: [] });
+                }
+
+                // Missed = expected, still available, never ordered in this
+                // session. The order path stores case_treatments.treatment_name
+                // verbatim into treatment_orders.treatment_item (matched on
+                // type + name), but compare trimmed/case-insensitively so a
+                // cosmetic rename of the catalogue row can't fake a miss.
+                dbAdapter.all(
+                    `SELECT treatment_type, treatment_name, feedback_if_missed
+                     FROM case_treatments
+                     WHERE case_id = ? AND is_expected = 1 AND is_available = 1`,
+                    [session.case_id],
+                    (err, expected) => {
+                        if (err) return res.status(500).json({ error: err.message });
+
+                        const orderKey = (type, name) => `${type}:${String(name || '').trim().toLowerCase()}`;
+                        const orderedKeys = new Set(orders.map(o => orderKey(o.treatment_type, o.treatment_item)));
+                        const missed = expected
+                            .filter(ct => !orderedKeys.has(orderKey(ct.treatment_type, ct.treatment_name)))
+                            .map(ct => ({
+                                treatment_name: ct.treatment_name,
+                                feedback_if_missed: ct.feedback_if_missed || null,
+                            }));
+
+                        res.json({ pending: false, total_points, ordered, missed });
+                    }
+                );
+            }
+        );
+    });
+});
+
 // GET /api/sessions/:sessionId/active-effects - Get current active treatment effects
 router.get('/sessions/:sessionId/active-effects', authenticateToken, async (req, res) => {
     const { sessionId } = req.params;

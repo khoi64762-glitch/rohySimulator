@@ -9,6 +9,29 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.30] — 2026-08-08
+
+### Added
+
+- **Treatment debrief in "View full case summary"** (tester bug report
+  2.9.15 #10). Points were written per order and never summed; feedback
+  texts were stored and never rendered; nothing computed "expected but
+  not ordered". A new `GET /sessions/:id/treatment-debrief` returns the
+  session's total points, each order's feedback, and the missed-expected
+  list with `feedback_if_missed` — with a server-side gate: the missed
+  list (which names the answers) is sealed until the session has ended,
+  since the consultant room is reachable mid-session. The case summary
+  renders the new section (six new i18n keys; en + pseudo shipped,
+  de/es/it/fi/sv machine translations pending — English fallback until
+  then).
+
+### Fixed
+
+- **Every treatment name in the case summary rendered blank** — the
+  renderer read `treatment_name` but the `treatment_orders` column is
+  `treatment_item` (the row callback was also named `t`, shadowing the
+  i18n function on the same line).
+
 ## [2.9.29] — 2026-08-08
 
 ### Fixed
