@@ -64,6 +64,28 @@ const ROLE_COLOR = {
     student:   'bg-emerald-900/40 text-emerald-300',
 };
 
+// Who actually spoke. Raw `role` says "assistant" for both the virtual
+// patient and every supporting agent; the persona lives in `extra`
+// (agent_type) for agent/team rows and is implied by role+source for
+// interaction rows.
+function speakerFor(row) {
+    if (row.source === 'agent' || row.source === 'team') {
+        return row.extra || row.model || 'agent';
+    }
+    if (row.source === 'interaction') {
+        if (row.role === 'assistant') return 'patient';
+        if (row.role === 'user') return 'student';
+        return row.role || null;
+    }
+    return null;
+}
+
+const SPEAKER_COLOR = {
+    patient: 'bg-blue-900/40 text-blue-300',
+    student: 'bg-emerald-900/40 text-emerald-300',
+    consultant: 'bg-teal-900/40 text-teal-300',
+};
+
 const COLUMNS = [
     { accessorKey: 'ts', header: 'when', size: 165,
       cell: (info) => <CopyableCell value={info.getValue()} className="font-mono text-neutral-400 whitespace-nowrap">{fmtTime(info.getValue())}</CopyableCell> },
@@ -83,6 +105,14 @@ const COLUMNS = [
           const v = info.getValue();
           if (!v) return <span className="text-neutral-500">—</span>;
           const cls = ROLE_COLOR[v] || 'bg-neutral-700 text-neutral-300';
+          return <span className={`px-1.5 py-0.5 rounded font-mono text-[11px] ${cls}`}>{v}</span>;
+      } },
+    { id: 'speaker', accessorFn: speakerFor, header: 'speaker', size: 100,
+      meta: { filterOptions: (rows) => uniqueValues(rows, speakerFor) },
+      cell: (info) => {
+          const v = info.getValue();
+          if (!v) return <span className="text-neutral-500">—</span>;
+          const cls = SPEAKER_COLOR[v] || 'bg-neutral-700 text-neutral-300';
           return <span className={`px-1.5 py-0.5 rounded font-mono text-[11px] ${cls}`}>{v}</span>;
       } },
     { accessorKey: 'username', header: 'user', size: 110,

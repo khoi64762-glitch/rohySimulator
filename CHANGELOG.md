@@ -9,6 +9,26 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.26] — 2026-08-08
+
+### Fixed
+
+- **Emotion-questionnaire answers were stored but invisible everywhere**
+  (tester bug report 2.9.15 #19). Both admin log feeds queried
+  `el.created_at` — the `emotion_logs` column is `timestamp` — and the
+  feed helper silently converted the SQL error into an empty result, so
+  the source vanished with no trace. Columns fixed in both feeds; the
+  helper now logs swallowed subquery failures; and the emotion-logs
+  endpoints are tenant-scoped (the GET was a cross-tenant read, and the
+  POST now stamps the caller's tenant so scoped reads keep seeing new
+  rows).
+
+- **Virtual patient and consultant were indistinguishable in Logs →
+  Chat log — both just "assistant"** (tester bug report 2.9.15 #20).
+  The persona was stored and returned all along but hidden behind a
+  default-hidden column labeled "model". A visible "speaker" column now
+  shows patient / student / the agent's role (e.g. consultant).
+
 ## [2.9.25] — 2026-08-08
 
 ### Fixed

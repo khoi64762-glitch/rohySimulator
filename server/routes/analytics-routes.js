@@ -43,6 +43,7 @@ import {
 
 const radiologyLog = logger('radiology');
 const routesAdminLog = logger('routes-agent-tna-admin');
+const feedLog = logger('analytics-routes');
 
 const clientLogLimiter = rateLimit({
     windowMs: 5 * 60 * 1000,
@@ -1889,8 +1890,14 @@ router.get('/chat-log/feed', authenticateToken, requireAdmin, (req, res) => {
             [name], (err, row) => resolve(err ? false : !!row)
         );
     });
+    // Resolve [] on error so one broken source can't 500 the whole feed —
+    // but LOG it: a silent [] is how the emotion feed vanished for months.
+    // Regression lock context: bug report 2.9.15 #19.
     const allP = (sql, params) => new Promise((resolve) => {
-        dbAdapter.all(sql, params, (err, rows) => resolve(err ? [] : (rows || [])));
+        dbAdapter.all(sql, params, (err, rows) => {
+            if (err) feedLog.warn('log feed subquery failed', { error: err.message });
+            resolve(err ? [] : (rows || []));
+        });
     });
 
     const queries = [];
@@ -2085,9 +2092,9 @@ router.get('/chat-log/feed', authenticateToken, requireAdmin, (req, res) => {
     // 5. emotion_logs → student emotion samples (self-report).
     queries.push(async () => {
         if (!await tableExists('emotion_logs')) return [];
-        const f = dateFilter('el.created_at');
+        const f = dateFilter('el.timestamp');
         return allP(`
-            SELECT el.created_at AS ts,
+            SELECT el.timestamp AS ts,
                    s.user_id, u.username,
                    s.case_id, c.name AS case_name,
                    el.session_id,
@@ -2102,7 +2109,7 @@ router.get('/chat-log/feed', authenticateToken, requireAdmin, (req, res) => {
             LEFT JOIN users u ON s.user_id = u.id
             LEFT JOIN cases c ON s.case_id = c.id
             WHERE el.tenant_id = ? ${f.clause} ${sessionWhere('el.session_id')}
-            ORDER BY el.created_at DESC LIMIT ?
+            ORDER BY el.timestamp DESC LIMIT ?
         `, [tenant, ...f.params, ...sessionParam(), limit]);
     });
 
@@ -2321,8 +2328,14 @@ router.get('/system-log/feed', authenticateToken, requireAdmin, (req, res) => {
         );
     });
 
+    // Resolve [] on error so one broken source can't 500 the whole feed —
+    // but LOG it: a silent [] is how the emotion feed vanished for months.
+    // Regression lock context: bug report 2.9.15 #19.
     const allP = (sql, params) => new Promise((resolve) => {
-        dbAdapter.all(sql, params, (err, rows) => resolve(err ? [] : (rows || [])));
+        dbAdapter.all(sql, params, (err, rows) => {
+            if (err) feedLog.warn('log feed subquery failed', { error: err.message });
+            resolve(err ? [] : (rows || []));
+        });
     });
 
     // ---- Every source. Each emits the canonical row shape. -----------
@@ -2503,9 +2516,9 @@ router.get('/system-log/feed', authenticateToken, requireAdmin, (req, res) => {
     // 10. emotion_logs → 'emotion'
     queries.push(async () => {
         if (!await tableExists('emotion_logs')) return [];
-        const f = dateFilter('el.created_at');
+        const f = dateFilter('el.timestamp');
         return allP(`
-            SELECT el.created_at AS ts, s.user_id, u.username,
+            SELECT el.timestamp AS ts, s.user_id, u.username,
                    'emotion' AS component, el.emotion AS event,
                    el.emotion AS description,
                    'web' AS origin, NULL AS ip,
@@ -2515,7 +2528,7 @@ router.get('/system-log/feed', authenticateToken, requireAdmin, (req, res) => {
             LEFT JOIN sessions s ON el.session_id = s.id
             LEFT JOIN users u ON s.user_id = u.id
             WHERE el.tenant_id = ? ${f.clause}
-            ORDER BY el.created_at DESC LIMIT ?
+            ORDER BY el.timestamp DESC LIMIT ?
         `, [tenant, ...f.params, perSource]);
     });
 
@@ -3009,8 +3022,8 @@ router.post('/emotion-logs', authenticateToken, (req, res) => {
     }
 
     dbAdapter.run(
-        `INSERT INTO emotion_logs (session_id, user_id, case_id, emotion) VALUES (?, ?, ?, ?)`,
-        [session_id || null, user_id, case_id || null, emotion.trim()],
+        `INSERT INTO emotion_logs (session_id, user_id, case_id, emotion, tenant_id) VALUES (?, ?, ?, ?, ?)`,
+        [session_id || null, user_id, case_id || null, emotion.trim(), tenantId(req)],
         function(err) {
             if (err) return res.status(500).json({ error: err.message });
             res.json({ id: this.lastID });
@@ -3034,10 +3047,11 @@ router.get('/emotion-logs', authenticateToken, requireAdmin, (req, res) => {
         FROM emotion_logs el
         LEFT JOIN users u ON el.user_id = u.id
         LEFT JOIN cases c ON el.case_id = c.id
+        WHERE el.tenant_id = ?
         ORDER BY el.timestamp DESC
         LIMIT 2000
     `;
-    dbAdapter.all(sql, [], (err, rows) => {
+    dbAdapter.all(sql, [tenantId(req)], (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
         res.json(rows);
     });
