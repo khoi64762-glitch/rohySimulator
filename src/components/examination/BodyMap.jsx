@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import defaultRegions from '../../utils/defaultRegions';
 import { mapRegionLabel } from './examinationLabels';
-import { baseUrl } from '../../config/api';
 import { apiFetch } from '../../services/apiClient';
+import { useBodyImage } from '../../hooks/useBodyImage';
 // Storage key - must match BodyMapDebug
 const STORAGE_KEY = 'rohy_bodymap_regions';
 
@@ -80,7 +80,9 @@ export default function BodyMap({
     };
 
     const currentRegions = getRegionsForView();
-    const getImageSrc = () => { if (gender === 'female') return baseUrl(view === 'posterior' ? '/woman-back.png' : '/woman-front.png'); return baseUrl(view === 'posterior' ? '/man-back.png' : '/man-front.png'); }; const imageSrc = getImageSrc();
+    // Admin-uploaded silhouette first, bundled default as fallback (bug report 2.9.15 #13).
+    const bodyImageType = `${gender === 'female' ? 'woman' : 'man'}-${view === 'posterior' ? 'back' : 'front'}`;
+    const { src: imageSrc, onError: onImageError } = useBodyImage(bodyImageType);
 
     // Drop the measured ratio whenever the image changes so the previous
     // view's ratio can't briefly distort the new one before it loads.
@@ -143,6 +145,7 @@ export default function BodyMap({
                     {/* PNG Body Image */}
                     <img
                         src={imageSrc}
+                        onError={onImageError}
                         alt={t('body_alt', { gender, view })}
                         className="h-full w-full select-none pointer-events-none"
                         draggable={false}

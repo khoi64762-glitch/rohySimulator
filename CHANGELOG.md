@@ -9,6 +9,27 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.27] — 2026-08-08
+
+### Fixed
+
+- **Selecting a scenario from Browse Repository dropped the teacher on
+  the Story step** (tester bug report 2.9.15 #2). The return step was a
+  hard-coded index that went stale when the Avatar step was inserted.
+  Wizard step indices are now derived from a single ordered key list the
+  step table itself is built from, so deep-links can't drift again —
+  locked by source-contract tests banning numeric step literals.
+
+- **Body Map image upload reported success but the image never appeared
+  — anywhere, ever** (tester bug report 2.9.15 #13). The server wrote
+  the file into the repo's `public/` root, which is never served (the
+  SPA's assets come from `frontend/`; only `/uploads/*` maps to
+  `public/`). Uploads now land in `public/uploads/bodymap/` and every
+  reader (config previews, BodyMap, BodyMapDebug) probes the uploaded
+  image first with a cache-busted fallback to the bundled default.
+  Note for ops: uploaded silhouettes survive container restarts but not
+  image redeploys — a volume for `public/uploads` is a follow-up.
+
 ## [2.9.26] — 2026-08-08
 
 ### Fixed

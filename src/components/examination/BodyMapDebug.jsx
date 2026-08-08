@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import DEFAULT_REGIONS from '../../utils/defaultRegions';
-import { baseUrl } from '../../config/api';
 import { apiFetch, apiPost } from '../../services/apiClient';
+import { useBodyImage } from '../../hooks/useBodyImage';
 import { useToast } from '../../contexts/ToastContext';
  
 // Storage key for localStorage
@@ -53,12 +53,9 @@ export default function BodyMapDebug({ gender = 'male', view = 'anterior' }) {
 
     const currentRegions = regions[view]?.[gender] || regions.anterior.male;
 
-    const getImageSrc = () => {
-        if (gender === 'female') {
-            return baseUrl(view === 'posterior' ? '/woman-back.png' : '/woman-front.png');
-        }
-        return baseUrl(view === 'posterior' ? '/man-back.png' : '/man-front.png');
-    };
+    // Admin-uploaded silhouette first, bundled default as fallback (bug report 2.9.15 #13).
+    const bodyImageType = `${gender === 'female' ? 'woman' : 'man'}-${view === 'posterior' ? 'back' : 'front'}`;
+    const { src: bodyImageSrc, onError: onBodyImageError } = useBodyImage(bodyImageType);
 
     const getSvgCoords = (e) => {
         const svg = svgRef.current;
@@ -237,7 +234,8 @@ export default function BodyMapDebug({ gender = 'male', view = 'anterior' }) {
                 {/* Image with overlay */}
                 <div className="relative" style={{ width: '500px', height: '900px' }}>
                     <img
-                        src={getImageSrc()}
+                        src={bodyImageSrc}
+                        onError={onBodyImageError}
                         alt={`${gender} body ${view}`}
                         className="absolute inset-0 w-full h-full object-contain"
                     />

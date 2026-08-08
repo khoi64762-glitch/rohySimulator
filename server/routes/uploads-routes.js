@@ -56,8 +56,8 @@ const storage = multer.diskStorage({
 // SVG is intentionally NOT in the allowlist for /api/upload — uploaded files
 // are served back from /uploads as-is, and an SVG with embedded <script> is
 // stored XSS. The /api/upload-body-image route still accepts .svg because it
-// renames the file into /public/<type>.svg (admin-only, controlled set of 4
-// filenames) and is meant for the body silhouette overlay.
+// renames the file into public/uploads/bodymap/<type>.svg (admin-only,
+// controlled set of 4 filenames) and is meant for the body silhouette overlay.
 const fileFilter = (req, file, cb) => {
     // Allowed MIME types for images, audio, and video
     const allowedMimes = [
@@ -102,8 +102,8 @@ const upload = multer({
 });
 
 // Separate multer for the body-image silhouette upload. That route renames
-// the file into /public/<fixed-name>.svg|.png and is admin-only, so SVG is
-// safe there even though it's stored XSS for the generic /upload route.
+// the file into public/uploads/bodymap/<fixed-name>.svg|.png and is admin-only,
+// so SVG is safe there even though it's stored XSS for the generic /upload route.
 const bodyImageFileFilter = (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
     const okMime = file.mimetype === 'image/png' || file.mimetype === 'image/svg+xml';
@@ -212,16 +212,29 @@ router.post('/upload-body-image', authenticateToken, requireAdmin, uploadBodyIma
         return res.status(400).json({ error: 'Only PNG and SVG files are allowed' });
     }
 
-    // Target path in public folder
-    const targetPath = path.join(__dirname, '../../public', `${imageType}${ext}`);
+    // Regression lock: body-image upload wrote to unserved public/ root (bug report 2.9.15 #13)
+    // Only /uploads/* is statically served out of public/ (server.js); the SPA's
+    // assets come from frontend/. Writing to the public/ ROOT therefore landed
+    // where no reader looked — the upload "succeeded" but the image never
+    // appeared. Uploaded silhouettes now live under public/uploads/bodymap/ and
+    // are addressed by the returned `url`.
+    const bodymapDir = path.join(__dirname, '../../public/uploads/bodymap');
+    const targetPath = path.join(bodymapDir, `${imageType}${ext}`);
+    const url = `/uploads/bodymap/${imageType}${ext}`;
 
     try {
-        // Move file from uploads to public folder with correct name
+        fs.mkdirSync(bodymapDir, { recursive: true });
+        // Move file from the multer staging dir into the served location.
         fs.renameSync(req.file.path, targetPath);
+        // Readers probe `<type>.png` before `<type>.svg` — drop the stale
+        // other-extension file so it can't shadow the fresh upload.
+        const staleTwin = path.join(bodymapDir, `${imageType}${ext === '.png' ? '.svg' : '.png'}`);
+        if (fs.existsSync(staleTwin)) fs.unlinkSync(staleTwin);
         res.json({
             success: true,
             message: `Body image ${imageType} updated successfully`,
-            path: `/${imageType}${ext}`
+            url,
+            path: url
         });
     } catch (err) {
         (req.log || routesCasesLog).error('body image save failed', { error: err.message });

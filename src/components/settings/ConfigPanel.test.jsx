@@ -681,3 +681,63 @@ describe('ConfigPanel', () => {
         expect(detectHit).toBe(true);
     });
 });
+
+describe('ConfigPanel — wizard deep-link step derivation (source contract)', () => {
+    // Regression lock: repository-select sent teachers to Story, not Scenario
+    // (bug report 2.9.15 #2). The handler hardcoded `setWizardInitialStep(3)`
+    // — index 3 WAS Scenario until the Avatar step was inserted, after which
+    // 3 = Story and 4 = Scenario. Same off-by-one class as the 2.9.17 lastStep
+    // fix (which derived the footer's last step from WIZARD_STEPS); this call
+    // site was missed. Driving the full browse-repository → wizard flow
+    // behaviorally needs the un-stubbed ScenarioRepository, so we lock the
+    // source contract instead, mirroring PatientMonitor.test.jsx.
+    async function readSource() {
+        const fs = await import('node:fs');
+        const path = await import('node:path');
+        return fs.readFileSync(path.resolve(__dirname, 'ConfigPanel.jsx'), 'utf8');
+    }
+
+    it('derives the repository-select target step from the step table, never a literal', async () => {
+        const src = await readSource();
+        // The handler goes through the step-key lookup…
+        expect(src).toMatch(/setWizardInitialStep\(wizardStepNumber\('scenario'\)\)/);
+        // …and no call site passes a numeric literal except the consumed-once
+        // reset to 1 (onStepLoaded).
+        const args = [...src.matchAll(/setWizardInitialStep\(([^)]*)\)/g)].map((m) => m[1].trim());
+        expect(args.length).toBeGreaterThan(0);
+        for (const arg of args) {
+            if (/^\d+$/.test(arg)) expect(arg).toBe('1');
+        }
+    });
+
+    it('keeps WIZARD_STEPS and wizardStepNumber on the same WIZARD_STEP_KEYS list', async () => {
+        const src = await readSource();
+        // One ordered key list exists, with scenario AFTER avatar + story
+        // (the 2.9.15 regression was exactly this ordering changing).
+        const keysMatch = src.match(/const WIZARD_STEP_KEYS = \[([^\]]*)\]/);
+        expect(keysMatch).toBeTruthy();
+        const keys = [...keysMatch[1].matchAll(/'([a-z]+)'/g)].map((m) => m[1]);
+        expect(keys.indexOf('scenario')).toBe(3); // 1-based step 4
+        expect(keys.indexOf('avatar')).toBe(1);
+        expect(keys.indexOf('story')).toBe(2);
+        // The rendered step table is BUILT from that list, so they can't drift.
+        expect(src).toMatch(/WIZARD_STEP_KEYS\.map\(\(key, i\) => \(\{ num: i \+ 1/);
+    });
+});
+
+describe('ConfigPanel — body-map preview upload visibility (source contract)', () => {
+    // Regression lock: body-image upload wrote to unserved public/ root (bug report 2.9.15 #13)
+    // The previews were static `./man-front.png` bundle paths with no
+    // cache-buster — even a correctly stored upload never repainted. They now
+    // go through BodyImagePreview (useBodyImage: uploaded URL first, onError
+    // fallback to the bundled default via baseUrl, versioned cache-buster).
+    it('renders previews through BodyImagePreview, not relative bundle paths', async () => {
+        const fs = await import('node:fs');
+        const path = await import('node:path');
+        const src = fs.readFileSync(path.resolve(__dirname, 'ConfigPanel.jsx'), 'utf8');
+        expect(src).not.toMatch(/src="\.\/(man|woman)-(front|back)\.png"/);
+        for (const type of ['man-front', 'man-back', 'woman-front', 'woman-back']) {
+            expect(src).toMatch(new RegExp(`<BodyImagePreview type="${type}" version=\\{bodyImageVersion\\}`));
+        }
+    });
+});

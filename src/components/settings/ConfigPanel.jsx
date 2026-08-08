@@ -46,6 +46,31 @@ import ModelSelect from './ModelSelect';
 import { friendlyLlmError } from '../../utils/llmErrorMessage';
 import { SCENARIO_TEMPLATES, scaleScenarioTimeline } from '../../data/scenarioTemplates';
 import { MARITAL_STATUSES, PATIENT_GENDERS, PERSONA_TYPES } from '../../services/patientDemographics';
+import { useBodyImage } from '../../hooks/useBodyImage';
+
+// Wizard step order — the single source of truth for step numbers. CaseWizard's
+// WIZARD_STEPS table (titles + icons) is built from this list, and any call
+// site that deep-links into the wizard derives its target from here instead of
+// hardcoding a literal. Step numbers are 1-BASED: CaseWizard consumes
+// `useState(initialStep || 1)`, hence the +1 in wizardStepNumber().
+//
+// Regression lock: the repository-select handler used a literal 3, which
+// silently became the Story step when the Avatar step was inserted before it
+// (bug report 2.9.15 #2) — the same off-by-one class the 2.9.17 lastStep fix
+// removed from the wizard footer by deriving from WIZARD_STEPS.
+const WIZARD_STEP_KEYS = [
+    'demographics', 'avatar', 'story', 'scenario', 'vitals', 'labs',
+    'radiology', 'exam', 'records', 'treatments', 'agents',
+];
+const wizardStepNumber = (key) => WIZARD_STEP_KEYS.indexOf(key) + 1;
+
+// Body-map silhouette preview: uploaded image first (with cache-busting
+// `version` so a fresh upload repaints), bundled default as onError fallback.
+// See useBodyImage — bug report 2.9.15 #13.
+function BodyImagePreview({ type, version, alt }) {
+    const { src, onError } = useBodyImage(type, version);
+    return <img src={src} onError={onError} alt={alt} className="w-16 h-24 object-contain bg-neutral-700 rounded" />;
+}
 
 /**
  * Keeps a stored value selectable when it is not one of the canonical options.
@@ -573,14 +598,20 @@ export default function ConfigPanel({ onClose, onLoadCase, fullPage = false, ini
         }
     };
 
-    const uploadBodyImage = (file, type) => {
+    // Cache-buster for the four BodyImagePreview thumbnails below: bumped after
+    // every successful upload so the preview refetches the fresh silhouette
+    // instead of repainting the browser-cached one (bug report 2.9.15 #13).
+    const [bodyImageVersion, setBodyImageVersion] = useState(0);
+    const uploadBodyImage = async (file, type) => {
         const formData = new FormData();
         formData.append('image', file);
         formData.append('type', type);
-        return apiFetch('/upload-body-image', {
+        const res = await apiFetch('/upload-body-image', {
             method: 'POST',
             body: formData,
         });
+        setBodyImageVersion(Date.now());
+        return res;
     };
 
     // Sidebar tab model. Each item carries the EXACT per-tab role gate that
@@ -1121,7 +1152,11 @@ export default function ConfigPanel({ onClose, onLoadCase, fullPage = false, ini
                                             }
                                         }));
 
-                                        setWizardInitialStep(3);
+                                        // Land on the wizard's Scenario step — derived from the
+                                        // step table (WIZARD_STEP_KEYS), never a literal: a
+                                        // hardcoded 3 sent teachers to Story after the Avatar
+                                        // step was inserted (bug report 2.9.15 #2).
+                                        setWizardInitialStep(wizardStepNumber('scenario'));
                                         setActiveTab('cases');
                                         toast.success(t('toast_scenario_applied', { name: scenario.name }));
                                     } else {
@@ -1209,7 +1244,7 @@ export default function ConfigPanel({ onClose, onLoadCase, fullPage = false, ini
                                         <div className="space-y-2">
                                             <label className="text-sm font-medium">{t('bodymap_male_front')}</label>
                                             <div className="flex gap-2">
-                                                <img src="./man-front.png" alt="Male front" className="w-16 h-24 object-contain bg-neutral-700 rounded" />
+                                                <BodyImagePreview type="man-front" version={bodyImageVersion} alt="Male front" />
                                                 <label className="flex-1 flex items-center justify-center border-2 border-dashed border-neutral-600 rounded cursor-pointer hover:border-teal-500 transition-colors">
                                                     <input type="file" accept=".svg,.png" className="hidden" onChange={(e) => {
                                                         const file = e.target.files?.[0];
@@ -1226,7 +1261,7 @@ export default function ConfigPanel({ onClose, onLoadCase, fullPage = false, ini
                                         <div className="space-y-2">
                                             <label className="text-sm font-medium">{t('bodymap_male_back')}</label>
                                             <div className="flex gap-2">
-                                                <img src="./man-back.png" alt="Male back" className="w-16 h-24 object-contain bg-neutral-700 rounded" />
+                                                <BodyImagePreview type="man-back" version={bodyImageVersion} alt="Male back" />
                                                 <label className="flex-1 flex items-center justify-center border-2 border-dashed border-neutral-600 rounded cursor-pointer hover:border-teal-500 transition-colors">
                                                     <input type="file" accept=".svg,.png" className="hidden" onChange={(e) => {
                                                         const file = e.target.files?.[0];
@@ -1243,7 +1278,7 @@ export default function ConfigPanel({ onClose, onLoadCase, fullPage = false, ini
                                         <div className="space-y-2">
                                             <label className="text-sm font-medium">{t('bodymap_female_front')}</label>
                                             <div className="flex gap-2">
-                                                <img src="./woman-front.png" alt="Female front" className="w-16 h-24 object-contain bg-neutral-700 rounded" />
+                                                <BodyImagePreview type="woman-front" version={bodyImageVersion} alt="Female front" />
                                                 <label className="flex-1 flex items-center justify-center border-2 border-dashed border-neutral-600 rounded cursor-pointer hover:border-teal-500 transition-colors">
                                                     <input type="file" accept=".svg,.png" className="hidden" onChange={(e) => {
                                                         const file = e.target.files?.[0];
@@ -1260,7 +1295,7 @@ export default function ConfigPanel({ onClose, onLoadCase, fullPage = false, ini
                                         <div className="space-y-2">
                                             <label className="text-sm font-medium">{t('bodymap_female_back')}</label>
                                             <div className="flex gap-2">
-                                                <img src="./woman-back.png" alt="Female back" className="w-16 h-24 object-contain bg-neutral-700 rounded" />
+                                                <BodyImagePreview type="woman-back" version={bodyImageVersion} alt="Female back" />
                                                 <label className="flex-1 flex items-center justify-center border-2 border-dashed border-neutral-600 rounded cursor-pointer hover:border-teal-500 transition-colors">
                                                     <input type="file" accept=".svg,.png" className="hidden" onChange={(e) => {
                                                         const file = e.target.files?.[0];
@@ -3488,19 +3523,23 @@ PERSONALITY: You are anxious but cooperative. You're worried this might be a hea
         }));
     };
 
-    const WIZARD_STEPS = [
-        { num: 1,  title: t('wstep_demographics'), icon: '👤' },
-        { num: 2,  title: t('wstep_avatar'),       icon: '🎭' },
-        { num: 3,  title: t('wstep_story'),        icon: '📖' },
-        { num: 4,  title: t('wstep_scenario'),     icon: '📈' },
-        { num: 5,  title: t('wstep_vitals'),       icon: '💓' },
-        { num: 6,  title: t('wstep_labs'),         icon: '🧪' },
-        { num: 7,  title: t('wstep_radiology'),    icon: '📷' },
-        { num: 8,  title: t('wstep_exam'),         icon: '🩺' },
-        { num: 9,  title: t('wstep_records'),      icon: '📄' },
-        { num: 10, title: t('wstep_treatments'),   icon: '💊' },
-        { num: 11, title: t('wstep_agents'),       icon: '🤖' }
-    ];
+    // Titles + icons keyed by WIZARD_STEP_KEYS (module scope) — the numbering
+    // comes from that one list, so deep links (wizardStepNumber) and this
+    // table can never drift apart again (bug report 2.9.15 #2).
+    const WIZARD_STEP_META = {
+        demographics: { title: t('wstep_demographics'), icon: '👤' },
+        avatar:       { title: t('wstep_avatar'),       icon: '🎭' },
+        story:        { title: t('wstep_story'),        icon: '📖' },
+        scenario:     { title: t('wstep_scenario'),     icon: '📈' },
+        vitals:       { title: t('wstep_vitals'),       icon: '💓' },
+        labs:         { title: t('wstep_labs'),         icon: '🧪' },
+        radiology:    { title: t('wstep_radiology'),    icon: '📷' },
+        exam:         { title: t('wstep_exam'),         icon: '🩺' },
+        records:      { title: t('wstep_records'),      icon: '📄' },
+        treatments:   { title: t('wstep_treatments'),   icon: '💊' },
+        agents:       { title: t('wstep_agents'),       icon: '🤖' },
+    };
+    const WIZARD_STEPS = WIZARD_STEP_KEYS.map((key, i) => ({ num: i + 1, key, ...WIZARD_STEP_META[key] }));
 
     // Helper to get vitals from scenario's first keyframe
     const getScenarioFirstFrameVitals = () => {

@@ -9,8 +9,8 @@ model.
 
 | Method | Path | Auth | Source |
 |--------|------|------|--------|
-| `GET` | `/api/bodymap-regions` | `(none)` | `server/routes/uploads-routes.js:236` |
-| `POST` | `/api/bodymap-regions` | `authenticateToken, requireEducator` | `server/routes/uploads-routes.js:251` |
+| `GET` | `/api/bodymap-regions` | `(none)` | `server/routes/uploads-routes.js:249` |
+| `POST` | `/api/bodymap-regions` | `authenticateToken, requireEducator` | `server/routes/uploads-routes.js:264` |
 | `POST` | `/api/upload` | `authenticateToken` | `server/routes/uploads-routes.js:129` |
 | `POST` | `/api/upload-body-image` | `authenticateToken, requireAdmin` | `server/routes/uploads-routes.js:194` |
 | `POST` | `/api/uploads/file` | `authenticateToken, requireEducator` | `server/routes/uploads-routes.js:190` |
