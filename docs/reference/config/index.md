@@ -32,13 +32,13 @@ The following variables carry credentials or signing material. Never commit them
 | Variable | Required | Default | Purpose | Source |
 | --- | --- | --- | --- | --- |
 | `ALLOW_DEFAULT_USERS` | No | — | Bootstrap-only flag to seed default users on first boot. | `server/seeders/users.js:107` |
-| `JWT_EXPIRY` | No | `4h` | Lifetime of issued JWTs. | `server/middleware/auth.js:321` |
+| `JWT_EXPIRY` | No | `7d` | Lifetime of issued JWTs. | `server/middleware/auth.js:324` |
 | `JWT_SECRET` | Yes | — | Secret used to sign/verify auth + audit tokens. Fatal if unset. _Fatal if unset (validateEnv pushes an error)._ **⚠ secret — see security note above.** | `server/middleware/auth.js:16` |
 | `ROHY_ADMIN_EMAIL` | No | — | Email for the provisioned first admin. Defaults to &lt;username&gt;@rohy.local. | `server/seeders/users.js:54` |
 | `ROHY_ADMIN_NAME` | No | — | Display name for the provisioned first admin. Defaults to "System Administrator". | `server/seeders/users.js:55` |
 | `ROHY_ADMIN_PASSWORD` | No | — | Password for the provisioned first admin. Must satisfy the normal password policy or the seeder refuses it. **⚠ secret — see security note above.** | `server/seeders/users.js:53` |
 | `ROHY_ADMIN_USERNAME` | No | — | Provisions the first admin on first boot (with ROHY_ADMIN_PASSWORD). Applied only while the users table is empty. | `server/seeders/users.js:52` |
-| `ROHY_DISABLE_AUTH_RATE_LIMIT` | No | — | Disables the auth-endpoint rate limiter (dev/test). | `server/routes/auth-routes.js:76`<br>`server/routes/registration-routes.js:35` |
+| `ROHY_DISABLE_AUTH_RATE_LIMIT` | No | — | Disables the auth-endpoint rate limiter (dev/test). | `server/routes/auth-routes.js:79`<br>`server/routes/registration-routes.js:35` |
 | `ROHY_TOKEN` | No | — | _see source_ **⚠ secret — see security note above.** | `scripts/llm-language-smoke.mjs:47`<br>`scripts/translate-locales.mjs:76` |
 | `ROHY_TRUST_PROXY` | No | `loopback` | Express `trust proxy` setting (proxy hop count / IP / preset). | `server/server.js:63` |
 | `TLS_CERT_PATH` | No | `'' (empty string)` | Path to TLS certificate; must be paired with `TLS_KEY_PATH`. _Conditionally required: if either of TLS_CERT_PATH / TLS_KEY_PATH is set, both must be._ | `server/routes/help-routes.js:130`<br>`server/server.js:55` |

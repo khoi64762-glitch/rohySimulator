@@ -52,6 +52,8 @@ export const AuthProvider = ({ children }) => {
         if (!user) return;
         let cancelled = false;
         let timer = null;
+        let refreshing = false;
+        let lastAttemptMs = 0;
 
         const decodeJwtExp = (token) => {
             try {
@@ -78,23 +80,71 @@ export const AuthProvider = ({ children }) => {
         };
 
         const tick = async () => {
-            if (cancelled) return;
-            const result = await AuthService.refreshToken();
-            if (cancelled) return;
-            if (!result) {
-                AuthService.logout();
-                setUser(null);
+            if (cancelled || refreshing) return;
+            refreshing = true;
+            lastAttemptMs = Date.now();
+            if (timer) { clearTimeout(timer); timer = null; }
+            try {
+                const result = await AuthService.refreshToken();
+                if (cancelled) return;
+                if (result) {
+                    // Schedule the next refresh based on the freshly-issued token.
+                    timer = setTimeout(tick, computeDelay());
+                    return;
+                }
+                // Refresh failed — but that is NOT proof the session is dead.
+                // A laptop waking from sleep often loses the first request to
+                // a not-yet-up network; hard-logging-out here threw users out
+                // of running cases. Ask /auth/verify: if the cookie/token
+                // still authenticates, keep the session and retry shortly;
+                // only when verify also rejects is the session truly gone.
+                try {
+                    await AuthService.verifyToken();
+                    if (cancelled) return;
+                    timer = setTimeout(tick, 60 * 1000);
+                } catch {
+                    if (cancelled) return;
+                    AuthService.logout();
+                    setUser(null);
+                }
+            } finally {
+                refreshing = false;
+            }
+        };
+
+        // Wake guard. setTimeout does not run while the machine sleeps and
+        // is throttled in background tabs, so the "5 minutes before expiry"
+        // refresh can fire hours late — after the token is already dead.
+        // Whenever the tab becomes visible/focused/online again, refresh
+        // immediately if the token is inside the wake window (or, for
+        // cookie-mode users whose exp we cannot read, if we haven't tried
+        // recently). This is what keeps a login alive across sleep gaps.
+        const WAKE_WINDOW_MS = 60 * 60 * 1000; // refresh on wake if <1h left
+        const WAKE_MIN_GAP_MS = 10 * 60 * 1000; // cookie mode: at most every 10 min
+        const onWake = () => {
+            if (cancelled || refreshing) return;
+            if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+            const token = AuthService.getToken();
+            if (token) {
+                const expMs = decodeJwtExp(token);
+                if (expMs && expMs - Date.now() > WAKE_WINDOW_MS) return; // plenty of runway
+            } else if (Date.now() - lastAttemptMs < WAKE_MIN_GAP_MS) {
                 return;
             }
-            // Schedule the next refresh based on the freshly-issued token.
-            timer = setTimeout(tick, computeDelay());
+            tick();
         };
+        window.addEventListener('focus', onWake);
+        window.addEventListener('online', onWake);
+        document.addEventListener('visibilitychange', onWake);
 
         // First refresh fires based on the existing token's exp.
         timer = setTimeout(tick, computeDelay());
         return () => {
             cancelled = true;
             if (timer) clearTimeout(timer);
+            window.removeEventListener('focus', onWake);
+            window.removeEventListener('online', onWake);
+            document.removeEventListener('visibilitychange', onWake);
         };
     }, [user]);
 
@@ -136,6 +186,7 @@ export const AuthProvider = ({ children }) => {
             localStorage.removeItem('rohy_active_session');
             localStorage.removeItem('rohy_chat_history');
             localStorage.removeItem('rohy_view');
+            localStorage.removeItem('rohy_scenario_anchor');
             // Per-session debrief keys are tagged with the session id; we
             // don't have it in scope here, but they'll be overwritten on
             // the next session and never read without a matching active

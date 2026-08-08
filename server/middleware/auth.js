@@ -111,8 +111,8 @@ export function extractToken(req) {
 //
 // Tokens that pre-date this change have no active_sessions row at all. We
 // accept those (legacy compatibility) so rolling out doesn't force every
-// signed-in user to re-login on the deploy. Once they expire (4h default),
-// the next login goes through the new path.
+// signed-in user to re-login on the deploy. Once they expire (see
+// authTtlSeconds), the next login goes through the new path.
 export const authenticateToken = (req, res, next) => {
     const { token, source, malformed } = extractToken(req);
 
@@ -207,7 +207,10 @@ export const authenticateToken = (req, res, next) => {
 
 // Promise-style helpers so route handlers can await session state changes.
 
-export function recordActiveSession(token, user, { ipAddress = null, userAgent = null, expiresIn = '+4 hours' } = {}) {
+export function recordActiveSession(token, user, { ipAddress = null, userAgent = null, expiresIn = null } = {}) {
+    // Default follows the JWT TTL — an active_sessions row that expires
+    // before the token it authorises turns every late request into a 401.
+    if (!expiresIn) expiresIn = `+${authTtlSeconds()} seconds`;
     const tokenHash = hashToken(token);
     return new Promise((resolve, reject) => {
         dbAdapter.run(
@@ -300,16 +303,32 @@ export const requireAuth = (req, res, next) => {
     next();
 };
 
-// Helper function to generate JWT token.
+// One knob for how long a login lasts.
 //
-// Default TTL is 4h. Tokens are now server-revocable: authenticateToken
-// consults active_sessions, so logout / admin force-logout / password change
-// can immediately invalidate a still-cryptographically-valid JWT. The 4h
-// TTL still bounds the worst-case window for legacy tokens (those issued
-// before the active_sessions check landed) since those have no row to
-// revoke.
+// Three lifetimes MUST agree or logins die at the shortest one: the JWT
+// `exp` claim, the rohy_auth cookie's maxAge, and the active_sessions
+// row's expires_at. They used to be hardcoded separately (all at 4h);
+// authTtlSeconds() is now the single source all three derive from.
 //
-// Override via JWT_EXPIRY env var (e.g. '7d' for a kiosk deployment).
+// JWT_EXPIRY accepts '45s', '90m', '12h', '7d', or a bare number of
+// seconds. The default is 7 days: a session survives overnight and
+// weekend gaps instead of collapsing after 4 idle hours. That is safe
+// to hold this long because tokens are server-revocable — every request
+// re-checks active_sessions, so logout / admin force-logout / password
+// change invalidates a still-cryptographically-valid JWT immediately.
+// Deployments wanting a tighter window set JWT_EXPIRY (e.g. '4h').
+const DEFAULT_TTL_SECONDS = 7 * 86400; // '7d'
+const TTL_UNIT_SECONDS = { s: 1, m: 60, h: 3600, d: 86400 };
+
+export function authTtlSeconds() {
+    const raw = String(process.env.JWT_EXPIRY || '7d').trim();
+    const match = raw.match(/^(\d+)\s*([smhd]?)$/i);
+    if (!match) return DEFAULT_TTL_SECONDS;
+    return Number(match[1]) * TTL_UNIT_SECONDS[(match[2] || 's').toLowerCase()];
+}
+
+// Helper function to generate JWT token. TTL comes from authTtlSeconds()
+// so it always matches the cookie and the active_sessions row.
 export const generateToken = (user) => {
     const payload = {
         id: user.id,
@@ -318,5 +337,5 @@ export const generateToken = (user) => {
         role: user.role,
         tenant_id: user.tenant_id || 1
     };
-    return jwt.sign(payload, JWT_SECRET, { expiresIn: process.env.JWT_EXPIRY || '4h' });
+    return jwt.sign(payload, JWT_SECRET, { expiresIn: authTtlSeconds() });
 };

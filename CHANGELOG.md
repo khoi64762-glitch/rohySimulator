@@ -9,6 +9,29 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.20] — 2026-08-08
+
+### Fixed
+
+- **Logins collapsed after 4 idle hours — and a laptop sleeping through
+  the refresh window got logged out mid-case.** The login lifetime was
+  hardcoded in three places that silently had to agree: the JWT's `exp`,
+  the `rohy_auth` cookie's maxAge, and the `active_sessions` row. All
+  three now derive from one source, `authTtlSeconds()` (`JWT_EXPIRY`
+  env; default raised to **7 days** — safe because every request
+  re-checks server-side revocation, so logout/force-logout/password
+  change still invalidate a token instantly).
+
+  Separately, the client's "refresh 5 minutes before expiry" timer does
+  not run while the machine sleeps and is throttled in hidden tabs, so
+  it could fire *after* expiry — and any failed refresh (including a
+  transient network error at wake) hard-logged the user out.
+  `AuthContext` now also refreshes on tab wake/focus/reconnect when the
+  token is inside its last hour, and a failed refresh consults
+  `/auth/verify` before ending the session: only a definitive rejection
+  logs out. Logout additionally clears the scenario anchor introduced
+  in 2.9.21.
+
 ## [2.9.19] — 2026-08-07
 
 ### Fixed

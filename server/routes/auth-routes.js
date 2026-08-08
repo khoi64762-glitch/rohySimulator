@@ -7,6 +7,7 @@ import bcrypt from 'bcrypt';
 import rateLimit from 'express-rate-limit';
 import {
     authenticateToken,
+    authTtlSeconds,
     generateToken,
     recordActiveSession,
     revokeActiveSessionByHash,
@@ -51,7 +52,9 @@ import {
     releaseInviteUse,
 } from '../lib/invites.js';
 
-function authCookieOptions(maxAgeSeconds = 4 * 60 * 60) {
+// maxAge defaults to the shared auth TTL — a cookie that dies before the
+// JWT inside it silently logs cookie-mode users out early.
+function authCookieOptions(maxAgeSeconds = authTtlSeconds()) {
     return {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
@@ -618,8 +621,9 @@ router.get('/auth/verify', authenticateToken, (req, res) => {
 
 // POST /api/auth/refresh — rotate the JWT inside an active session.
 //
-// The client calls this proactively before the 4h JWT expires (from
-// AuthContext via a setInterval). We:
+// The client calls this proactively before the JWT expires (from
+// AuthContext, scheduled off the token's exp claim and re-armed on
+// tab wake). We:
 //   1. Re-issue a fresh JWT bound to the same user (same role/tenant).
 //   2. Insert a new active_sessions row keyed on the new token's hash.
 //   3. Revoke the OLD active_sessions row (the one used to authenticate
