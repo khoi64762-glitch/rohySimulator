@@ -3461,7 +3461,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/cohorts-routes.js:807",
+        "x-rohy-source": "server/routes/cohorts-routes.js:833",
         "x-rohy-auth": [
           "authenticateToken",
           "requireEducator"
@@ -3496,7 +3496,42 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/cohorts-routes.js:968",
+        "x-rohy-source": "server/routes/cohorts-routes.js:994",
+        "x-rohy-auth": [
+          "authenticateToken",
+          "requireStudent"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/cohorts/mine": {
+      "get": {
+        "summary": "Get /cohorts/mine",
+        "tags": [
+          "cohorts"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Validation error (envelope via server/redaction.js)"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Insufficient role"
+          }
+        },
+        "x-rohy-source": "server/routes/cohorts-routes.js:271",
         "x-rohy-auth": [
           "authenticateToken",
           "requireStudent"
@@ -3531,7 +3566,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/cohorts-routes.js:375",
+        "x-rohy-source": "server/routes/cohorts-routes.js:401",
         "x-rohy-auth": [
           "authenticateToken",
           "requireEducator"
@@ -3564,7 +3599,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/cohorts-routes.js:262",
+        "x-rohy-source": "server/routes/cohorts-routes.js:288",
         "x-rohy-auth": [
           "authenticateToken",
           "requireEducator"
@@ -3597,7 +3632,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/cohorts-routes.js:304",
+        "x-rohy-source": "server/routes/cohorts-routes.js:330",
         "x-rohy-auth": [
           "authenticateToken",
           "requireEducator"
@@ -3632,7 +3667,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/cohorts-routes.js:1445",
+        "x-rohy-source": "server/routes/cohorts-routes.js:1484",
         "x-rohy-auth": [
           "authenticateToken",
           "requireEducator"
@@ -3667,7 +3702,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/cohorts-routes.js:1804",
+        "x-rohy-source": "server/routes/cohorts-routes.js:1843",
         "x-rohy-auth": [
           "authenticateToken",
           "requireEducator"
@@ -3702,7 +3737,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/cohorts-routes.js:1488",
+        "x-rohy-source": "server/routes/cohorts-routes.js:1527",
         "x-rohy-auth": [
           "authenticateToken",
           "requireEducator"
@@ -3737,7 +3772,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/cohorts-routes.js:1815",
+        "x-rohy-source": "server/routes/cohorts-routes.js:1854",
         "x-rohy-auth": [
           "authenticateToken",
           "requireEducator"
@@ -3772,7 +3807,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/cohorts-routes.js:1782",
+        "x-rohy-source": "server/routes/cohorts-routes.js:1821",
         "x-rohy-auth": [
           "authenticateToken",
           "requireEducator"
@@ -3807,7 +3842,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/cohorts-routes.js:1793",
+        "x-rohy-source": "server/routes/cohorts-routes.js:1832",
         "x-rohy-auth": [
           "authenticateToken",
           "requireEducator"
@@ -3842,7 +3877,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/cohorts-routes.js:1838",
+        "x-rohy-source": "server/routes/cohorts-routes.js:1877",
         "x-rohy-auth": [
           "authenticateToken",
           "requireEducator"
@@ -3877,7 +3912,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/cohorts-routes.js:1826",
+        "x-rohy-source": "server/routes/cohorts-routes.js:1865",
         "x-rohy-auth": [
           "authenticateToken",
           "requireEducator"
@@ -3912,7 +3947,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/cohorts-routes.js:531",
+        "x-rohy-source": "server/routes/cohorts-routes.js:557",
         "x-rohy-auth": [
           "authenticateToken",
           "requireEducator"
@@ -3947,7 +3982,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/cohorts-routes.js:632",
+        "x-rohy-source": "server/routes/cohorts-routes.js:658",
         "x-rohy-auth": [
           "authenticateToken",
           "requireEducator"
@@ -3980,7 +4015,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/cohorts-routes.js:659",
+        "x-rohy-source": "server/routes/cohorts-routes.js:685",
         "x-rohy-auth": [
           "authenticateToken",
           "requireEducator"
@@ -4015,7 +4050,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/cohorts-routes.js:1334",
+        "x-rohy-source": "server/routes/cohorts-routes.js:1373",
         "x-rohy-auth": [
           "authenticateToken",
           "requireEducator"
@@ -4050,7 +4085,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/cohorts-routes.js:1283",
+        "x-rohy-source": "server/routes/cohorts-routes.js:1322",
         "x-rohy-auth": [
           "authenticateToken",
           "requireEducator"
@@ -4085,7 +4120,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/cohorts-routes.js:1170",
+        "x-rohy-source": "server/routes/cohorts-routes.js:1209",
         "x-rohy-auth": [
           "authenticateToken",
           "requireEducator"
@@ -4120,7 +4155,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/cohorts-routes.js:952",
+        "x-rohy-source": "server/routes/cohorts-routes.js:978",
         "x-rohy-auth": [
           "authenticateToken",
           "requireEducator"
@@ -4153,7 +4188,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/cohorts-routes.js:933",
+        "x-rohy-source": "server/routes/cohorts-routes.js:959",
         "x-rohy-auth": [
           "authenticateToken",
           "requireEducator"
@@ -4188,7 +4223,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/cohorts-routes.js:461",
+        "x-rohy-source": "server/routes/cohorts-routes.js:487",
         "x-rohy-auth": [
           "authenticateToken",
           "requireEducator"
@@ -4223,7 +4258,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/cohorts-routes.js:768",
+        "x-rohy-source": "server/routes/cohorts-routes.js:794",
         "x-rohy-auth": [
           "authenticateToken",
           "requireEducator"
@@ -4258,7 +4293,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/cohorts-routes.js:496",
+        "x-rohy-source": "server/routes/cohorts-routes.js:522",
         "x-rohy-auth": [
           "authenticateToken",
           "requireEducator"
@@ -4291,7 +4326,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/cohorts-routes.js:714",
+        "x-rohy-source": "server/routes/cohorts-routes.js:740",
         "x-rohy-auth": [
           "authenticateToken",
           "requireEducator"
@@ -4326,7 +4361,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/cohorts-routes.js:1124",
+        "x-rohy-source": "server/routes/cohorts-routes.js:1163",
         "x-rohy-auth": [
           "authenticateToken",
           "requireEducator"
@@ -4361,7 +4396,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/cohorts-routes.js:1221",
+        "x-rohy-source": "server/routes/cohorts-routes.js:1260",
         "x-rohy-auth": [
           "authenticateToken",
           "requireEducator"
@@ -4396,7 +4431,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/cohorts-routes.js:871",
+        "x-rohy-source": "server/routes/cohorts-routes.js:897",
         "x-rohy-auth": [
           "authenticateToken",
           "requireEducator"
@@ -4431,7 +4466,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/cohorts-routes.js:904",
+        "x-rohy-source": "server/routes/cohorts-routes.js:930",
         "x-rohy-auth": [
           "authenticateToken",
           "requireEducator"

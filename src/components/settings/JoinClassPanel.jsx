@@ -1,18 +1,37 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { GraduationCap, Loader2 } from 'lucide-react';
+import { GraduationCap, Loader2, Users } from 'lucide-react';
 import { useToast } from '../../contexts/ToastContext';
 import { ApiError } from '../../services/apiClient';
-import { joinCohort } from '../../services/cohortsService';
+import { joinCohort, getMyCohorts } from '../../services/cohortsService';
 
 // Minimal student self-join: enter a join code shared by a teacher.
 // Lives inside UserProfilePanel so every user (incl. students) can reach it
 // from the profile menu without a new top-level surface.
+// Below the form, "My classes" lists the caller's live memberships
+// (GET /cohorts/mine) and refreshes after a successful join, so joining a
+// class is visibly confirmed instead of vanishing behind a toast.
 export default function JoinClassPanel() {
-    const { t } = useTranslation('profile');
+    const { t, i18n } = useTranslation('profile');
     const toast = useToast();
     const [code, setCode] = useState('');
     const [submitting, setSubmitting] = useState(false);
+    // null = still loading; [] = loaded and empty.
+    const [classes, setClasses] = useState(null);
+    const [listFailed, setListFailed] = useState(false);
+
+    const loadClasses = useCallback(async () => {
+        try {
+            const data = await getMyCohorts();
+            setClasses(Array.isArray(data?.cohorts) ? data.cohorts : []);
+            setListFailed(false);
+        } catch {
+            setClasses([]);
+            setListFailed(true);
+        }
+    }, []);
+
+    useEffect(() => { loadClasses(); }, [loadClasses]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -24,6 +43,7 @@ export default function JoinClassPanel() {
             const name = data?.cohort?.name || t('join_class_fallback_name');
             setCode('');
             toast.success(t('join_class_success', { name }));
+            loadClasses();
         } catch (err) {
             const msg = err instanceof ApiError && err.message
                 ? err.message
@@ -32,6 +52,15 @@ export default function JoinClassPanel() {
         } finally {
             setSubmitting(false);
         }
+    };
+
+    // sqlite emits 'YYYY-MM-DD HH:MM:SS' (UTC, no zone marker); normalise to
+    // ISO+Z so the Date is anchored correctly before locale formatting.
+    const formatJoined = (value) => {
+        if (!value) return null;
+        const iso = String(value).replace(' ', 'T');
+        const date = new Date(iso.endsWith('Z') ? iso : `${iso}Z`);
+        return Number.isNaN(date.getTime()) ? null : date.toLocaleDateString(i18n.language);
     };
 
     return (
@@ -71,6 +100,43 @@ export default function JoinClassPanel() {
                     {t('join_class_button')}
                 </button>
             </form>
+
+            <div className="space-y-2">
+                <h3 className="text-sm font-bold text-neutral-300 flex items-center gap-2">
+                    <Users className="w-4 h-4" /> {t('my_classes_title')}
+                </h3>
+                {classes === null ? (
+                    <div className="flex items-center gap-2 text-xs text-neutral-500">
+                        <Loader2 className="w-4 h-4 animate-spin" /> {t('my_classes_loading')}
+                    </div>
+                ) : listFailed ? (
+                    <p className="text-xs text-red-400">{t('my_classes_error')}</p>
+                ) : classes.length === 0 ? (
+                    <p className="text-xs text-neutral-500">{t('my_classes_empty')}</p>
+                ) : (
+                    <ul className="space-y-2">
+                        {classes.map((cls) => {
+                            const joined = formatJoined(cls.joined_at);
+                            return (
+                                <li
+                                    key={cls.id}
+                                    className="p-3 bg-neutral-800/50 border border-neutral-700 rounded-lg"
+                                >
+                                    <div className="text-sm font-medium text-white">{cls.name}</div>
+                                    {cls.description && (
+                                        <div className="text-xs text-neutral-400 mt-0.5">{cls.description}</div>
+                                    )}
+                                    {joined && (
+                                        <div className="text-xs text-neutral-500 mt-1">
+                                            {t('my_classes_joined', { date: joined })}
+                                        </div>
+                                    )}
+                                </li>
+                            );
+                        })}
+                    </ul>
+                )}
+            </div>
         </div>
     );
 }

@@ -9,6 +9,21 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.32] — 2026-08-08
+
+### Added
+
+- **Students can finally see the classes they belong to** (tester bug
+  report 2.9.15 #18). Joining a class only fired a toast — no
+  student-facing endpoint listed memberships, so a successful join was
+  indistinguishable from a failed one. New `GET /cohorts/mine` (live,
+  tenant-scoped memberships) and a "My classes" list in the join panel
+  that refreshes after each join. A join code from a soft-deleted class
+  now answers "That class has been closed" (`COHORT_DELETED`) instead
+  of the generic not-found — the exact confusion that produced this bug
+  report, since every seeded per-case course is soft-deleted.
+  Cross-tenant codes still get the generic 404 (no existence leak).
+
 ## [2.9.31] — 2026-08-08
 
 ### Removed

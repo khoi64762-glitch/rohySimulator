@@ -31,6 +31,11 @@ function pRun(db, sql, params = []) {
         db.run(sql, params, function done(err) { err ? reject(err) : resolve(this); })
     );
 }
+function pGet(db, sql, params = []) {
+    return new Promise((resolve, reject) =>
+        db.get(sql, params, (err, row) => err ? reject(err) : resolve(row))
+    );
+}
 
 async function seedUser(db, { username, role, tenant = 1 }) {
     const hash = await bcrypt.hash(PASSWORD, 4);
@@ -304,5 +309,124 @@ describe('/api/cohorts routes', () => {
         expect(gone.status).toBe(404);
         const list = await (await teacherA('/api/cohorts')).json();
         expect(list.cohorts.map(c => c.id)).not.toContain(cohortId);
+    });
+
+    // ------------------------------------------------------------------
+    // GET /cohorts/mine + deleted-code join (bug report 2.9.15 #18):
+    // a successful join used to be invisible (no student-facing membership
+    // list), and a code from a soft-deleted cohort 404'd exactly like a typo.
+    // ------------------------------------------------------------------
+
+    let mineId, otherId, closedId, closedCode;
+
+    async function createWithCode(name) {
+        const res = await teacherA('/api/cohorts', {
+            method: 'POST', body: JSON.stringify({ name, join_code: true }),
+        });
+        expect(res.status).toBe(201);
+        const { cohort } = await res.json();
+        expect(cohort.join_code).toBeTruthy();
+        return cohort;
+    }
+
+    it('GET /cohorts/mine returns only the caller\'s live memberships', async () => {
+        // Regression lock: joining a class was invisible — no student-facing
+        // endpoint listed the caller's memberships (bug report 2.9.15 #18).
+        const mine = await createWithCode('Mine 101');
+        const other = await createWithCode('Other 101');
+        const closed = await createWithCode('Closed 101');
+        mineId = mine.id; otherId = other.id; closedId = closed.id; closedCode = closed.join_code;
+
+        // Caller joins two cohorts; a different student joins the third.
+        for (const code of [mine.join_code, closed.join_code]) {
+            const res = await student('/api/cohorts/join', {
+                method: 'POST', body: JSON.stringify({ join_code: code }),
+            });
+            expect(res.status).toBe(200);
+        }
+        const student2 = authedFetch(server.baseUrl, await login(server.baseUrl, 'coh-student-2'));
+        const joined2 = await student2('/api/cohorts/join', {
+            method: 'POST', body: JSON.stringify({ join_code: other.join_code }),
+        });
+        expect(joined2.status).toBe(200);
+
+        // Soft-delete 'Closed 101' — its membership must drop out of /mine.
+        const del = await teacherA(`/api/cohorts/${closedId}`, { method: 'DELETE' });
+        expect(del.status).toBe(200);
+
+        const res = await student('/api/cohorts/mine');
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        const ids = body.cohorts.map(c => c.id);
+        expect(ids).toContain(mineId);
+        expect(ids).not.toContain(otherId);   // someone else's membership
+        expect(ids).not.toContain(closedId);  // soft-deleted cohort
+        const row = body.cohorts.find(c => c.id === mineId);
+        expect(row.name).toBe('Mine 101');
+        expect(row.joined_at).toBeTruthy();
+        expect(row.status).toBe('active');
+        expect(row.member_role).toBe('student');
+
+        const res2 = await student2('/api/cohorts/mine');
+        expect(res2.status).toBe(200);
+        const ids2 = (await res2.json()).cohorts.map(c => c.id);
+        expect(ids2).toContain(otherId);
+        expect(ids2).not.toContain(mineId);
+    });
+
+    it('GET /cohorts/mine is tenant-scoped even against a stray membership row', async () => {
+        // Regression lock: /mine must filter on cohorts.tenant_id, not trust
+        // cohort_members alone (bug report 2.9.15 #18).
+        const db = await openDb(server.dbPath);
+        try {
+            const t2 = await pGet(db, `SELECT id FROM users WHERE username = ?`, ['coh-t2-student']);
+            await pRun(
+                db,
+                `INSERT INTO cohort_members (cohort_id, user_id) VALUES (?, ?)`,
+                [mineId, t2.id]
+            );
+        } finally {
+            await closeDb(db);
+        }
+        const res = await t2Student('/api/cohorts/mine');
+        expect(res.status).toBe(200);
+        const ids = (await res.json()).cohorts.map(c => c.id);
+        expect(ids).not.toContain(mineId);
+    });
+
+    it('GET /cohorts/mine rejects unauthenticated callers', async () => {
+        const res = await fetch(`${server.baseUrl}/api/cohorts/mine`);
+        expect([401, 403]).toContain(res.status);
+    });
+
+    it('joining with a soft-deleted cohort\'s code says the class was closed', async () => {
+        // Regression lock: a code from a soft-deleted cohort answered the
+        // generic "No cohort found for that join code" — indistinguishable
+        // from a typo (bug report 2.9.15 #18).
+        const res = await student('/api/cohorts/join', {
+            method: 'POST', body: JSON.stringify({ join_code: closedCode }),
+        });
+        expect(res.status).toBe(404);
+        const body = await res.json();
+        expect(body.code).toBe('COHORT_DELETED');
+        expect(body.error).toBe('That class has been closed');
+    });
+
+    it('joining with an unknown code keeps the generic 404', async () => {
+        const res = await student('/api/cohorts/join', {
+            method: 'POST', body: JSON.stringify({ join_code: 'ZZZZZZZZ' }),
+        });
+        expect(res.status).toBe(404);
+        const body = await res.json();
+        expect(body.code).toBeUndefined();
+        expect(body.error).toBe('No cohort found for that join code');
+    });
+
+    it('cross-tenant caller gets the generic 404 for a deleted cohort\'s code (no existence leak)', async () => {
+        const res = await t2Student('/api/cohorts/join', {
+            method: 'POST', body: JSON.stringify({ join_code: closedCode }),
+        });
+        expect(res.status).toBe(404);
+        expect((await res.json()).code).toBeUndefined();
     });
 });

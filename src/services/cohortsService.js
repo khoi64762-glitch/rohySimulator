@@ -76,6 +76,10 @@ export const disableJoinCode = (id) => apiDelete(`/cohorts/${id}/join-code`);
 export const joinCohort = (joinCode) =>
     apiPost('/cohorts/join', { join_code: joinCode });
 
+// → { cohorts: [{id, name, description, joined_at, status, member_role}] } —
+// the CALLER's own live class memberships (any signed-in non-guest role).
+export const getMyCohorts = () => apiGet('/cohorts/mine');
+
 // --- Phase-4 read-only reporting (all requireEducator, own-cohort scoped) ---
 
 // → { cohort:{id,name}, roster:[{id,username,name,role,session_count,

@@ -259,6 +259,32 @@ router.get('/cohorts', authenticateToken, requireEducator, async (req, res, next
     }
 });
 
+// Student-facing self-service list: the CALLER's own live course memberships.
+// Before this route existed a successful join was invisible — the join toast
+// was the only evidence, and there was no student-reachable endpoint listing
+// what the caller belongs to (GET /cohorts is requireEducator by design).
+// requireStudent = every signed-in non-guest; the query is keyed on
+// req.user.id only, so there is nothing to own-check — a caller can never
+// name someone else's memberships.
+// ROUTE ORDER: must stay ABOVE GET /cohorts/:id, or Express matches 'mine'
+// as :id and students get the educator gate's 403.
+router.get('/cohorts/mine', authenticateToken, requireStudent, async (req, res, next) => {
+    try {
+        const rows = await dbAdapter.all(
+            `SELECT c.id, c.name, c.description, m.joined_at, m.status, m.member_role
+               FROM cohort_members m
+               JOIN cohorts c ON c.id = m.cohort_id
+              WHERE m.user_id = ? AND m.deleted_at IS NULL
+                AND c.tenant_id = ? AND c.deleted_at IS NULL
+              ORDER BY m.joined_at DESC, c.id DESC`,
+            [req.user.id, tenantId(req)]
+        );
+        res.json({ cohorts: rows });
+    } catch (err) {
+        next(err);
+    }
+});
+
 router.get('/cohorts/:id', authenticateToken, requireEducator, async (req, res, next) => {
     try {
         const cohort = await loadOwnedCohort(req, res);
@@ -982,6 +1008,19 @@ router.post('/cohorts/join', authenticateToken, requireStudent, async (req, res,
             [joinCode, tenantId(req)]
         );
         if (!cohort) {
+            // Distinguish "this class was closed" from "you typed it wrong":
+            // in a fresh install every seeded per-case course is soft-deleted,
+            // so a perfectly transcribed code from an old slide used to read
+            // as a typo. Same tenant filter as the live lookup — a cross-tenant
+            // caller still gets the generic 404, no existence leak.
+            const closed = await dbAdapter.get(
+                `SELECT id FROM cohorts
+                  WHERE join_code = ? AND tenant_id = ? AND deleted_at IS NOT NULL`,
+                [joinCode, tenantId(req)]
+            );
+            if (closed) {
+                return res.status(404).json({ error: 'That class has been closed', code: 'COHORT_DELETED' });
+            }
             return res.status(404).json({ error: 'No cohort found for that join code' });
         }
         const { created, revived } = await addMember(cohort.id, req.user.id);
