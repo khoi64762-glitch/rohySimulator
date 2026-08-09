@@ -196,9 +196,17 @@ COPY --from=piper-builder --chown=node:node /piper-out/server/data/piper ./serve
 COPY --chown=node:node deploy/docker/entrypoint.sh /usr/local/bin/rohy-entrypoint
 RUN chmod +x /usr/local/bin/rohy-entrypoint
 
+# Runtime uploads (body-map silhouettes land in public/uploads/bodymap — see
+# server/routes/uploads-routes.js). The repo's public/ tree is build-input
+# only (Vite bakes it into frontend/), so the directory does not exist in the
+# image unless we create it — and a named volume mounted over a NONEXISTENT
+# path is created root-owned, which breaks writes for the node user. Create
+# it with the right ownership so the rohy-uploads volume inherits it.
+RUN mkdir -p /opt/rohy/public/uploads && chown -R node:node /opt/rohy/public
+
 # Persistent state lives in volumes so `docker compose down && up` doesn't
-# wipe the DB or force a 330 MB Kokoro re-download.
-VOLUME ["/var/lib/rohy", "/var/cache/rohy-hf"]
+# wipe the DB, force a 330 MB Kokoro re-download, or drop uploaded images.
+VOLUME ["/var/lib/rohy", "/var/cache/rohy-hf", "/opt/rohy/public/uploads"]
 
 ENV NODE_ENV=production \
     PORT=4000 \

@@ -9,6 +9,19 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.37] — 2026-08-09
+
+### Fixed
+
+- **Uploaded body-map images now survive image redeploys.** They were
+  written into the container layer (`public/uploads/`), which every
+  redeploy discards. New named volume `rohy-uploads` mounted at
+  `/opt/rohy/public/uploads`; the runtime image pre-creates the
+  directory node-owned so the volume inherits correct ownership (a
+  volume mounted over a nonexistent path is created root-owned and
+  breaks writes). Additive for existing stacks — the volume starts
+  empty, matching what a redeploy would have left anyway.
+
 ## [2.9.36] — 2026-08-09
 
 ### Fixed
