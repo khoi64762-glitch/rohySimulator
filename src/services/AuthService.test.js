@@ -12,7 +12,8 @@
 // CONTRACT covered:
 //   1. login()         — POSTs JSON to /api/auth/login, persists token, throws on failure paths
 //   2. register()      — POSTs JSON to /api/auth/register, persists token, throws on failure
-//   3. verifyToken()   — sends Bearer auth, returns user, clears token on 401/network error
+//   3. verifyToken()   — sends Bearer auth, returns user; null + token cleared on
+//                        definitive rejection; THROWS (token kept) on network error
 //   4. logout()        — clears 'token' from localStorage
 //   5. getToken()      — reads 'token' from localStorage
 //   6. authHeaders()   — returns { Authorization: 'Bearer <t>' } when token present, {} otherwise
@@ -222,14 +223,17 @@ describe('AuthService.verifyToken', () => {
         expect(localStorage.getItem('token')).toBeNull();
     });
 
-    it('clears the token and returns null when fetch throws (network error)', async () => {
+    // Regression lock: verifyToken used to swallow network errors into the
+    // same null as a real rejection AND delete the token — so a wifi blip
+    // read as "logged out", while AuthContext's verify-before-logout branch
+    // (which expected a throw) was dead code and revoked sessions kept a
+    // zombie UI (Codex adversarial review of v2.9.20).
+    it('THROWS on network error and keeps the stored token', async () => {
         localStorage.setItem('token', 'tok-net');
         fetchSpy.mockRejectedValueOnce(new TypeError('network down'));
 
-        const user = await AuthService.verifyToken();
-
-        expect(user).toBeNull();
-        expect(localStorage.getItem('token')).toBeNull();
+        await expect(AuthService.verifyToken()).rejects.toThrow();
+        expect(localStorage.getItem('token')).toBe('tok-net');
     });
 });
 

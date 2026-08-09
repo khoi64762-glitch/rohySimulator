@@ -95,17 +95,26 @@ export const AuthProvider = ({ children }) => {
                 // Refresh failed — but that is NOT proof the session is dead.
                 // A laptop waking from sleep often loses the first request to
                 // a not-yet-up network; hard-logging-out here threw users out
-                // of running cases. Ask /auth/verify: if the cookie/token
-                // still authenticates, keep the session and retry shortly;
-                // only when verify also rejects is the session truly gone.
+                // of running cases. Ask /auth/verify and use its full
+                // contract: a user object means the session still stands
+                // (retry the refresh shortly); null means the server
+                // definitively rejected it (log out); a THROW is a network
+                // failure (retry — do not log out on a wifi blip). NB
+                // verifyToken never threw on rejection historically, so a
+                // catch-only branch here was dead code and a revoked session
+                // kept its zombie UI forever.
                 try {
-                    await AuthService.verifyToken();
+                    const stillValid = await AuthService.verifyToken();
                     if (cancelled) return;
-                    timer = setTimeout(tick, 60 * 1000);
+                    if (stillValid) {
+                        timer = setTimeout(tick, 60 * 1000);
+                    } else {
+                        AuthService.logout();
+                        setUser(null);
+                    }
                 } catch {
                     if (cancelled) return;
-                    AuthService.logout();
-                    setUser(null);
+                    timer = setTimeout(tick, 60 * 1000);
                 }
             } finally {
                 refreshing = false;

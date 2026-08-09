@@ -160,4 +160,28 @@ describe('treatment debrief endpoint (bug report 2.9.15 #10)', () => {
             { treatment_name: 'TDB Heparinol', feedback_if_missed: 'Anticoagulation was expected.' },
         ]);
     });
+
+    // Regression lock: ordering was not terminal at session end, so End &
+    // Debrief was a cheat flow — end the session, read the missed-expected
+    // list above, then order the revealed treatments into the ended session
+    // to farm their points (Codex adversarial review of v2.9.30).
+    it('ordering into an ended session is rejected (409 SESSION_ENDED)', async () => {
+        const res = await fetch(
+            `${server.baseUrl}/api/sessions/${sessionId}/order-treatment`,
+            {
+                method: 'POST',
+                headers: {
+                    authorization: `Bearer ${studentToken}`,
+                    'content-type': 'application/json',
+                },
+                body: JSON.stringify({ treatment_type: 'medication', treatment_name: 'TDB Heparinol', dose: '5000', route: 'IV' }),
+            });
+        expect(res.status).toBe(409);
+        const body = await res.json();
+        expect(body.code).toBe('SESSION_ENDED');
+
+        // And the debrief total must not have moved.
+        const debrief = await (await getDebrief(studentToken)).json();
+        expect(debrief.total_points).toBe(100);
+    });
 });

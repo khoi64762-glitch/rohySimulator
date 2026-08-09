@@ -195,4 +195,22 @@ describe('useAlarms', () => {
       vi.useRealTimers();
     }
   });
+
+  // Regression lock: fire-state refs were only OVERWRITTEN when the new
+  // session had a sessionStorage entry — switching to a fresh session
+  // carried the old session's fired keys forward and suppressed an
+  // identical breach for up to the 5-minute refresh window (Codex
+  // adversarial review of v2.9.21).
+  it('re-fires for a new session with no stored fire-state (refs reset on session change)', async () => {
+    window.sessionStorage.clear();
+    const { rerender } = renderHook(({ sid }) => useAlarms({ hr: 130 }, sid), {
+      initialProps: { sid: 'session-1' },
+    });
+    await waitFor(() => expect(notificationState.notify).toHaveBeenCalledTimes(1));
+
+    // Same breach, brand-new session: must count as a first fire again.
+    rerender({ sid: 'session-2' });
+    await waitFor(() => expect(notificationState.notify).toHaveBeenCalledTimes(2));
+    expect(notificationState.notify.mock.calls[1][0].data.sessionId).toBe('session-2');
+  });
 });

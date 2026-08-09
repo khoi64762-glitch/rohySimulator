@@ -9,6 +9,38 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.35] — 2026-08-09
+
+### Fixed
+
+Three defects surfaced by an adversarial (Codex) review of the
+v2.9.20–v2.9.34 series:
+
+- **A revoked session could keep a zombie UI forever.** The
+  verify-before-logout path added in v2.9.20 expected
+  `AuthService.verifyToken()` to throw on rejection — but it returned
+  `null` for both a real rejection and a network blip (and deleted the
+  bearer token on the blip). The contract is now explicit: user on
+  success, null + token cleared on definitive rejection (→ logout),
+  THROW with token kept on network failure (→ retry, never logout).
+
+- **Switching sessions could silence an identical alarm.** The v2.9.21
+  alarm fire-state restore only *overwrote* the refs when the new
+  session had stored state; a fresh session inherited the previous
+  session's fired keys and suppressed the same breach for up to the
+  5-minute refresh window. Refs now reset when no stored state exists.
+
+- **End & Debrief was a cheat flow.** Ordering was not terminal at
+  session end: a learner could end the session, read the
+  missed-expected list from the debrief, then order the revealed
+  treatments into the ended session to farm their points. Treatment
+  orders on an ended session now return 409 `SESSION_ENDED`.
+
+Also reviewed and accepted as designed: the order response's
+`is_expected`/`points_awarded` fields (they power the intentional
+points toast and CI warning; per-order probing reveals only what the
+learner has already committed to).
+
 ## [2.9.34] — 2026-08-09
 
 ### Fixed

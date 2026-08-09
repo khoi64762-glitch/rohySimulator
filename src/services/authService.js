@@ -77,27 +77,29 @@ export const AuthService = {
     // Verify the current session. Cookie-mode clients send the rohy_auth
     // cookie via credentials:'same-origin'; legacy bearer-mode clients
     // send Authorization: Bearer if they still have a localStorage token.
-    // Either path returns the user record on success.
+    //
+    // Contract (callers depend on the distinction): returns the user on
+    // success, returns null on a DEFINITIVE rejection (the server answered
+    // non-2xx — session dead, legacy token dropped), and THROWS on a
+    // network failure (offline laptop waking up, server restarting). A
+    // network error must not delete the token or read as "logged out" —
+    // conflating the two either logs users out on a wifi blip or leaves a
+    // zombie UI running on a revoked session.
     async verifyToken() {
         const legacyToken = localStorage.getItem('token');
         const headers = legacyToken ? { Authorization: `Bearer ${legacyToken}` } : {};
-        try {
-            const response = await fetch(apiUrl(`/auth/verify`), {
-                credentials: 'same-origin',
-                headers,
-            });
+        const response = await fetch(apiUrl(`/auth/verify`), {
+            credentials: 'same-origin',
+            headers,
+        });
 
-            if (!response.ok) {
-                if (legacyToken) localStorage.removeItem('token');
-                return null;
-            }
-
-            const data = await response.json();
-            return data.user;
-        } catch {
+        if (!response.ok) {
             if (legacyToken) localStorage.removeItem('token');
             return null;
         }
+
+        const data = await response.json();
+        return data.user;
     },
 
     // F-013: getProfile() was retired. It was localStorage-token-only and

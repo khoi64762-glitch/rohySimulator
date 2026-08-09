@@ -48,15 +48,27 @@ export const useAlarms = (vitals, sessionId) => {
     // mount so only genuinely new breaches fire.
     const fireStateKey = sessionId != null ? `rohy_alarm_fire_state:${sessionId}` : null;
     useEffect(() => {
-        if (!fireStateKey) return;
-        try {
-            const raw = sessionStorage.getItem(fireStateKey);
-            if (raw) {
-                const { keys, fires } = JSON.parse(raw);
-                activeKeysRef.current = new Set(Array.isArray(keys) ? keys : []);
-                lastFireRef.current = new Map(Array.isArray(fires) ? fires : []);
-            }
-        } catch { /* corrupt entry — fall back to fresh state */ }
+        // Restore this session's fire-state — or RESET when there is none.
+        // Without the reset branch, switching sessions inside a mounted
+        // component carried the previous session's fired-keys forward, and
+        // an identical breach in the new session was silently suppressed
+        // for up to the 5-minute refresh window.
+        let restored = false;
+        if (fireStateKey) {
+            try {
+                const raw = sessionStorage.getItem(fireStateKey);
+                if (raw) {
+                    const { keys, fires } = JSON.parse(raw);
+                    activeKeysRef.current = new Set(Array.isArray(keys) ? keys : []);
+                    lastFireRef.current = new Map(Array.isArray(fires) ? fires : []);
+                    restored = true;
+                }
+            } catch { /* corrupt entry — fall back to fresh state */ }
+        }
+        if (!restored) {
+            activeKeysRef.current = new Set();
+            lastFireRef.current = new Map();
+        }
     }, [fireStateKey]);
     const persistFireState = useCallback(() => {
         if (!fireStateKey) return;

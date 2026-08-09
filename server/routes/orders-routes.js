@@ -1849,11 +1849,18 @@ router.post('/sessions/:sessionId/order-treatment', authenticateToken, (req, res
     }
 
     // Verify session and access (snapshot-aware select for downstream config)
-    dbAdapter.get('SELECT s.user_id, s.case_id, s.case_snapshot, c.config FROM sessions s JOIN cases c ON s.case_id = c.id WHERE s.id = ? AND s.tenant_id = ?', [sessionId, tenantId(req)], (err, session) => {
+    dbAdapter.get('SELECT s.user_id, s.case_id, s.case_snapshot, s.status, s.end_time, c.config FROM sessions s JOIN cases c ON s.case_id = c.id WHERE s.id = ? AND s.tenant_id = ?', [sessionId, tenantId(req)], (err, session) => {
         if (err) return res.status(500).json({ error: err.message });
         if (!session) return res.status(404).json({ error: 'Session not found' });
         if (session.user_id !== req.user.id && !hasRoleAtLeast(req.user, ROLE_RANKS.educator)) {
             return res.status(403).json({ error: 'Access denied' });
+        }
+        // An ended session takes no more orders. Without this, End & Debrief
+        // became a cheat flow: end the session, read the missed-expected
+        // list from the debrief endpoint, then keep ordering into the ended
+        // session to farm the points and feedback the debrief just revealed.
+        if (session.end_time || session.status === 'completed' || session.status === 'abandoned') {
+            return res.status(409).json({ error: 'Session has ended — no further orders can be placed', code: 'SESSION_ENDED' });
         }
 
         // Check for contraindication

@@ -2579,7 +2579,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/orders-routes.js:2404",
+        "x-rohy-source": "server/routes/orders-routes.js:2411",
         "x-rohy-auth": [
           "authenticateToken",
           "requireEducator"
@@ -8959,7 +8959,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/orders-routes.js:2283",
+        "x-rohy-source": "server/routes/orders-routes.js:2290",
         "x-rohy-auth": [
           "authenticateToken"
         ],
@@ -8993,7 +8993,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/orders-routes.js:1950",
+        "x-rohy-source": "server/routes/orders-routes.js:1957",
         "x-rohy-auth": [
           "authenticateToken"
         ],
@@ -9397,7 +9397,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/orders-routes.js:2142",
+        "x-rohy-source": "server/routes/orders-routes.js:2149",
         "x-rohy-auth": [
           "authenticateToken"
         ],
@@ -9900,7 +9900,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/orders-routes.js:2219",
+        "x-rohy-source": "server/routes/orders-routes.js:2226",
         "x-rohy-auth": [
           "authenticateToken"
         ],
@@ -9934,7 +9934,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/orders-routes.js:2177",
+        "x-rohy-source": "server/routes/orders-routes.js:2184",
         "x-rohy-auth": [
           "authenticateToken"
         ],
@@ -10792,7 +10792,7 @@
             "description": "Insufficient role"
           }
         },
-        "x-rohy-source": "server/routes/orders-routes.js:2486",
+        "x-rohy-source": "server/routes/orders-routes.js:2493",
         "x-rohy-auth": [
           "authenticateToken"
         ],
