@@ -9,6 +9,31 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.34] — 2026-08-09
+
+### Fixed
+
+- **The Playwright e2e suite runs again** (it left CI on 2026-05-17 and
+  quietly rotted: 20 of 88 tests failed on the current app for harness
+  reasons, none of them app defects). Repairs: global-setup now
+  completes the first-run gates that shipped after the suite was
+  written (the admin Platform-setup wizard and the student welcome page
+  were occluding every assertion on a fresh e2e DB); the e2e server
+  disables the auth rate limiter like CI's audit server (login-heavy
+  specs and back-to-back local runs blew the 10/15-min cap and
+  cascade-429'd); the canary's login sentinel matched a heading that no
+  longer exists ("Sign In" → "Welcome back"); cookie-auth tests logged
+  in through the isolated `request` fixture and then read cookies from
+  the browser context — two different jars, so they could never have
+  passed as written (now `context.request`); and multi-tab tests waited
+  on a `/admin/i` sentinel the in-session UI no longer renders — they
+  now anchor on "End & Debrief", which also guarantees the restored
+  session has validated before the storage-event assertions run.
+  Result: 73/74 running tests pass (14 skipped); the one residual
+  failure (voice-runtime lock 2) passes 8/8 in isolation and fails only
+  from inter-spec state bleed on the shared server — the suite's known
+  pre-existing weakness, documented for a dedicated isolation pass.
+
 ## [2.9.33] — 2026-08-08
 
 ### Fixed

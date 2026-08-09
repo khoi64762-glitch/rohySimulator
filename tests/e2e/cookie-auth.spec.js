@@ -79,7 +79,11 @@ test.describe('cookie-mode auth lane (post-flag-day)', () => {
         expect(body.error).toMatch(/CSRF/i);
     });
 
-    test('cookie-auth POST with matching X-CSRF-Token succeeds and rotates rohy_auth', async ({ baseURL, request, context }) => {
+    test('cookie-auth POST with matching X-CSRF-Token succeeds and rotates rohy_auth', async ({ baseURL, context }) => {
+        // context.request shares the browser context's cookie jar — the
+        // standalone `request` fixture does NOT, so logging in through it
+        // left context.cookies() empty and every assertion below dangling.
+        const request = context.request;
         await request.post(`${baseURL}/api/auth/login`, {
             data: { username: 'admin', password: 'admin123' },
         });
@@ -110,7 +114,10 @@ test.describe('cookie-mode auth lane (post-flag-day)', () => {
         expect(authAfter).not.toBe(authBefore);
     });
 
-    test('logout clears both cookies', async ({ baseURL, request, context }) => {
+    test('logout clears both cookies', async ({ baseURL, context }) => {
+        // Same jar note as above: must be context.request, not the
+        // isolated `request` fixture.
+        const request = context.request;
         await request.post(`${baseURL}/api/auth/login`, {
             data: { username: 'admin', password: 'admin123' },
         });

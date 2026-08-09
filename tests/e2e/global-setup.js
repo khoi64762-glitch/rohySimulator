@@ -48,7 +48,31 @@ export default async function globalSetup(config) {
             const tokens = { admin, student, baseURL, mintedAt: new Date().toISOString() };
             fs.writeFileSync(TOKEN_FILE, JSON.stringify(tokens, null, 2));
 
-            console.log(`[globalSetup] minted tokens at ${TOKEN_FILE}`);
+            // First-run gates (shipped v2.7.1, after Playwright left CI):
+            // on a fresh e2e DB the admin gets the Platform-setup wizard and
+            // students get the welcome page — both render ABOVE the app and
+            // occlude everything the specs assert on. Complete both here so
+            // tests exercise the normal app; the wizard flows themselves can
+            // be tested by explicitly resetting the flags in a spec.
+            // Bearer requests skip CSRF, so plain PUTs with the minted
+            // tokens are enough.
+            const ctx = await pwRequest.newContext({ baseURL });
+            try {
+                const setupRes = await ctx.put('/api/platform-settings/setup', {
+                    headers: { Authorization: `Bearer ${admin.token}` },
+                    data: { completed: true },
+                });
+                if (!setupRes.ok()) throw new Error(`platform setup complete → ${setupRes.status()}: ${await setupRes.text()}`);
+                const prefRes = await ctx.put('/api/users/preferences', {
+                    headers: { Authorization: `Bearer ${student.token}` },
+                    // Same shape StudentFirstRun writes: first_run_done is a
+                    // VERSION number compared with >=, not a boolean.
+                    data: { onboarding_settings: { first_run_done: 1 } },
+                });
+                if (!prefRes.ok()) throw new Error(`student first-run complete → ${prefRes.status()}: ${await prefRes.text()}`);
+            } finally { await ctx.dispose(); }
+
+            console.log(`[globalSetup] minted tokens + completed first-run gates at ${TOKEN_FILE}`);
             return;
         } catch (err) {
             lastErr = err;

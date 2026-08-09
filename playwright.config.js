@@ -104,6 +104,12 @@ export default defineConfig({
             ROHY_DB: DB_PATH,
             JWT_SECRET: 'rohy-e2e-secret',
             NODE_ENV: 'test',
+            // The auth limiter caps 10 logins / 15 min / IP. globalSetup
+            // pre-mints two tokens, but specs that create-and-login fresh
+            // users (tenant, rbac) plus any back-to-back local runs blow
+            // the cap and cascade-429. Same switch CI's audit server uses;
+            // never set in production.
+            ROHY_DISABLE_AUTH_RATE_LIMIT: '1',
             // Keep the operator's piper/llm config out of e2e — tests that
             // need TTS or LLM will mock at the network layer.
             PIPER_DISABLED: '1',

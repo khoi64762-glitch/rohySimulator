@@ -66,9 +66,10 @@ test.describe('canary', () => {
 
     test('unauthenticated visit lands on the login screen', async ({ page }) => {
         // Plain `page` fixture has no token injected. The SPA should
-        // render <LoginPage>. Looking for the literal "Sign In" heading
-        // (h2 in src/components/auth/LoginPage.jsx).
+        // render <LoginPage>. Its h2 is the i18n `welcome_back` string
+        // ("Welcome back" — src/components/auth/LoginPage.jsx); the old
+        // "Sign In" heading text predates the login-page redesign.
         await page.goto('/');
-        await expect(page.getByRole('heading', { name: /sign in/i })).toBeVisible({ timeout: 10_000 });
+        await expect(page.getByRole('heading', { name: /welcome back/i })).toBeVisible({ timeout: 10_000 });
     });
 });

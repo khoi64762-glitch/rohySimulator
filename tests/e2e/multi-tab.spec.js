@@ -137,8 +137,13 @@ test.describe('multi-tab session handling', () => {
                 timestamp: Date.now(),
             });
             await a.page.goto('/');
-            // Wait until the SPA past the login gate (admin badge or chrome).
-            await expect(a.page.getByText(/admin/i).first()).toBeVisible({ timeout: 10_000 });
+            // Wait for the SESSION chrome, not the login gate: 'End & Debrief'
+            // renders only once the seeded session has restored AND
+            // validated — which is also what arms the storage listener
+            // (App.jsx guards on sessionId). The old /admin/i sentinel
+            // matched nothing: the in-session UI no longer shows the
+            // username anywhere.
+            await expect(a.page.getByText(/End & Debrief/i).first()).toBeVisible({ timeout: 10_000 });
             // Banner must NOT be visible yet — only one tab so far.
             await expect(a.page.getByText(BANNER_RE)).toHaveCount(0);
 
@@ -185,7 +190,7 @@ test.describe('multi-tab session handling', () => {
                 timestamp: Date.now(),
             });
             await a.page.goto('/');
-            await expect(a.page.getByText(/admin/i).first()).toBeVisible({ timeout: 10_000 });
+            await expect(a.page.getByText(/End & Debrief/i).first()).toBeVisible({ timeout: 10_000 });
 
             const tabB = await a.context.newPage();
             try {
@@ -229,7 +234,7 @@ test.describe('multi-tab session handling', () => {
                 timestamp: Date.now(),
             });
             await a.page.goto('/');
-            await expect(a.page.getByText(/admin/i).first()).toBeVisible({ timeout: 10_000 });
+            await expect(a.page.getByText(/End & Debrief/i).first()).toBeVisible({ timeout: 10_000 });
 
             const tabB = await a.context.newPage();
             try {
@@ -296,7 +301,7 @@ test.describe('multi-tab session handling', () => {
                 timestamp: Date.now(),
             });
             await a.page.goto('/');
-            await expect(a.page.getByText(/admin/i).first()).toBeVisible({ timeout: 10_000 });
+            await expect(a.page.getByText(/End & Debrief/i).first()).toBeVisible({ timeout: 10_000 });
 
             const tabB = await a.context.newPage();
             try {
@@ -381,7 +386,7 @@ test.describe('multi-tab session handling', () => {
                 timestamp: Date.now(),
             });
             await a.page.goto('/');
-            await expect(a.page.getByText(/admin/i).first()).toBeVisible({ timeout: 10_000 });
+            await expect(a.page.getByText(/End & Debrief/i).first()).toBeVisible({ timeout: 10_000 });
 
             const tabB = await a.context.newPage();
             try {
