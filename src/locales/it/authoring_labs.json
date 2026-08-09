@@ -34,6 +34,7 @@
   "could_not_find_tests": "Impossibile trovare gli esami: {names}",
   "csv_format": "Formato CSV: test_name, group, category, min_value, max_value, unit, normal_samples",
   "current_prefix": "Attuale:",
+  "default_labs_off_empty_warning": "Gli studenti NON vedranno alcun esame di laboratorio in questo caso: il catalogo completo è disattivato e non ci sono esami configurati. Riattiva il catalogo o aggiungi esami qui sotto.",
   "default_labs_title": "Tutti gli esami di laboratorio disponibili per impostazione predefinita",
   "default_labs_when_disabled": "Se disattivato: saranno disponibili solo gli esami che configuri di seguito.",
   "default_labs_when_enabled": "Se attivato: tutti gli oltre 77 esami di laboratorio disponibili con valori normali.",

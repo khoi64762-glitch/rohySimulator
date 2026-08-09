@@ -34,6 +34,7 @@
   "could_not_find_tests": "Could not find tests: {names}",
   "csv_format": "CSV format: test_name, group, category, min_value, max_value, unit, normal_samples",
   "current_prefix": "Current:",
+  "default_labs_off_empty_warning": "Students will see NO lab tests in this case: the full catalogue is turned off and no individual tests are configured. Re-enable the catalogue or add tests below.",
   "default_labs_title": "All Lab Tests Available by Default",
   "default_labs_when_disabled": "When disabled: Only tests you configure below will be available.",
   "default_labs_when_enabled": "When enabled: All 77+ lab tests available with normal values.",

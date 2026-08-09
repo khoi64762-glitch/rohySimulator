@@ -82,3 +82,31 @@ describe('LabInvestigationEditor apiFetch migration', () => {
         expect(searchCall[1].headers['X-Request-Id']).toBeTruthy();
     });
 });
+
+describe('empty-catalogue warning', () => {
+    // Regression lock: the only way students see an EMPTY lab catalogue is
+    // defaultLabsEnabled=false with no configured tests (wire-verified,
+    // bug report 2.9.15 #3) — and the toggle ships checked, so "selecting"
+    // it actually turns it off. The editor must say so out loud.
+    const renderEditor = (investigations) => renderWithProviders(
+        <LabInvestigationEditor
+            caseData={{ config: { investigations } }}
+            setCaseData={vi.fn()}
+            patientGender="Both"
+        />,
+        { withAuth: false, withNotifications: false, withToast: false }
+    );
+
+    it('warns when the catalogue is off and no tests are configured', () => {
+        renderEditor({ defaultLabsEnabled: false, labs: [] });
+        expect(screen.getByRole('alert')).toHaveTextContent(/no lab tests/i);
+    });
+
+    it('stays quiet when the catalogue is on, or when tests are configured', () => {
+        const { unmount } = renderEditor({ defaultLabsEnabled: true, labs: [] });
+        expect(screen.queryByRole('alert')).toBeNull();
+        unmount();
+        renderEditor({ defaultLabsEnabled: false, labs: [{ test_name: 'CBC', test_group: 'Hematology' }] });
+        expect(screen.queryByRole('alert')).toBeNull();
+    });
+});

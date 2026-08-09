@@ -9,6 +9,21 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.36] — 2026-08-09
+
+### Fixed
+
+- **Empty lab catalogue — the last open item of the 2.9.15 tester
+  report (#3) — closed with wire evidence.** Reproduced against a live
+  server: "All labs by default" ON + Instant Results + configured tests
+  returns the full catalogue (201 labs — the tester's claimed conflict
+  does not exist), and default OFF + configured tests returns exactly
+  those tests. The ONLY way to an empty catalogue is default OFF with
+  no tests persisted — and since the toggle ships checked, "selecting"
+  it actually turns it off. The Labs editor now shows a red warning the
+  moment that combination exists ("Students will see NO lab tests…"),
+  in all six languages.
+
 ## [2.9.35] — 2026-08-09
 
 ### Fixed

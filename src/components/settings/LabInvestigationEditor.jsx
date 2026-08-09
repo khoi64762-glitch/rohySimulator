@@ -537,6 +537,17 @@ export default function LabInvestigationEditor({ caseData, setCaseData, patientG
                         </div>
                     </div>
                 </label>
+                {/* Bug report 2.9.15 #3 (wire-verified): the only way students
+                    see an EMPTY lab catalogue is this toggle off with no
+                    configured tests — and since the toggle ships checked,
+                    "selecting" it actually turns it off. Say the consequence
+                    out loud instead of letting the case ship silent. */}
+                {!defaultLabsEnabled && configuredLabs.length === 0 && (
+                    <div className="mt-3 flex items-start gap-2 bg-red-900/30 border border-red-700/60 rounded-md p-3 text-sm text-red-200" role="alert">
+                        <span aria-hidden="true">⚠️</span>
+                        <span>{t('default_labs_off_empty_warning')}</span>
+                    </div>
+                )}
             </div>
 
             {/* Lab Timing Settings */}

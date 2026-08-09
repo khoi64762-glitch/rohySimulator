@@ -34,6 +34,7 @@
   "could_not_find_tests": "Tests nicht gefunden: {names}",
   "csv_format": "CSV-Format: test_name, group, category, min_value, max_value, unit, normal_samples",
   "current_prefix": "Aktuell:",
+  "default_labs_off_empty_warning": "Die Studierenden sehen in diesem Fall KEINE Labortests: Der Gesamtkatalog ist deaktiviert und es sind keine einzelnen Tests konfiguriert. Aktivieren Sie den Katalog wieder oder fügen Sie unten Tests hinzu.",
   "default_labs_title": "Alle Laboruntersuchungen standardmäßig verfügbar",
   "default_labs_when_disabled": "Wenn deaktiviert: Nur die unten konfigurierten Tests sind verfügbar.",
   "default_labs_when_enabled": "Wenn aktiviert: Alle über 77 Laboruntersuchungen mit Normalwerten verfügbar.",

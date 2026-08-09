@@ -34,6 +34,7 @@
   "could_not_find_tests": "Kunde inte hitta prover: {names}",
   "csv_format": "CSV-format: test_name, group, category, min_value, max_value, unit, normal_samples",
   "current_prefix": "Aktuellt:",
+  "default_labs_off_empty_warning": "Studenterna ser INGA laboratorieprover i detta fall: hela katalogen är avstängd och inga enskilda prover är konfigurerade. Aktivera katalogen igen eller lägg till prover nedan.",
   "default_labs_title": "Alla labbprover tillgängliga som standard",
   "default_labs_when_disabled": "När inaktiverat: endast prover du konfigurerar nedan är tillgängliga.",
   "default_labs_when_enabled": "När aktiverat: alla 77+ labbprover tillgängliga med normalvärden.",
