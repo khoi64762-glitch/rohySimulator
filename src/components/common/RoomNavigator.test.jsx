@@ -8,7 +8,8 @@
 
 import React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
+import { setAppLanguage } from '../../i18n/index.js';
 import RoomNavigator from './RoomNavigator';
 
 function renderNav(overrides = {}) {
@@ -22,7 +23,10 @@ function renderNav(overrides = {}) {
     return { onSelectRoom };
 }
 
-afterEach(() => cleanup());
+afterEach(async () => {
+    await setAppLanguage('en');
+    cleanup();
+});
 
 describe('RoomNavigator', () => {
     it('renders all five peer room buttons', () => {
@@ -60,4 +64,21 @@ describe('RoomNavigator', () => {
         expect(onSelectRoom).toHaveBeenCalledWith(expected);
     });
 
+    // The room key stays `radiology` (URL/state/tests depend on it); only the
+    // student-facing label says the room also holds the diagnostic tests
+    // (ECG, Holter, echo, cath live under the 'Cardiac' modality there).
+    it('labels the radiology room "Radiology & diagnostics" in English', () => {
+        renderNav();
+        const button = screen.getByRole('button', { name: /Radiology & diagnostics/ });
+        expect(button).toBeTruthy();
+        expect(button.textContent).toMatch(/imaging & tests/);
+    });
+
+    it('labels the radiology room "Radiologia e diagnostica" in Italian', async () => {
+        renderNav();
+        await setAppLanguage('it');
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: /Radiologia e diagnostica/ })).toBeTruthy();
+        });
+    });
 });

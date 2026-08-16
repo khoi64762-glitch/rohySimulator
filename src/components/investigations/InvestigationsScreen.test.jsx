@@ -202,7 +202,7 @@ describe('InvestigationsScreen — topbar', () => {
     it('renders the Radiology title when activeKind=radiology', async () => {
         const { container } = await renderScreen({ activeKind: 'radiology' });
         const header = headerOf(container);
-        expect(header.textContent).toMatch(/Radiology Room/);
+        expect(header.textContent).toMatch(/Radiology & diagnostics/);
     });
 
     it('does not render a topbar Back button (RoomNavigator owns exit)', async () => {

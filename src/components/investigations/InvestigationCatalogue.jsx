@@ -1,5 +1,11 @@
 import { useTranslation } from 'react-i18next';
 import { Check, Filter, Loader2, Plus, Search, Zap } from 'lucide-react';
+import {
+    FAMILY_LABEL_KEYS,
+    MODALITY_FAMILIES,
+    matchesModalityFamily,
+    modalityLabel,
+} from '../../services/diagnostics';
 
 // Left-rail catalogue used by InvestigationsScreen for both labs and
 // radiology. Pure display — fetching, polling, and the actual order
@@ -17,17 +23,34 @@ export default function InvestigationCatalogue({
     onSearchChange,
     groupFilter,
     onGroupFilterChange,
+    // Radiology only: 'all' | 'imaging' | 'diagnostics' coarse filter
+    // (server/shared/diagnostics.js). Labs pass nothing and get no chips.
+    familyFilter = 'all',
+    onFamilyFilterChange,
     loading,
     onSubmit,
     onSubmitInstant,
 }) {
     const { t } = useTranslation('investigations');
+    const isRadiology = kind === 'radiology';
+    // Radiology `test_group` is the stored English modality string; the
+    // group dropdown/headers show its translated label while the value
+    // (and the filter) keep the stored string.
+    const groupLabel = (group) => (isRadiology ? modalityLabel(t, group) : group);
+    // The family chip narrows what the group dropdown offers, so a student
+    // on "Diagnostics" only sees diagnostic modalities in the dropdown.
+    const visibleGroups = isRadiology
+        ? groups.filter((group) => matchesModalityFamily(group, familyFilter))
+        : groups;
     const filtered = items.filter((item) => {
+        const query = searchQuery.toLowerCase();
         const matchesSearch = !searchQuery
-            || item.test_name.toLowerCase().includes(searchQuery.toLowerCase())
-            || (item.test_group || '').toLowerCase().includes(searchQuery.toLowerCase());
+            || item.test_name.toLowerCase().includes(query)
+            || (item.test_group || '').toLowerCase().includes(query)
+            || (isRadiology && groupLabel(item.test_group || 'Other').toLowerCase().includes(query));
         const matchesGroup = groupFilter === 'all' || item.test_group === groupFilter;
-        return matchesSearch && matchesGroup;
+        const matchesFamily = !isRadiology || matchesModalityFamily(item.test_group, familyFilter);
+        return matchesSearch && matchesGroup && matchesFamily;
     });
     const grouped = groupByTestGroup(filtered);
 
@@ -56,6 +79,14 @@ export default function InvestigationCatalogue({
                         className="w-full pl-9 pr-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none transition-colors"
                     />
                 </div>
+                {isRadiology && onFamilyFilterChange && (
+                    <FamilyFilterChips
+                        theme={theme}
+                        value={familyFilter}
+                        onChange={onFamilyFilterChange}
+                        items={items}
+                    />
+                )}
                 <div className="relative">
                     <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                     <select
@@ -64,9 +95,9 @@ export default function InvestigationCatalogue({
                         className="w-full pl-9 pr-8 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white focus:border-cyan-500 focus:outline-none appearance-none cursor-pointer transition-colors"
                     >
                         <option value="all">{t('all_groups')}</option>
-                        {groups.map((group) => (
+                        {visibleGroups.map((group) => (
                             <option key={group} value={group}>
-                                {group} ({items.filter((i) => i.test_group === group).length})
+                                {groupLabel(group)} ({items.filter((i) => i.test_group === group).length})
                             </option>
                         ))}
                     </select>
@@ -82,7 +113,7 @@ export default function InvestigationCatalogue({
                 ) : Object.entries(grouped).map(([group, groupItems]) => (
                     <div key={group}>
                         <div className="px-1 pb-1.5 flex items-center gap-2">
-                            <span className="text-[10px] uppercase tracking-widest font-bold text-slate-500">{group}</span>
+                            <span className="text-[10px] uppercase tracking-widest font-bold text-slate-500">{groupLabel(group)}</span>
                             <span className="flex-1 h-px bg-slate-800" />
                             <span className="text-[10px] text-slate-600">{groupItems.length}</span>
                         </div>
@@ -137,6 +168,61 @@ export default function InvestigationCatalogue({
                     )}
                 </div>
             )}
+        </div>
+    );
+}
+
+// All | Imaging | Diagnostics segment for the radiology catalogue. The
+// "Radiology" room quietly holds the 12-lead ECG, Holter, echo and cath
+// studies under the 'Cardiac' modality; this row is how a learner looking
+// for a diagnostic test discovers they live here. Rendered as a radiogroup
+// so arrow keys move between chips and a screen reader announces the
+// active one; the count next to each label is the number of catalogue
+// studies the chip would show.
+function FamilyFilterChips({ theme, value, onChange, items }) {
+    const { t } = useTranslation('investigations');
+    const countFor = (family) => items.filter((item) => matchesModalityFamily(item.test_group, family)).length;
+    const onKeyDown = (event) => {
+        const index = MODALITY_FAMILIES.indexOf(value);
+        if (index < 0) return;
+        let next = null;
+        if (event.key === 'ArrowRight' || event.key === 'ArrowDown') next = (index + 1) % MODALITY_FAMILIES.length;
+        if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') next = (index - 1 + MODALITY_FAMILIES.length) % MODALITY_FAMILIES.length;
+        if (next === null) return;
+        event.preventDefault();
+        onChange(MODALITY_FAMILIES[next]);
+        event.currentTarget.querySelector(`[data-family="${MODALITY_FAMILIES[next]}"]`)?.focus();
+    };
+    return (
+        <div
+            role="radiogroup"
+            aria-label={t('filter_family_aria')}
+            data-testid="family-filter"
+            onKeyDown={onKeyDown}
+            className="flex items-center gap-1 mb-2 p-0.5 rounded-lg bg-slate-800/80 border border-slate-700"
+        >
+            {MODALITY_FAMILIES.map((family) => {
+                const active = family === value;
+                return (
+                    <button
+                        key={family}
+                        type="button"
+                        role="radio"
+                        aria-checked={active}
+                        data-family={family}
+                        tabIndex={active ? 0 : -1}
+                        onClick={() => onChange(family)}
+                        className={`flex-1 px-2 py-1 rounded-md text-xs font-medium transition-colors ${
+                            active
+                                ? `${theme.accentChip} border`
+                                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/60'
+                        }`}
+                    >
+                        {t(FAMILY_LABEL_KEYS[family])}
+                        <span className={`ml-1 tabular-nums ${active ? 'opacity-80' : 'text-slate-500'}`}>{countFor(family)}</span>
+                    </button>
+                );
+            })}
         </div>
     );
 }

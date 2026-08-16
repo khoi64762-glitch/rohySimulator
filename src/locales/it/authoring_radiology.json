@@ -14,7 +14,7 @@
   "findings": "Referto",
   "findings_default_hint": "Vuoto → il referto mostra il valore predefinito indicato sopra.",
   "findings_placeholder": "Descrivi cosa mostra l'esame...",
-  "heading": "6. Esami radiologici",
+  "heading": "6. Esami radiologici e diagnostici",
   "help": "Configura gli esami radiologici e i relativi risultati. Quando gli studenti richiedono questi esami, vedranno i referti che hai configurato.",
   "interpretation": "Interpretazione",
   "interpretation_default_hint": "Vuoto → il referto mostra il valore predefinito indicato sopra (stampato sotto \"Impressione\").",

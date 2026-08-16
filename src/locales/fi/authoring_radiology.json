@@ -14,7 +14,7 @@
   "findings": "Löydökset",
   "findings_default_hint": "Tyhjä → raportti näyttää yllä olevan oletusarvon.",
   "findings_placeholder": "Kuvaile, mitä tutkimus osoittaa...",
-  "heading": "6. Radiologiset tutkimukset",
+  "heading": "6. Radiologiset ja diagnostiset tutkimukset",
   "help": "Määritä radiologiset tutkimukset ja niiden tulokset. Kun opiskelijat tilaavat näitä tutkimuksia, he näkevät määrittämäsi löydökset.",
   "interpretation": "Tulkinta",
   "interpretation_default_hint": "Tyhjä → raportti näyttää yllä olevan oletusarvon (tulostetaan otsikon \"Lausunto\" alle).",

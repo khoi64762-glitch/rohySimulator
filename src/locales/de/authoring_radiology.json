@@ -14,7 +14,7 @@
   "findings": "Befund",
   "findings_default_hint": "Leer → der Bericht zeigt den oben stehenden Standardwert an.",
   "findings_placeholder": "Beschreiben Sie, was die Untersuchung zeigt...",
-  "heading": "6. Radiologische Untersuchungen",
+  "heading": "6. Radiologische & diagnostische Untersuchungen",
   "help": "Konfigurieren Sie radiologische Untersuchungen und ihre Ergebnisse. Wenn Studierende diese Untersuchungen anfordern, sehen sie die von Ihnen konfigurierten Befunde.",
   "interpretation": "Beurteilung",
   "interpretation_default_hint": "Leer → der Bericht zeigt den oben stehenden Standardwert an (unter \"Beurteilung\" gedruckt).",

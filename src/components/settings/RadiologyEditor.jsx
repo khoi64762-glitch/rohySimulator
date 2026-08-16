@@ -4,9 +4,17 @@ import { Plus, Trash2, Upload, Loader2, Scan, AlertCircle, RefreshCw, PenLine } 
 import { apiFetch } from '../../services/apiClient';
 import { useToast } from '../../contexts/ToastContext';
 import { DEFAULT_TURNAROUND_MINUTES } from '../../constants/turnaround';
-
-// Default modalities for custom studies
-const MODALITIES = ['X-Ray', 'CT', 'MRI', 'Ultrasound', 'Nuclear Medicine', 'Fluoroscopy', 'Cardiac', 'Other'];
+// The modality vocabulary is shared with the student ordering screen and the
+// server (server/shared/diagnostics.js) — the editor used to carry its own
+// list, which drifted from radiology_database.json (no DEXA, no Mammography).
+import {
+    DEFAULT_MODALITY,
+    FAMILY_LABEL_KEYS,
+    MODALITIES,
+    MODALITY_FAMILIES,
+    matchesModalityFamily,
+    modalityLabel,
+} from '../../services/diagnostics';
 
 /**
  * RadiologyEditor - Configure radiology studies for a case
@@ -23,10 +31,18 @@ export default function RadiologyEditor({ caseData, setCaseData }) {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [selectedModality, setSelectedModality] = useState('all');
+    // Imaging | Diagnostics segment above the modality dropdown — same
+    // families the student catalogue offers. Changing the family resets the
+    // modality pick so a stale "Cardiac" can't empty the imaging list.
+    const [selectedFamily, setSelectedFamily] = useState('all');
+    const selectFamily = (family) => {
+        setSelectedFamily(family);
+        setSelectedModality('all');
+    };
     const [showCustomForm, setShowCustomForm] = useState(false);
     const [customStudy, setCustomStudy] = useState({
         name: '',
-        modality: 'X-Ray',
+        modality: DEFAULT_MODALITY,
         bodyRegion: '',
         turnaroundMinutes: DEFAULT_TURNAROUND_MINUTES
     });
@@ -79,10 +95,13 @@ export default function RadiologyEditor({ caseData, setCaseData }) {
         return acc;
     }, {});
 
-    // Filter studies safely
+    // Filter studies safely: family segment first, then the modality pick.
+    const familyStudies = studies.filter(s => s && matchesModalityFamily(s.modality, selectedFamily));
+    const familyModalities = modalities.filter(mod => matchesModalityFamily(mod, selectedFamily));
     const filteredStudies = selectedModality === 'all'
-        ? studies
-        : studies.filter(s => s && s.modality === selectedModality);
+        ? familyStudies
+        : familyStudies.filter(s => s.modality === selectedModality);
+    const familyCount = (family) => studies.filter(s => s && matchesModalityFamily(s.modality, family)).length;
 
     // Add a new study configuration from master database.
     //
@@ -133,7 +152,7 @@ export default function RadiologyEditor({ caseData, setCaseData }) {
             isCustom: true
         };
         updateRadiology([...radiology, newStudy]);
-        setCustomStudy({ name: '', modality: 'X-Ray', bodyRegion: '', turnaroundMinutes: DEFAULT_TURNAROUND_MINUTES });
+        setCustomStudy({ name: '', modality: DEFAULT_MODALITY, bodyRegion: '', turnaroundMinutes: DEFAULT_TURNAROUND_MINUTES });
         setShowCustomForm(false);
     };
 
@@ -205,6 +224,8 @@ export default function RadiologyEditor({ caseData, setCaseData }) {
             'Ultrasound': 'text-green-400 bg-green-900/30 border-green-700/50',
             'Nuclear Medicine': 'text-yellow-400 bg-yellow-900/30 border-yellow-700/50',
             'Fluoroscopy': 'text-cyan-400 bg-cyan-900/30 border-cyan-700/50',
+            'Mammography': 'text-pink-400 bg-pink-900/30 border-pink-700/50',
+            'DEXA': 'text-teal-400 bg-teal-900/30 border-teal-700/50',
             'Cardiac': 'text-red-400 bg-red-900/30 border-red-700/50'
         };
         return colors[modality] || 'text-neutral-400 bg-neutral-800/50 border-neutral-700';
@@ -218,6 +239,8 @@ export default function RadiologyEditor({ caseData, setCaseData }) {
             'Ultrasound': 'text-green-400',
             'Nuclear Medicine': 'text-yellow-400',
             'Fluoroscopy': 'text-cyan-400',
+            'Mammography': 'text-pink-400',
+            'DEXA': 'text-teal-400',
             'Cardiac': 'text-red-400'
         };
         return colors[modality] || 'text-neutral-400';
@@ -242,13 +265,43 @@ export default function RadiologyEditor({ caseData, setCaseData }) {
                             onChange={(e) => setSelectedModality(e.target.value)}
                             className="input-dark text-xs max-w-[180px]"
                         >
-                            <option value="all">{t('filter_all', { count: studies.length })}</option>
-                            {modalities.map(mod => (
+                            <option value="all">{t('filter_all', { count: familyStudies.length })}</option>
+                            {familyModalities.map(mod => (
                                 <option key={mod} value={mod}>
-                                    {mod} ({groupedStudies[mod]?.length || 0})
+                                    {modalityLabel(t, mod)} ({groupedStudies[mod]?.length || 0})
                                 </option>
                             ))}
                         </select>
+                    </div>
+                    {/* All | Imaging | Diagnostics — the ECG / Holter / echo /
+                        cath studies live under the 'Cardiac' modality; this
+                        segment is how an author finds them without knowing that. */}
+                    <div
+                        role="radiogroup"
+                        aria-label={t('filter_family_aria', { ns: 'investigations' })}
+                        data-testid="editor-family-filter"
+                        className="flex items-center gap-1 p-0.5 rounded-lg bg-neutral-800/80 border border-neutral-700"
+                    >
+                        {MODALITY_FAMILIES.map(family => {
+                            const active = family === selectedFamily;
+                            return (
+                                <button
+                                    key={family}
+                                    type="button"
+                                    role="radio"
+                                    aria-checked={active}
+                                    onClick={() => selectFamily(family)}
+                                    className={`flex-1 px-2 py-1 rounded-md text-xs font-medium transition-colors ${
+                                        active
+                                            ? 'bg-purple-600 text-white'
+                                            : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700/60'
+                                    }`}
+                                >
+                                    {t(FAMILY_LABEL_KEYS[family], { ns: 'investigations' })}
+                                    <span className={`ml-1 tabular-nums ${active ? 'opacity-80' : 'text-neutral-500'}`}>{familyCount(family)}</span>
+                                </button>
+                            );
+                        })}
                     </div>
 
                     <div className="border border-neutral-700 rounded-lg overflow-hidden">
@@ -298,7 +351,7 @@ export default function RadiologyEditor({ caseData, setCaseData }) {
                                                     </div>
                                                     <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                                                         <span className={`text-xs ${getModalityTextColor(study.modality)}`}>
-                                                            {study.modality}
+                                                            {modalityLabel(t, study.modality)}
                                                         </span>
                                                         <span className="text-xs text-neutral-500">{study.body_region}</span>
                                                         <span className="text-xs text-neutral-600">
@@ -360,13 +413,14 @@ export default function RadiologyEditor({ caseData, setCaseData }) {
                                     />
                                 </div>
                                 <div>
-                                    <label className="text-xs text-neutral-400 mb-1 block">{t('modality')}</label>
+                                    <label htmlFor="custom-study-modality" className="text-xs text-neutral-400 mb-1 block">{t('modality')}</label>
                                     <select
+                                        id="custom-study-modality"
                                         value={customStudy.modality}
                                         onChange={e => setCustomStudy(prev => ({ ...prev, modality: e.target.value }))}
                                         className="input-dark text-xs w-full"
                                     >
-                                        {MODALITIES.map(m => <option key={m} value={m}>{m}</option>)}
+                                        {MODALITIES.map(m => <option key={m} value={m}>{modalityLabel(t, m)}</option>)}
                                     </select>
                                 </div>
                                 <div>
@@ -434,7 +488,7 @@ export default function RadiologyEditor({ caseData, setCaseData }) {
                                                     </div>
                                                     <div className="flex items-center gap-2 mt-1 flex-wrap">
                                                         <span className={`text-xs px-1.5 py-0.5 rounded border ${getModalityColor(study.modality)}`}>
-                                                            {study.modality || t('unknown_modality')}
+                                                            {study.modality ? modalityLabel(t, study.modality) : t('unknown_modality')}
                                                         </span>
                                                         {study.bodyRegion && (
                                                             <span className="text-xs text-neutral-500">{study.bodyRegion}</span>

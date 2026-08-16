@@ -214,6 +214,8 @@ export default function InvestigationsScreen({
                         onSearchChange={active.setSearchQuery}
                         groupFilter={active.groupFilter}
                         onGroupFilterChange={active.setGroupFilter}
+                        familyFilter={active.familyFilter}
+                        onFamilyFilterChange={active.setFamilyFilter}
                         loading={active.submitting}
                         onSubmit={active.submit}
                         onSubmitInstant={active.submitInstant}
@@ -508,6 +510,15 @@ function useInvestigationState({
     const [selected, setSelected] = useState([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [groupFilter, setGroupFilter] = useState('all');
+    // Radiology-only coarse filter: 'all' | 'imaging' | 'diagnostics'
+    // (see server/shared/diagnostics.js). Sits ABOVE the modality group
+    // dropdown; changing the family resets the group so a stale
+    // "Cardiac" pick can't hide every imaging study.
+    const [familyFilter, setFamilyFilterState] = useState('all');
+    const setFamilyFilter = useCallback((family) => {
+        setFamilyFilterState(family);
+        setGroupFilter('all');
+    }, []);
     const [submitting, setSubmitting] = useState(false);
     // `openOrders` is the stack of reports rendered in the centre
     // column. The contract: every result the student has *viewed* in
@@ -655,6 +666,8 @@ function useInvestigationState({
         setSearchQuery,
         groupFilter,
         setGroupFilter,
+        familyFilter,
+        setFamilyFilter,
         submitting,
         submit: () => submit({ instant: false }),
         submitInstant: () => submit({ instant: true }),

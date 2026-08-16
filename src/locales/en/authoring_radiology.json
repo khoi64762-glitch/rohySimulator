@@ -14,7 +14,7 @@
   "findings": "Findings",
   "findings_default_hint": "Empty → report shows the master default above.",
   "findings_placeholder": "Describe what the study shows...",
-  "heading": "6. Radiology Studies",
+  "heading": "6. Radiology & Diagnostic Studies",
   "help": "Configure radiology studies and their results. When students order these studies, they'll see the findings you configure.",
   "interpretation": "Interpretation",
   "interpretation_default_hint": "Empty → report shows the master default above (printed under \"Impression\").",

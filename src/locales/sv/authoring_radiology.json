@@ -14,7 +14,7 @@
   "findings": "Fynd",
   "findings_default_hint": "Tomt → rapporten visar standardvärdet ovan.",
   "findings_placeholder": "Beskriv vad undersökningen visar...",
-  "heading": "6. Radiologiska undersökningar",
+  "heading": "6. Radiologiska & diagnostiska undersökningar",
   "help": "Konfigurera radiologiska undersökningar och deras resultat. När studenter beställer dessa undersökningar ser de de fynd du konfigurerar.",
   "interpretation": "Tolkning",
   "interpretation_default_hint": "Tomt → rapporten visar standardvärdet ovan (skrivs ut under \"Utlåtande\").",

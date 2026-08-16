@@ -9,6 +9,24 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.43] — 2026-08-16
+
+### Changed
+
+- **"Radiology" is now "Radiology & diagnostics".** The 12-lead ECG,
+  Holter, echo and the other *Cardiac* studies were always orderable
+  through the radiology pipeline (image/video upload included) but
+  nobody looked for them there. The student room, its tab and the case
+  editor tab are relabelled in all six languages; an *All | Imaging |
+  Diagnostics* filter (Diagnostics = Cardiac today; EEG/spirometry
+  later) sits above the study list in both the student catalogue and
+  the case editor; modality names show translated labels while stored
+  values stay the English data strings. The editor's modality dropdown
+  now comes from a shared list that includes DEXA and Mammography (both
+  present in the data, missing from the old hardcoded list — a
+  data-drift test now locks the two together). Internal room key
+  unchanged.
+
 ## [2.9.42] — 2026-08-16
 
 ### Fixed

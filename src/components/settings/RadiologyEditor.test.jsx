@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import renderWithProviders from '../../../tests/utils/renderWithProviders.jsx';
 import RadiologyEditor from './RadiologyEditor.jsx';
 
@@ -218,5 +218,50 @@ describe('RadiologyEditor apiFetch migration', () => {
         });
 
         await waitFor(() => expect(toast.error).toHaveBeenCalledWith('forbidden'));
+    });
+});
+
+describe('RadiologyEditor modality vocabulary (server/shared/diagnostics.js)', () => {
+    // Regression lock: editor modality list drifted from radiology_database.json
+    it('custom-study modality options include DEXA and Mammography', async () => {
+        mount();
+        await screen.findByText('Chest X-Ray');
+        fireEvent.click(screen.getByRole('button', { name: /custom/i }));
+        const modalitySelect = screen.getByLabelText(/^modality$/i);
+        const values = Array.from(modalitySelect.options).map((o) => o.value);
+        expect(values).toEqual(expect.arrayContaining(['DEXA', 'Mammography', 'Cardiac', 'X-Ray']));
+        // Stored value stays the English modality string; the label is translated.
+        const dexa = Array.from(modalitySelect.options).find((o) => o.value === 'DEXA');
+        expect(dexa.textContent).toBe('DEXA');
+        // Adding a custom DEXA study persists the English value.
+        fireEvent.change(screen.getByPlaceholderText(/chest x-ray pa\/lateral/i), { target: { value: 'Hip DEXA' } });
+        fireEvent.change(modalitySelect, { target: { value: 'DEXA' } });
+        fireEvent.click(screen.getByRole('button', { name: /^add study$/i }));
+        await waitFor(() => expect(screen.getByText('Hip DEXA')).toBeInTheDocument());
+    });
+
+    it('Imaging | Diagnostics segment narrows the catalogue browser to Cardiac studies', async () => {
+        const ecg = { id: 22, name: '12-Lead ECG', modality: 'Cardiac', body_region: 'Chest', turnaround_minutes: 5 };
+        fetchSpy.mockImplementation((url) => {
+            if (typeof url === 'string' && url.endsWith('/api/radiology-database')) {
+                return Promise.resolve(jsonResponse({ studies: [study, ecg], modalities: ['Cardiac', 'X-Ray'] }));
+            }
+            return Promise.resolve(jsonResponse({}));
+        });
+        mount();
+        await screen.findByText('12-Lead ECG');
+        expect(screen.getByText('Chest X-Ray')).toBeInTheDocument();
+
+        const group = screen.getByTestId('editor-family-filter');
+        fireEvent.click(within(group).getByRole('radio', { name: /Diagnostics/ }));
+        expect(screen.getByText('12-Lead ECG')).toBeInTheDocument();
+        expect(screen.queryByText('Chest X-Ray')).toBeNull();
+        // Modality dropdown only offers the diagnostic modality.
+        const filter = screen.getByDisplayValue(/^All \(1\)$/);
+        expect(Array.from(filter.options).map((o) => o.value)).toEqual(['all', 'Cardiac']);
+
+        fireEvent.click(within(group).getByRole('radio', { name: /Imaging/ }));
+        expect(screen.getByText('Chest X-Ray')).toBeInTheDocument();
+        expect(screen.queryByText('12-Lead ECG')).toBeNull();
     });
 });

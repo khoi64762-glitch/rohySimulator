@@ -14,7 +14,7 @@
   "findings": "Hallazgos",
   "findings_default_hint": "Vacío → el informe muestra el valor por defecto maestro arriba.",
   "findings_placeholder": "Describa lo que muestra el estudio...",
-  "heading": "6. Estudios de Radiología",
+  "heading": "6. Estudios de Radiología y Diagnóstico",
   "help": "Configure estudios de radiología y sus resultados. Cuando los estudiantes ordenen estos estudios, verán los hallazgos que configure.",
   "interpretation": "Interpretación",
   "interpretation_default_hint": "Vacío → el informe muestra el valor por defecto maestro arriba (imprimido bajo \"Impresión\").",
