@@ -165,34 +165,48 @@ jobs:
             sha256sum -c "${f}.sha256"
           done
 
-      - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.tag.outputs.ref }}
-          fail_on_unmatched_files: true
-          # The bundler writes its manifest.json INSIDE each tarball at
-          # the root (deploy/bundle-airgap.sh:416), not as a sibling
-          # file. Operators reading what's in a bundle look at
-          # `tar tzf foo.tar.gz | grep manifest.json` — no separate
-          # sidecar to upload here.
-          files: |
-            dist/airgap/*.tar.gz
-            dist/airgap/*.sha256
-          body: |
+      # Release notes = the matching CHANGELOG section (v1.2.3 → "## [1.2.3]"),
+      # followed by the install-path text (quoted heredoc: the ``` fences must
+      # NOT be command-substituted; owner/repo/tag are sed-substituted after).
+      # written above the fixed install-path text. Without this the release
+      # page carried only the boilerplate and readers had to open CHANGELOG.md.
+      - name: Extract CHANGELOG notes for this tag
+        id: notes
+        run: |
+          VER="${{ steps.tag.outputs.ref }}"; VER="${VER#v}"
+          node -e '
+            const fs = require("fs");
+            const ver = process.argv[1];
+            const src = fs.readFileSync("CHANGELOG.md", "utf8");
+            const start = src.indexOf("## [" + ver + "]");
+            let out = "";
+            if (start >= 0) {
+              const rest = src.slice(start);
+              const next = rest.indexOf("\n## [", 5);
+              out = (next >= 0 ? rest.slice(0, next) : rest).trim() + "\n";
+            } else {
+              out = "_No CHANGELOG section for " + ver + " — see CHANGELOG.md._\n";
+            }
+            fs.writeFileSync("release-notes.md", out);
+          ' "$VER"
+          OWNER="${{ github.repository_owner }}" REPO="${{ github.repository }}" TAG="${{ steps.tag.outputs.ref }}"
+          {
+            echo
+            cat <<'EOF_INSTALL'
             ## Install paths for this release
 
             ### Option A — Docker (smallest, simplest)
 
             ```bash
-            docker pull ghcr.io/${{ github.repository_owner }}/rohy:${{ steps.tag.outputs.ref }}
+            docker pull ghcr.io/${OWNER}/rohy:${TAG}
             docker compose -f deploy/docker/compose.yml up -d
             ```
 
             ### Option B — Air-gap tarball (zero-network target)
 
             ```bash
-            curl -LO https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.ref }}/rohy-airgap-source-*.tar.gz
-            curl -LO https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.ref }}/rohy-airgap-source-*.tar.gz.sha256
+            curl -LO https://github.com/${REPO}/releases/download/${TAG}/rohy-airgap-source-*.tar.gz
+            curl -LO https://github.com/${REPO}/releases/download/${TAG}/rohy-airgap-source-*.tar.gz.sha256
             sha256sum -c rohy-airgap-source-*.tar.gz.sha256
             tar xzf rohy-airgap-source-*.tar.gz
             cd rohy-airgap-*
@@ -210,11 +224,28 @@ jobs:
 
             ---
 
-            See [docs/INSTALL.md](https://github.com/${{ github.repository }}/blob/main/docs/INSTALL.md)
+            See [docs/INSTALL.md](https://github.com/${REPO}/blob/main/docs/INSTALL.md)
             for the full install reference and
-            [docs/DEPLOY.md](https://github.com/${{ github.repository }}/blob/main/docs/DEPLOY.md)
+            [docs/DEPLOY.md](https://github.com/${REPO}/blob/main/docs/DEPLOY.md)
             for production hardening.
+          EOF_INSTALL
+          } | sed -E 's/^ {2}//' | sed -e "s|\${OWNER}|${OWNER}|g" -e "s|\${REPO}|${REPO}|g" -e "s|\${TAG}|${TAG}|g" >> release-notes.md
+          echo "----"; head -60 release-notes.md
 
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.ref }}
+          fail_on_unmatched_files: true
+          body_path: release-notes.md
+          # The bundler writes its manifest.json INSIDE each tarball at
+          # the root (deploy/bundle-airgap.sh:416), not as a sibling
+          # file. Operators reading what's in a bundle look at
+          # `tar tzf foo.tar.gz | grep manifest.json` — no separate
+          # sidecar to upload here.
+          files: |
+            dist/airgap/*.tar.gz
+            dist/airgap/*.sha256
       - name: Summary
         run: |
           echo "## Air-gap bundle published" >> $GITHUB_STEP_SUMMARY

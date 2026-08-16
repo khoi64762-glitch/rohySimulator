@@ -9,6 +9,16 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.50] — 2026-08-16
+
+### Changed
+
+- **Release notes come from the CHANGELOG.** The Release workflow now
+  writes the tag's `## [x.y.z]` section above the install-path text
+  instead of publishing boilerplate only (heredoc is quoted so the code
+  fences are never command-substituted; owner/repo/tag are substituted
+  afterwards).
+
 ## [2.9.49] — 2026-08-16
 
 ### Fixed
