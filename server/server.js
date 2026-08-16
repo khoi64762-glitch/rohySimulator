@@ -20,7 +20,7 @@ import { ensureCaseCodes } from './seeders/cases.js';
 import seedStemiCourse from './seedStemiCourse.js';
 import { seedLanguageCases } from './seedLanguageCases.js';
 import { seedLlmDefaults } from './seeders/llmSettings.js';
-import { loadKokoro } from './services/kokoroTts.js';
+import { loadKokoro, kokoroIdleUnloadMs } from './services/kokoroTts.js';
 import { auditPersonaAndCaseVoices } from './healthChecks/voiceCatalogueAudit.js';
 import { configureSlowQueryThresholdFromDb, instrumentSqliteDb } from './observability.js';
 import requestIdMiddleware from './middleware/requestId.js';
@@ -226,8 +226,9 @@ function startHttpsServer(port) {
 // longer cold). Voice 2.0: there is no platform engine setting — kokoro is
 // the seeded safety-net engine (en/it default voices) and the shipped
 // personas carry kokoro voices, so warm it whenever the admin hasn't
-// disabled it. Skipped only on an explicit `tts_provider_enabled_kokoro=0`
-// (a deliberately kokoro-free deployment shouldn't pay the load).
+// disabled it. Skipped on an explicit `tts_provider_enabled_kokoro=0`
+// (a deliberately kokoro-free deployment shouldn't pay the load) and
+// whenever idle-unload is active (see below).
 function maybeWarmupKokoro() {
     // Test servers run in parallel and exercise TTS through explicit fake
     // providers. Letting every worker warm/download the real ~330 MB model
@@ -235,6 +236,17 @@ function maybeWarmupKokoro() {
     // and makes unrelated route tests network-dependent. On-demand synthesis
     // remains available to dedicated service tests; only boot warmup is skipped.
     if (process.env.NODE_ENV === 'test') return;
+
+    // Idle-unload active (the default since 2.9.51): the model would load at
+    // boot only to be dropped again after the idle window, so warming is
+    // pure cost — ~400 MB resident on a box that may never speak. Load
+    // lazily on the first synthesis instead. ROHY_KOKORO_IDLE_UNLOAD_MIN=0
+    // restores always-resident + boot warmup.
+    const idleMs = kokoroIdleUnloadMs();
+    if (idleMs > 0) {
+        kokoroLog.info('boot warmup skipped: lazy load with idle unload', { idle_unload_min: idleMs / 60_000 });
+        return;
+    }
 
     dbAdapter.get(
         "SELECT setting_value FROM platform_settings WHERE setting_key = 'tts_provider_enabled_kokoro'",

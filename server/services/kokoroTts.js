@@ -1,6 +1,19 @@
 // Kokoro-82M TTS via kokoro-js. Singleton: the model is ~330 MB on disk
-// and ~600 MB resident, so we lazy-load it once and reuse the instance for
-// every /api/tts call.
+// and ~400 MB resident (Linux, native onnxruntime-node), so we lazy-load it
+// on first use and reuse the instance across /api/tts calls.
+//
+// Residency policy: the model is UNLOADED after ROHY_KOKORO_IDLE_UNLOAD_MIN
+// minutes without a synthesis (default 10; 0 = keep resident for the life
+// of the process, the pre-2.9.51 behaviour). Measured on the production box
+// (3.7 GiB, glibc): dispose() returns ~380 MB of the ~600 MB the loaded
+// process holds; the remaining ~200 MB is the ORT runtime + thread pool and
+// only goes away with the process. On macOS the allocator keeps the freed
+// pages, so RSS does not drop there — judge this on the deploy OS. The
+// price of unloading is one warm reload (~1.7 s with a persistent
+// TRANSFORMERS_CACHE, ~15 s if the cache lives inside node_modules and a
+// deploy wiped it) on the first synthesis after a quiet spell. An in-flight
+// synthesis or stream always pins the model; the timer only fires between
+// requests.
 //
 // First call to load() will download model+tokenizer+voicepacks from the
 // Hugging Face Hub into the user's transformers.js cache (~330 MB). After
@@ -47,6 +60,91 @@ let _loading = null;
 // in the first place — this guard is defense-in-depth.
 let _disabled = null;
 
+// Idle-unload configuration. Read once at import; minutes, non-negative
+// integer-ish. Anything unparsable falls back to the default so a typo in
+// the env file degrades to "unload after 10 min", never to "never unload".
+const DEFAULT_IDLE_UNLOAD_MIN = 10;
+function parseIdleUnloadMinutes(raw) {
+    if (raw === undefined || raw === null || raw === '') return DEFAULT_IDLE_UNLOAD_MIN;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : DEFAULT_IDLE_UNLOAD_MIN;
+}
+const IDLE_UNLOAD_MS = parseIdleUnloadMinutes(process.env.ROHY_KOKORO_IDLE_UNLOAD_MIN ?? 10) * 60_000;
+
+let _lastUsedAt = 0;   // ms epoch of the last synthesis start (or load)
+let _inFlight = 0;     // synthesis calls / open streams currently using _instance
+let _idleTimer = null;
+let _unloading = null; // in-progress unload promise, so loadKokoro() can wait for it
+let _loadedAt = 0;
+
+/** Milliseconds of inactivity after which the model is unloaded; 0 = never. */
+export function kokoroIdleUnloadMs() {
+    return IDLE_UNLOAD_MS;
+}
+
+function touchKokoro() {
+    _lastUsedAt = Date.now();
+    armIdleTimer();
+}
+
+// (Re)arm the single idle timer. unref() so a resident model never keeps
+// the process alive on its own (tests, CLI tools that import this module).
+function armIdleTimer() {
+    if (IDLE_UNLOAD_MS <= 0 || !_instance) return;
+    if (_idleTimer) clearTimeout(_idleTimer);
+    _idleTimer = setTimeout(onIdleTimer, IDLE_UNLOAD_MS);
+    if (typeof _idleTimer.unref === 'function') _idleTimer.unref();
+}
+
+function onIdleTimer() {
+    _idleTimer = null;
+    if (!_instance) return;
+    const idleFor = Date.now() - _lastUsedAt;
+    // A request slipped in, or a stream is still open: try again later.
+    if (_inFlight > 0 || idleFor < IDLE_UNLOAD_MS) {
+        armIdleTimer();
+        return;
+    }
+    unloadKokoro('idle').catch((e) => {
+        kokoroLog.warn('idle unload failed', { error: e?.message || String(e) });
+    });
+}
+
+/**
+ * Release the resident model (ONNX sessions + tokenizer) so its native
+ * memory returns to the OS. Safe to call when nothing is loaded. Never
+ * unloads while a synthesis is in flight — returns false in that case.
+ * The next loadKokoro() reloads from the transformers cache.
+ */
+export async function unloadKokoro(reason = 'manual') {
+    if (_unloading) return _unloading;
+    if (!_instance) return false;
+    if (_inFlight > 0) return false;
+    const inst = _instance;
+    _instance = null;
+    if (_idleTimer) { clearTimeout(_idleTimer); _idleTimer = null; }
+    _unloading = (async () => {
+        const t0 = Date.now();
+        try {
+            // KokoroTTS holds { model: PreTrainedModel, tokenizer }; the
+            // model owns the ORT sessions and exposes dispose() → release().
+            if (inst?.model && typeof inst.model.dispose === 'function') {
+                await inst.model.dispose();
+            }
+            kokoroLog.info('model unloaded', {
+                reason,
+                resident_ms: _loadedAt ? t0 - _loadedAt : null,
+                idle_ms: _lastUsedAt ? t0 - _lastUsedAt : null,
+                dispose_ms: Date.now() - t0,
+            });
+            return true;
+        } finally {
+            _unloading = null;
+        }
+    })();
+    return _unloading;
+}
+
 const KOKORO_FATAL_PATTERNS = [
     /protobuf parsing/i,         // truncated .onnx file — most common
     /failed to allocate/i,       // OOM / WASM heap exhaustion
@@ -71,16 +169,21 @@ export async function loadKokoro() {
     if (_loading) return _loading;
 
     _loading = (async () => {
+        // A request arriving mid-dispose must not race the session teardown.
+        if (_unloading) await _unloading.catch(() => {});
         const t0 = Date.now();
         try {
             const tts = await KokoroTTS.from_pretrained(MODEL_ID, { dtype: DTYPE });
             kokoroLog.info('model loaded', {
                 duration_ms: Date.now() - t0,
                 wasm_threads: _wasmThreads,
-                voice_count: Object.keys(tts.voices).length
+                voice_count: Object.keys(tts.voices).length,
+                idle_unload_min: IDLE_UNLOAD_MS / 60_000
             });
             _instance = tts;
+            _loadedAt = Date.now();
             _loading = null;
+            touchKokoro();
             return tts;
         } catch (err) {
             _loading = null;
@@ -122,6 +225,11 @@ export function _resetForTest() {
     _instance = null;
     _loading = null;
     _disabled = null;
+    _unloading = null;
+    _inFlight = 0;
+    _lastUsedAt = 0;
+    _loadedAt = 0;
+    if (_idleTimer) { clearTimeout(_idleTimer); _idleTimer = null; }
 }
 
 export function isKokoroLoaded() {
@@ -147,12 +255,19 @@ export async function synthesizeKokoro({ text, voice, speed }) {
         err.code = 'UNKNOWN_VOICE';
         throw err;
     }
-    const out = await tts.generate(text, {
-        voice,
-        speed: typeof speed === 'number' ? speed : 1
-    });
-    const pcm = float32ToInt16Buffer(out.audio);
-    return Buffer.concat([buildWavHeader(pcm.length, out.sampling_rate), pcm]);
+    _inFlight += 1;
+    touchKokoro();
+    try {
+        const out = await tts.generate(text, {
+            voice,
+            speed: typeof speed === 'number' ? speed : 1
+        });
+        const pcm = float32ToInt16Buffer(out.audio);
+        return Buffer.concat([buildWavHeader(pcm.length, out.sampling_rate), pcm]);
+    } finally {
+        _inFlight -= 1;
+        touchKokoro();
+    }
 }
 
 // Streaming synthesis: yields per-sentence chunks so the client can start
@@ -180,15 +295,25 @@ export async function* synthesizeKokoroStream({ text, voice, speed }) {
     splitter.push(text);
     splitter.close();
 
-    const stream = tts.stream(splitter, {
-        voice,
-        speed: typeof speed === 'number' ? speed : 1
-    });
-    for await (const out of stream) {
-        yield {
-            sampleRate: out.audio.sampling_rate,
-            pcm: float32ToInt16Buffer(out.audio.audio)
-        };
+    // Pinned until the consumer finishes (or abandons) the generator — the
+    // finally runs on return/throw/break alike, so an early-closed HTTP
+    // response cannot leave the model pinned forever.
+    _inFlight += 1;
+    touchKokoro();
+    try {
+        const stream = tts.stream(splitter, {
+            voice,
+            speed: typeof speed === 'number' ? speed : 1
+        });
+        for await (const out of stream) {
+            yield {
+                sampleRate: out.audio.sampling_rate,
+                pcm: float32ToInt16Buffer(out.audio.audio)
+            };
+        }
+    } finally {
+        _inFlight -= 1;
+        touchKokoro();
     }
 }
 

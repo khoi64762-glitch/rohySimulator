@@ -9,6 +9,28 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.51] — 2026-08-16
+
+### Changed
+
+- **Kokoro TTS is loaded lazily and unloaded when idle.** The ~330 MB
+  Kokoro-82M model used to be warmed at boot and held resident for the
+  life of the process — ~400 MB on a 3.7 GiB production box whether or
+  not anyone used voice mode. It now loads on the first synthesis and is
+  released after `ROHY_KOKORO_IDLE_UNLOAD_MIN` minutes without one
+  (default 10; `0` restores always-resident + boot warmup). Measured on
+  the production host: `dispose()` returns ~380 MB (667 → 285 MB RSS);
+  the remaining ~200 MB is the ORT runtime and only leaves with the
+  process. An in-flight synthesis or an open stream always pins the model
+  (an early-closed response releases the pin via the generator's
+  `finally`), and a request arriving mid-dispose waits for the teardown
+  before reloading. Cost: one warm reload (~1.7 s with a persistent
+  `TRANSFORMERS_CACHE`) on the first voice reply after a quiet spell.
+  Voice listing and the capability probe already worked from the static
+  package catalogue when the model is not resident, so nothing else
+  changes. `server/.env.example` documents both `TRANSFORMERS_CACHE` and
+  the new variable; the config reference is regenerated.
+
 ## [2.9.50] — 2026-08-16
 
 ### Changed

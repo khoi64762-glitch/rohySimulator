@@ -191,6 +191,7 @@ const PURPOSES = {
     GOOGLE_TTS_API_KEY: 'Google Text-to-Speech API credential.',
     PIPER_BIN: 'Path to the Piper TTS binary.',
     TRANSFORMERS_CACHE: 'Persistent cache dir for the Kokoro/transformers model bundle.',
+    ROHY_KOKORO_IDLE_UNLOAD_MIN: 'Minutes without a synthesis before the Kokoro model is unloaded from RAM (frees ~380 MB on Linux; next voice reply reloads it). 0 = always resident + boot warmup.',
     ROHY_TEST_FAKE_GOOGLE_TTS: 'Test hook: stub Google TTS instead of calling the API.',
     ROHY_TEST_FAKE_OPENAI_TTS: 'Test hook: stub OpenAI TTS instead of calling the API.',
 };

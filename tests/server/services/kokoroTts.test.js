@@ -32,7 +32,7 @@
 // real audio generation here. Those are integration concerns; this file is
 // pure unit and runs offline in <100 ms.
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Buffer } from 'node:buffer';
 
 // ---------------------------------------------------------------------------
@@ -47,6 +47,7 @@ const mockState = {
     voices: {},
     fromPretrainedCalls: 0,
     fromPretrainedDelayMs: 0,
+    disposeCalls: 0,
     // generate(text, opts) → { audio: Float32Array, sampling_rate }
     generateImpl: null,
     // stream(splitter, opts) → async iterable of { audio: { audio: Float32Array, sampling_rate } }
@@ -60,6 +61,10 @@ vi.mock('kokoro-js', () => {
     class FakeKokoroTTS {
         constructor(voices) {
             this.voices = voices;
+            // Mirrors kokoro-js: the instance holds a transformers.js model
+            // whose dispose() releases the ONNX sessions. The SUT's idle
+            // unload calls exactly this.
+            this.model = { dispose: async () => { mockState.disposeCalls += 1; } };
         }
         static async from_pretrained(_modelId, _opts) {
             mockState.fromPretrainedCalls += 1;
@@ -137,6 +142,11 @@ beforeEach(() => {
     mockState.voices = defaultVoices();
     mockState.fromPretrainedCalls = 0;
     mockState.fromPretrainedDelayMs = 0;
+    mockState.disposeCalls = 0;
+    // Default: idle unload OFF for the pre-existing contracts, which were
+    // written against an always-resident singleton. The idle-unload
+    // describe block opts in per test.
+    process.env.ROHY_KOKORO_IDLE_UNLOAD_MIN = '0';
     mockState.generateImpl = null;
     mockState.streamImpl = null;
     mockState.splitterPushed = [];
@@ -444,5 +454,140 @@ describe('kokoroTts: isKokoroVoice', () => {
         expect(await sut.isKokoroVoice('af_bella')).toBe(true);
         expect(await sut.isKokoroVoice('not_a_voice')).toBe(false);
         expect(sut.isKokoroLoaded()).toBe(true);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// 8. Idle unload — the model is released after ROHY_KOKORO_IDLE_UNLOAD_MIN
+//    minutes without a synthesis, never while one is in flight, and reloads
+//    transparently on the next call. 0 keeps it resident (legacy behaviour).
+//    Regression lock: production held ~400 MB of Kokoro weights resident
+//    24/7 on a 3.7 GiB box whether or not anyone used voice mode.
+// ---------------------------------------------------------------------------
+
+describe('kokoroTts: idle unload', () => {
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it('defaults to a 10-minute idle window and exposes it in ms', async () => {
+        delete process.env.ROHY_KOKORO_IDLE_UNLOAD_MIN;
+        const sut = await loadFreshSUT();
+        expect(sut.kokoroIdleUnloadMs()).toBe(10 * 60_000);
+    });
+
+    it('treats an unparsable value as the default, never as "never unload"', async () => {
+        process.env.ROHY_KOKORO_IDLE_UNLOAD_MIN = 'soon';
+        const sut = await loadFreshSUT();
+        expect(sut.kokoroIdleUnloadMs()).toBe(10 * 60_000);
+    });
+
+    it('0 disables unloading: the model stays resident past the window', async () => {
+        vi.useFakeTimers();
+        process.env.ROHY_KOKORO_IDLE_UNLOAD_MIN = '0';
+        const sut = await loadFreshSUT();
+        await sut.synthesizeKokoro({ text: 'hi', voice: 'af_bella' });
+        expect(sut.isKokoroLoaded()).toBe(true);
+        await vi.advanceTimersByTimeAsync(60 * 60_000);
+        expect(sut.isKokoroLoaded()).toBe(true);
+        expect(mockState.disposeCalls).toBe(0);
+    });
+
+    it('disposes the model once the idle window elapses with nothing in flight', async () => {
+        vi.useFakeTimers();
+        process.env.ROHY_KOKORO_IDLE_UNLOAD_MIN = '1';
+        const sut = await loadFreshSUT();
+        await sut.synthesizeKokoro({ text: 'hi', voice: 'af_bella' });
+        expect(sut.isKokoroLoaded()).toBe(true);
+        await vi.advanceTimersByTimeAsync(59_000);
+        expect(sut.isKokoroLoaded()).toBe(true);
+        await vi.advanceTimersByTimeAsync(2_000);
+        expect(sut.isKokoroLoaded()).toBe(false);
+        expect(mockState.disposeCalls).toBe(1);
+        // Voice listing degrades to the pre-load shape, not a crash.
+        expect(sut.listKokoroVoices()).toEqual([]);
+    });
+
+    it('a synthesis inside the window resets the idle clock', async () => {
+        vi.useFakeTimers();
+        process.env.ROHY_KOKORO_IDLE_UNLOAD_MIN = '1';
+        const sut = await loadFreshSUT();
+        await sut.synthesizeKokoro({ text: 'one', voice: 'af_bella' });
+        await vi.advanceTimersByTimeAsync(45_000);
+        await sut.synthesizeKokoro({ text: 'two', voice: 'af_bella' });
+        await vi.advanceTimersByTimeAsync(45_000); // 90 s after first, 45 s after second
+        expect(sut.isKokoroLoaded()).toBe(true);
+        await vi.advanceTimersByTimeAsync(20_000); // 65 s after second
+        expect(sut.isKokoroLoaded()).toBe(false);
+    });
+
+    it('never unloads while a stream is still being consumed', async () => {
+        vi.useFakeTimers();
+        process.env.ROHY_KOKORO_IDLE_UNLOAD_MIN = '1';
+        // A slow stream: sentences arrive well past the idle window.
+        mockState.streamImpl = () => (async function* () {
+            yield { audio: { audio: new Float32Array([0.1]), sampling_rate: 24000 } };
+            await new Promise((r) => setTimeout(r, 90_000));
+            yield { audio: { audio: new Float32Array([0.2]), sampling_rate: 24000 } };
+        })();
+        const sut = await loadFreshSUT();
+        const it = sut.synthesizeKokoroStream({ text: 'a. b.', voice: 'af_bella' });
+        await it.next();
+        const second = it.next(); // pulls the next sentence → the stream's 90 s wait starts now
+        await vi.advanceTimersByTimeAsync(70_000); // idle timer fires mid-stream
+        expect(sut.isKokoroLoaded()).toBe(true);
+        expect(mockState.disposeCalls).toBe(0);
+        await vi.advanceTimersByTimeAsync(25_000);
+        await second;
+        await it.next(); // done → pin released, clock restarts
+        expect(sut.isKokoroLoaded()).toBe(true);
+        await vi.advanceTimersByTimeAsync(61_000);
+        expect(sut.isKokoroLoaded()).toBe(false);
+        expect(mockState.disposeCalls).toBe(1);
+    });
+
+    it('an abandoned stream (consumer breaks early) still releases the pin', async () => {
+        vi.useFakeTimers();
+        process.env.ROHY_KOKORO_IDLE_UNLOAD_MIN = '1';
+        mockState.streamImpl = () => (async function* () {
+            yield { audio: { audio: new Float32Array([0.1]), sampling_rate: 24000 } };
+            yield { audio: { audio: new Float32Array([0.2]), sampling_rate: 24000 } };
+        })();
+        const sut = await loadFreshSUT();
+        for await (const _chunk of sut.synthesizeKokoroStream({ text: 'a. b.', voice: 'af_bella' })) {
+            break; // client disconnected after the first sentence
+        }
+        await vi.advanceTimersByTimeAsync(61_000);
+        expect(sut.isKokoroLoaded()).toBe(false);
+    });
+
+    it('reloads transparently on the next synthesis after an unload', async () => {
+        vi.useFakeTimers();
+        process.env.ROHY_KOKORO_IDLE_UNLOAD_MIN = '1';
+        const sut = await loadFreshSUT();
+        await sut.synthesizeKokoro({ text: 'one', voice: 'af_bella' });
+        await vi.advanceTimersByTimeAsync(61_000);
+        expect(sut.isKokoroLoaded()).toBe(false);
+        const wav = await sut.synthesizeKokoro({ text: 'two', voice: 'af_bella' });
+        expect(wav.subarray(0, 4).toString('ascii')).toBe('RIFF');
+        expect(sut.isKokoroLoaded()).toBe(true);
+        expect(mockState.fromPretrainedCalls).toBe(2);
+    });
+
+    it('unloadKokoro() is a no-op when nothing is loaded and refuses while in flight', async () => {
+        process.env.ROHY_KOKORO_IDLE_UNLOAD_MIN = '1';
+        let releaseGenerate;
+        mockState.generateImpl = () => new Promise((r) => { releaseGenerate = () => r({ audio: new Float32Array([0]), sampling_rate: 24000 }); });
+        const sut = await loadFreshSUT();
+        expect(await sut.unloadKokoro()).toBe(false);
+        const pending = sut.synthesizeKokoro({ text: 'x', voice: 'af_bella' });
+        await vi.waitFor(() => expect(releaseGenerate).toBeTypeOf('function'));
+        expect(await sut.unloadKokoro('manual')).toBe(false); // pinned
+        expect(sut.isKokoroLoaded()).toBe(true);
+        releaseGenerate();
+        await pending;
+        expect(await sut.unloadKokoro('manual')).toBe(true);
+        expect(sut.isKokoroLoaded()).toBe(false);
+        expect(mockState.disposeCalls).toBe(1);
     });
 });
