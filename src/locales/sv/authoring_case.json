@@ -26,6 +26,8 @@
   "feedback_missed_placeholder": "t.ex. ’Överväg att ordinera detta vid hypotoni’",
   "inherit_voice_none": "Ärv från Patient-personan (ingen angiven)",
   "inherit_voice_with": "Ärv från Patient-personan ({voice})",
+  "manage_library_hint": "Lägg till saknade behandlingar under Inställningar → Bibliotek → Behandlingar.",
+  "manage_library_link": "Hantera bibliotek",
   "master_catalog_warning_after": " vid körning. Att redigera huvudkatalogen ändrar retroaktivt beteendet för varje fall som är konfigurerat att använda den behandlingen. Åsidosättningar per fall är ännu inte tillgängliga i det här gränssnittet.",
   "master_catalog_warning_before": "Behandlingarna nedan hämtar sina effektvärden (anslag, varaktighet, förändringar av vitalparametrar) i realtid från den delade huvudkatalogen ",
   "onset_label": "| Anslag: {onset}min",

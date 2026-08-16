@@ -930,6 +930,20 @@
     "reviewer": null,
     "risk": "low"
   },
+  "authoring_case.manage_library_hint": {
+    "src": "3132b1f6e4ae",
+    "state": "machine",
+    "reviewed_at": null,
+    "reviewer": null,
+    "risk": "low"
+  },
+  "authoring_case.manage_library_link": {
+    "src": "91e12446e6a1",
+    "state": "machine",
+    "reviewed_at": null,
+    "reviewer": null,
+    "risk": "low"
+  },
   "authoring_case.master_catalog_warning_after": {
     "src": "c2c4fc66ca01",
     "state": "machine",
@@ -7559,6 +7573,13 @@
     "reviewer": null,
     "risk": "clinical"
   },
+  "authoring_meds.tl_empty_inactive": {
+    "src": "9472adff6bb0",
+    "state": "machine",
+    "reviewed_at": null,
+    "reviewer": null,
+    "risk": "clinical"
+  },
   "authoring_meds.tl_empty_no_match": {
     "src": "6914ca3d58dd",
     "state": "machine",
@@ -7568,6 +7589,76 @@
   },
   "authoring_meds.tl_error_name_required": {
     "src": "22f4211c68e3",
+    "state": "machine",
+    "reviewed_at": null,
+    "reviewer": null,
+    "risk": "clinical"
+  },
+  "authoring_meds.tl_ext_add": {
+    "src": "9fd728c66c9a",
+    "state": "machine",
+    "reviewed_at": null,
+    "reviewer": null,
+    "risk": "clinical"
+  },
+  "authoring_meds.tl_ext_empty": {
+    "src": "ae3d587a6653",
+    "state": "machine",
+    "reviewed_at": null,
+    "reviewer": null,
+    "risk": "clinical"
+  },
+  "authoring_meds.tl_ext_error": {
+    "src": "029d6b52dbaa",
+    "state": "machine",
+    "reviewed_at": null,
+    "reviewer": null,
+    "risk": "clinical"
+  },
+  "authoring_meds.tl_ext_generic": {
+    "src": "edb692cb2fca",
+    "state": "machine",
+    "reviewed_at": null,
+    "reviewer": null,
+    "risk": "clinical"
+  },
+  "authoring_meds.tl_ext_in_library": {
+    "src": "be6339943daa",
+    "state": "machine",
+    "reviewed_at": null,
+    "reviewer": null,
+    "risk": "clinical"
+  },
+  "authoring_meds.tl_ext_intro": {
+    "src": "5165cef25bce",
+    "state": "machine",
+    "reviewed_at": null,
+    "reviewer": null,
+    "risk": "clinical"
+  },
+  "authoring_meds.tl_ext_min_chars": {
+    "src": "3cb61f21d8fa",
+    "state": "machine",
+    "reviewed_at": null,
+    "reviewer": null,
+    "risk": "clinical"
+  },
+  "authoring_meds.tl_ext_open": {
+    "src": "ed077f3d8125",
+    "state": "machine",
+    "reviewed_at": null,
+    "reviewer": null,
+    "risk": "clinical"
+  },
+  "authoring_meds.tl_ext_placeholder": {
+    "src": "3761633d89d9",
+    "state": "machine",
+    "reviewed_at": null,
+    "reviewer": null,
+    "risk": "clinical"
+  },
+  "authoring_meds.tl_ext_title": {
+    "src": "f21747f3f456",
     "state": "machine",
     "reviewed_at": null,
     "reviewer": null,
@@ -7741,6 +7832,13 @@
     "reviewer": null,
     "risk": "clinical"
   },
+  "authoring_meds.tl_prefill_hint": {
+    "src": "95d3c90fe67e",
+    "state": "machine",
+    "reviewed_at": null,
+    "reviewer": null,
+    "risk": "clinical"
+  },
   "authoring_meds.tl_restore": {
     "src": "a76e13b98392",
     "state": "machine",
@@ -7785,6 +7883,34 @@
   },
   "authoring_meds.tl_show_inactive": {
     "src": "3f37b13d7441",
+    "state": "machine",
+    "reviewed_at": null,
+    "reviewer": null,
+    "risk": "clinical"
+  },
+  "authoring_meds.tl_status_active": {
+    "src": "92340695899b",
+    "state": "machine",
+    "reviewed_at": null,
+    "reviewer": null,
+    "risk": "clinical"
+  },
+  "authoring_meds.tl_status_all": {
+    "src": "a52ace420f21",
+    "state": "machine",
+    "reviewed_at": null,
+    "reviewer": null,
+    "risk": "clinical"
+  },
+  "authoring_meds.tl_status_deactivated": {
+    "src": "4840a57222fc",
+    "state": "machine",
+    "reviewed_at": null,
+    "reviewer": null,
+    "risk": "clinical"
+  },
+  "authoring_meds.tl_status_filter_label": {
+    "src": "920e413c7d41",
     "state": "machine",
     "reviewed_at": null,
     "reviewer": null,
@@ -7841,6 +7967,41 @@
   },
   "authoring_meds.tl_toast_updated": {
     "src": "f6153c3540b6",
+    "state": "machine",
+    "reviewed_at": null,
+    "reviewer": null,
+    "risk": "clinical"
+  },
+  "authoring_meds.tl_tty_brand": {
+    "src": "090ed4316f1d",
+    "state": "machine",
+    "reviewed_at": null,
+    "reviewer": null,
+    "risk": "clinical"
+  },
+  "authoring_meds.tl_tty_clinical": {
+    "src": "83ae225d4b44",
+    "state": "machine",
+    "reviewed_at": null,
+    "reviewer": null,
+    "risk": "clinical"
+  },
+  "authoring_meds.tl_tty_ingredient": {
+    "src": "c4c5ed008b86",
+    "state": "machine",
+    "reviewed_at": null,
+    "reviewer": null,
+    "risk": "clinical"
+  },
+  "authoring_meds.tl_tty_label": {
+    "src": "a8acb697fd05",
+    "state": "machine",
+    "reviewed_at": null,
+    "reviewer": null,
+    "risk": "clinical"
+  },
+  "authoring_meds.tl_type_filter_label": {
+    "src": "baaddf70fb5d",
     "state": "machine",
     "reviewed_at": null,
     "reviewer": null,

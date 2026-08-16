@@ -26,6 +26,8 @@
   "feedback_missed_placeholder": "z. B. ‚Erwägen Sie dies bei Hypotonie‘",
   "inherit_voice_none": "Von der Patienten-Persona übernehmen (keine festgelegt)",
   "inherit_voice_with": "Von der Patienten-Persona übernehmen ({voice})",
+  "manage_library_hint": "Fehlende Behandlungen unter Einstellungen → Bibliotheken → Behandlungen hinzufügen.",
+  "manage_library_link": "Bibliothek verwalten",
   "master_catalog_warning_after": " zur Laufzeit. Das Bearbeiten des Hauptkatalogs ändert rückwirkend das Verhalten für jeden Fall, der für die Verwendung dieser Behandlung konfiguriert ist. Fallspezifische Überschreibungen sind in dieser Oberfläche noch nicht verfügbar.",
   "master_catalog_warning_before": "Die folgenden Behandlungen beziehen ihre Effektwerte (Wirkungseintritt, Dauer, Veränderungen der Vitalparameter) zur Laufzeit aus dem gemeinsamen Hauptkatalog ",
   "onset_label": "| Wirkungseintritt: {onset}min",

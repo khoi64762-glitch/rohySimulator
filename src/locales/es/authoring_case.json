@@ -26,6 +26,8 @@
   "feedback_missed_placeholder": "p.ej., 'Considere ordenar esto para hipotensión'",
   "inherit_voice_none": "Heredar de la persona del paciente (ninguno establecido)",
   "inherit_voice_with": "Heredar de la persona del paciente ({voice})",
+  "manage_library_hint": "Añada los tratamientos que falten en Configuración → Bibliotecas → Tratamientos.",
+  "manage_library_link": "Gestionar biblioteca",
   "master_catalog_warning_after": " catálogo maestro en tiempo de ejecución. Editar el catálogo maestro cambiará retroactivamente el comportamiento de cada caso configurado para usar ese tratamiento. Las anulaciones por caso no están expuestas en esta interfaz.",
   "master_catalog_warning_before": "Los tratamientos a continuación obtienen sus valores de efecto (inicio, duración, deltas de constantes vitales) en vivo de la compartida ",
   "onset_label": "| Inicio: {onset}min",

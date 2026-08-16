@@ -26,6 +26,8 @@
   "feedback_missed_placeholder": "es. 'Considera di prescriverlo per l'ipotensione'",
   "inherit_voice_none": "Eredita dalla persona Paziente (nessuna impostata)",
   "inherit_voice_with": "Eredita dalla persona Paziente ({voice})",
+  "manage_library_hint": "Aggiungi i trattamenti mancanti in Impostazioni → Librerie → Trattamenti.",
+  "manage_library_link": "Gestisci libreria",
   "master_catalog_warning_after": " a runtime. La modifica del catalogo principale cambierà retroattivamente il comportamento per ogni caso configurato per usare quel trattamento. Gli override per singolo caso non sono ancora disponibili in questa interfaccia.",
   "master_catalog_warning_before": "I trattamenti seguenti ricavano i loro valori di effetto (insorgenza, durata, variazioni dei parametri vitali) in tempo reale dal catalogo principale condiviso ",
   "onset_label": "| Insorgenza: {onset}min",

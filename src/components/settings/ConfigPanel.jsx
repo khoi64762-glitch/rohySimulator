@@ -4929,6 +4929,7 @@ PERSONALITY: You are anxious but cooperative. You're worried this might be a hea
                         <CaseTreatmentConfig
                             caseId={caseData.id}
                             caseTreatments={caseData.config?.treatments || []}
+                            onManageLibrary={() => setActiveTab('treatments_library')}
                             onUpdate={(treatments) => {
                                 setCaseData(prev => ({
                                     ...prev,

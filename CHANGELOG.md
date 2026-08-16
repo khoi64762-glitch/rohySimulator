@@ -9,6 +9,27 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.47] — 2026-08-16
+
+### Fixed
+
+- **Treatments library: "Show deactivated" read as a no-op.** The
+  checkbox only mixed deactivated rows, faintly styled, into the active
+  list. Replaced by an explicit **Active | Deactivated | All** status
+  view with counts, badge and Restore in the Deactivated view; the
+  deactivate confirmation uses the translated dialog.
+
+### Added
+
+- **Add from RxNorm / openFDA** inside the Treatments library: search the
+  full drug universe through the existing proxy, see term type
+  (ingredient / clinical drug / brand / FDA label) and RxCUI, pick a hit
+  to open the add form prefilled (name, RxCUI, route guess, effects none)
+  — hits already in the library say so and open the row instead. The
+  RxNorm proxy now returns `tty`, fills empty names from
+  `/rxcui/{id}/properties`, and sorts ingredients first (cached 24 h).
+  The case editor's treatment tab links to *Manage library*.
+
 ## [2.9.46] — 2026-08-16
 
 ### Added

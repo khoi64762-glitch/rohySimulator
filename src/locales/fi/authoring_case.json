@@ -26,6 +26,8 @@
   "feedback_missed_placeholder": "esim. ’Harkitse tämän määräämistä hypotensioon’",
   "inherit_voice_none": "Peri Potilas-persoonalta (ei asetettu)",
   "inherit_voice_with": "Peri Potilas-persoonalta ({voice})",
+  "manage_library_hint": "Lisää puuttuvat hoidot kohdassa Asetukset → Kirjastot → Hoidot.",
+  "manage_library_link": "Hallitse kirjastoa",
   "master_catalog_warning_after": " -pääkatalogista ajonaikaisesti. Pääkatalogin muokkaaminen muuttaa takautuvasti käyttäytymistä jokaisessa tapauksessa, joka on määritetty käyttämään kyseistä hoitoa. Tapauskohtaisia ohituksia ei ole vielä käytettävissä tässä käyttöliittymässä.",
   "master_catalog_warning_before": "Alla olevat hoidot hakevat vaikutusarvonsa (alku, kesto, vitaalielintoimintojen muutokset) reaaliaikaisesti jaetusta ",
   "onset_label": "| Alku: {onset}min",

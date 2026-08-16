@@ -26,6 +26,8 @@
   "feedback_missed_placeholder": "e.g., 'Consider ordering this for hypotension'",
   "inherit_voice_none": "Inherit from Patient persona (none set)",
   "inherit_voice_with": "Inherit from Patient persona ({voice})",
+  "manage_library_hint": "Add missing treatments in Settings → Libraries → Treatments.",
+  "manage_library_link": "Manage library",
   "master_catalog_warning_after": " master catalog at runtime. Editing the master catalog will retroactively change behaviour for every case configured to use that treatment. Per-case overrides aren't yet exposed in this UI.",
   "master_catalog_warning_before": "Treatments below pull their effect values (onset, duration, vital-sign deltas) live from the shared ",
   "onset_label": "| Onset: {onset}min",

@@ -49,7 +49,9 @@ describe('proxyCache + search proxies', () => {
             }));
             setFetch(fetchSpy);
             const hits = await searchRxNorm('aspirin');
-            expect(fetchSpy).toHaveBeenCalledOnce();
+            // One approximateTerm call; the per-hit /properties enrichment
+            // (tty + empty-name fill) is covered in rxnorm-proxy.test.js.
+            expect(fetchSpy.mock.calls.filter(([u]) => u.includes('/approximateTerm.json'))).toHaveLength(1);
             expect(hits).toHaveLength(2);
             const aspirin = hits.find((h) => h.rxcui === '1191');
             expect(aspirin.display_name).toBe('Aspirin');
@@ -66,7 +68,7 @@ describe('proxyCache + search proxies', () => {
             setFetch(fetchSpy);
             const a = await searchRxNorm('naloxone');
             const b = await searchRxNorm('naloxone');
-            expect(fetchSpy).toHaveBeenCalledOnce();
+            expect(fetchSpy.mock.calls.filter(([u]) => u.includes('/approximateTerm.json'))).toHaveLength(1);
             expect(b).toEqual(a);
         });
 

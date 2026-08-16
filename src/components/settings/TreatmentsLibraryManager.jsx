@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
     Search, Plus, Loader2, Edit2, Save, X, RefreshCw, Lock, Stethoscope,
-    Pill, Droplets, Wind, HeartPulse, Ban, RotateCcw, ExternalLink
+    Pill, Droplets, Wind, HeartPulse, Ban, RotateCcw, ExternalLink, Globe, Check
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
@@ -79,6 +79,50 @@ const EMPTY_DRAFT = {
     pk_evidence_url: '',
     scope: 'platform',
 };
+
+// Status segment (Active | Deactivated | All). Default Active — the
+// deactivated rows live in their own view with a Restore action instead of
+// being mixed into the active list, which read as "the toggle does nothing".
+export const STATUS_VIEWS = ['active', 'inactive', 'all'];
+const STATUS_LABEL_KEYS = { active: 'tl_status_active', inactive: 'tl_status_deactivated', all: 'tl_status_all' };
+const statusMatches = (view, row) => view === 'all' || (view === 'active' ? !!row.is_active : !row.is_active);
+
+// RxNorm term types → the three buckets the search list labels. Static key
+// map (parser-visible); unknown / missing tty renders the raw code.
+const TTY_GROUPS = {
+    ingredient: { ttys: ['IN', 'MIN', 'PIN'], labelKey: 'tl_tty_ingredient' },
+    clinical:   { ttys: ['SCD', 'SCDF', 'SCDG', 'GPCK'], labelKey: 'tl_tty_clinical' },
+    brand:      { ttys: ['SBD', 'SBDF', 'SBDG', 'BPCK', 'BN'], labelKey: 'tl_tty_brand' },
+};
+export function ttyGroup(tty) {
+    const code = String(tty || '').toUpperCase();
+    return Object.keys(TTY_GROUPS).find((g) => TTY_GROUPS[g].ttys.includes(code)) || null;
+}
+
+// Route guess from an RxNorm dose-form name ("ceftriaxone 1000 MG Injection"
+// → IV). Only the unambiguous forms; anything else stays blank for the
+// educator to fill in.
+export function guessRouteFromName(name) {
+    const n = String(name || '').toLowerCase();
+    if (/\binject(?:ion|able)\b/.test(n)) return 'IV';
+    if (/\boral (?:tablet|capsule|solution|suspension)\b/.test(n) || /\bcapsule\b/.test(n)) return 'oral';
+    if (/\binhal(?:ant|ation)\b/.test(n)) return 'inhaled';
+    return '';
+}
+
+// The editor draft for a search hit: name + rxcui + route guess, everything
+// else at the zero-effect defaults (orderable + scored, no vitals change).
+export function prefillFromHit(hit) {
+    const name = hit.external_source === 'openfda'
+        ? (hit.generic_name || hit.display_name || '')
+        : (hit.display_name || '');
+    return {
+        treatment_type: 'medication',
+        treatment_name: name,
+        rxcui: hit.rxcui || '',
+        route: guessRouteFromName(hit.display_name),
+    };
+}
 
 function draftFromRow(row) {
     return {
@@ -199,11 +243,13 @@ function NumberInput({ value, onChange, min, step = 'any', disabled, name }) {
 /**
  * Add / edit modal. `row` null = create.
  */
-function TreatmentEditor({ row, currentUser, onClose, onSaved }) {
+function TreatmentEditor({ row, prefill, currentUser, onClose, onSaved }) {
     const { t } = useTranslation('authoring_meds');
     const toast = useToast();
     const isAdmin = rankOf(currentUser) >= ROLE_RANKS.admin;
-    const [draft, setDraft] = useState(() => (row ? draftFromRow(row) : { ...EMPTY_DRAFT, scope: isAdmin ? 'platform' : 'tenant' }));
+    const [draft, setDraft] = useState(() => (row
+        ? draftFromRow(row)
+        : { ...EMPTY_DRAFT, scope: isAdmin ? 'platform' : 'tenant', ...(prefill || {}) }));
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState(null);
     const set = (key) => (value) => setDraft((d) => ({ ...d, [key]: value }));
@@ -246,6 +292,11 @@ function TreatmentEditor({ row, currentUser, onClose, onSaved }) {
                 </div>
 
                 <div className="px-6 py-4 overflow-y-auto grid grid-cols-2 gap-3 text-xs">
+                    {prefill && (
+                        <div className="col-span-2 rounded px-3 py-2 text-xs bg-teal-50 border border-teal-200 text-teal-900" data-testid="tl-prefill-hint">
+                            {t('tl_prefill_hint')}
+                        </div>
+                    )}
                     <Field label={t('tl_field_type')}>
                         <select
                             name="treatment_type"
@@ -393,6 +444,147 @@ function TreatmentEditor({ row, currentUser, onClose, onSaved }) {
     );
 }
 
+/**
+ * "Add from RxNorm / openFDA": debounced typeahead against the existing
+ * /catalogue/medications/search proxy. A hit whose rxcui is already in the
+ * library offers Open (filter the table to it) instead of Add.
+ */
+const EXT_MIN_CHARS = 2;
+const EXT_DEBOUNCE_MS = 400;
+function ExternalSearch({ rows, onPick, onOpen }) {
+    const { t } = useTranslation('authoring_meds');
+    const [query, setQuery] = useState('');
+    const [hits, setHits] = useState(null); // null = nothing searched yet
+    const [searching, setSearching] = useState(false);
+    const [error, setError] = useState(false);
+    const requestSeq = useRef(0);
+
+    const byRxcui = useMemo(() => {
+        const map = new Map();
+        // First active row per rxcui wins (an inactive duplicate should not
+        // hide the live one).
+        rows.forEach((row) => {
+            if (!row.rxcui) return;
+            const key = String(row.rxcui);
+            const existing = map.get(key);
+            if (!existing || (!existing.is_active && row.is_active)) map.set(key, row);
+        });
+        return map;
+    }, [rows]);
+
+    useEffect(() => {
+        const q = query.trim();
+        if (q.length < EXT_MIN_CHARS) {
+            setHits(null);
+            setSearching(false);
+            setError(false);
+            return undefined;
+        }
+        const seq = ++requestSeq.current;
+        const timer = setTimeout(async () => {
+            setSearching(true);
+            setError(false);
+            try {
+                const data = await apiFetch(`/catalogue/medications/search?q=${encodeURIComponent(q)}&sources=rxnorm,openfda&limit=20`);
+                if (seq !== requestSeq.current) return;
+                setHits(Array.isArray(data?.hits) ? data.hits : []);
+            } catch {
+                if (seq !== requestSeq.current) return;
+                setHits([]);
+                setError(true);
+            } finally {
+                if (seq === requestSeq.current) setSearching(false);
+            }
+        }, EXT_DEBOUNCE_MS);
+        return () => clearTimeout(timer);
+    }, [query]);
+
+    const termLabel = (hit) => {
+        if (hit.external_source === 'openfda') return t('tl_tty_label');
+        const group = ttyGroup(hit.tty);
+        return group ? t(TTY_GROUPS[group].labelKey) : (hit.tty || '');
+    };
+
+    return (
+        <div className="rohy-card rounded-lg p-4 space-y-3" data-testid="tl-external-search">
+            <div className="flex items-center gap-2">
+                <Globe className="w-4 h-4 text-teal-700" />
+                <h4 className="text-sm font-bold">{t('tl_ext_title')}</h4>
+            </div>
+            <p className="text-xs text-neutral-500">{t('tl_ext_intro')}</p>
+            <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-500" />
+                <input
+                    type="search"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder={t('tl_ext_placeholder')}
+                    aria-label={t('tl_ext_title')}
+                    className="rohy-field w-full pl-10 pr-4 py-2 rounded-lg text-sm"
+                />
+                {searching && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 animate-spin text-neutral-500" />}
+            </div>
+            {query.trim().length > 0 && query.trim().length < EXT_MIN_CHARS && (
+                <div className="text-xs text-neutral-500">{t('tl_ext_min_chars', { count: EXT_MIN_CHARS })}</div>
+            )}
+            {error && <div className="text-xs rohy-danger-soft rounded px-3 py-2" role="alert">{t('tl_ext_error')}</div>}
+            {hits && !error && hits.length === 0 && !searching && (
+                <div className="text-xs text-neutral-500">{t('tl_ext_empty')}</div>
+            )}
+            {hits && hits.length > 0 && (
+                <ul className="divide-y divide-neutral-200 max-h-72 overflow-y-auto rounded border border-neutral-200" data-testid="tl-external-hits">
+                    {hits.map((hit) => {
+                        const existing = hit.rxcui ? byRxcui.get(String(hit.rxcui)) : null;
+                        const key = `${hit.external_source}:${hit.external_id || hit.rxcui || hit.display_name}`;
+                        const name = hit.display_name || hit.generic_name || hit.rxcui || '—';
+                        return (
+                            <li key={key} className="flex items-center gap-3 px-3 py-2 text-xs" data-testid={`tl-hit-${hit.external_source}-${hit.rxcui || hit.external_id}`}>
+                                <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="font-medium truncate">{name}</span>
+                                        {termLabel(hit) && <span className="rohy-badge-neutral uppercase tracking-wide">{termLabel(hit)}</span>}
+                                        <span className="rohy-badge-teal uppercase tracking-wide">{hit.external_source === 'openfda' ? 'openFDA' : 'RxNorm'}</span>
+                                        {existing && (
+                                            <span className="rohy-badge-green inline-flex items-center gap-1 uppercase tracking-wide">
+                                                <Check className="w-3 h-3" /> {t('tl_ext_in_library')}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div className="text-[11px] text-neutral-500 flex items-center gap-2">
+                                        {hit.rxcui && <span>RxCUI {hit.rxcui}</span>}
+                                        {hit.external_source === 'openfda' && hit.generic_name && hit.generic_name !== hit.display_name && (
+                                            <span>{t('tl_ext_generic', { name: hit.generic_name })}</span>
+                                        )}
+                                    </div>
+                                </div>
+                                {existing ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => onOpen(existing)}
+                                        className="rohy-subtle-button px-2 py-1 rounded text-xs"
+                                        aria-label={`${t('tl_ext_open')} ${name}`}
+                                    >
+                                        {t('tl_ext_open')}
+                                    </button>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        onClick={() => onPick(hit)}
+                                        className="flex items-center gap-1 px-2 py-1 bg-cyan-700 hover:bg-cyan-600 text-white rounded text-xs font-bold"
+                                        aria-label={`${t('tl_ext_add')} ${name}`}
+                                    >
+                                        <Plus className="w-3 h-3" /> {t('tl_ext_add')}
+                                    </button>
+                                )}
+                            </li>
+                        );
+                    })}
+                </ul>
+            )}
+        </div>
+    );
+}
+
 export default function TreatmentsLibraryManager() {
     const { t } = useTranslation('authoring_meds');
     const toast = useToast();
@@ -405,8 +597,8 @@ export default function TreatmentsLibraryManager() {
     const [loading, setLoading] = useState(isEducator);
     const [typeFilter, setTypeFilter] = useState('all');
     const [search, setSearch] = useState('');
-    const [showInactive, setShowInactive] = useState(false);
-    const [editor, setEditor] = useState(null); // null | { row: null|object }
+    const [statusView, setStatusView] = useState('active');
+    const [editor, setEditor] = useState(null); // null | { row: null|object, prefill?: object }
     const [busyId, setBusyId] = useState(null);
 
     const fetchRows = useCallback(async () => {
@@ -428,7 +620,7 @@ export default function TreatmentsLibraryManager() {
     const filtered = useMemo(() => {
         const q = search.trim().toLowerCase();
         return rows.filter((row) => {
-            if (!showInactive && !row.is_active) return false;
+            if (!statusMatches(statusView, row)) return false;
             if (typeFilter !== 'all' && row.treatment_type !== typeFilter) return false;
             if (!q) return true;
             return (
@@ -438,18 +630,37 @@ export default function TreatmentsLibraryManager() {
                 row.rxcui?.toLowerCase().includes(q)
             );
         });
-    }, [rows, search, typeFilter, showInactive]);
+    }, [rows, search, typeFilter, statusView]);
+
+    // Status counts are global; type counts follow the current status view.
+    const statusCounts = useMemo(() => ({
+        active: rows.filter((r) => r.is_active).length,
+        inactive: rows.filter((r) => !r.is_active).length,
+        all: rows.length,
+    }), [rows]);
 
     const counts = useMemo(() => {
-        const active = rows.filter((r) => r.is_active);
+        const inView = rows.filter((r) => statusMatches(statusView, r));
         return {
-            all: active.length,
-            ...Object.fromEntries(TREATMENT_TYPES.map((type) => [type, active.filter((r) => r.treatment_type === type).length])),
+            all: inView.length,
+            ...Object.fromEntries(TREATMENT_TYPES.map((type) => [type, inView.filter((r) => r.treatment_type === type).length])),
         };
-    }, [rows]);
+    }, [rows, statusView]);
+
+    // "Open" from the external search: filter the table down to that row
+    // (switching to the view it lives in) rather than opening an editor the
+    // user may not be allowed to save.
+    const revealRow = (row) => {
+        setStatusView(row.is_active ? 'active' : 'inactive');
+        setTypeFilter('all');
+        setSearch(row.treatment_name);
+    };
 
     const handleDeactivate = async (row) => {
-        if (!confirm(t('tl_confirm_deactivate', { name: row.treatment_name }))) return;
+        const ok = await toast.confirm(t('tl_confirm_deactivate', { name: row.treatment_name }), {
+            title: t('tl_deactivate'), type: 'danger', confirmText: t('tl_deactivate'),
+        });
+        if (!ok) return;
         setBusyId(row.id);
         try {
             await apiDelete(`/treatment-effects/${row.id}`);
@@ -517,32 +728,49 @@ export default function TreatmentsLibraryManager() {
 
             <p className="text-xs text-neutral-500">{t('tl_intro')}</p>
 
+            <ExternalSearch
+                rows={rows}
+                onPick={(hit) => setEditor({ row: null, prefill: prefillFromHit(hit) })}
+                onOpen={revealRow}
+            />
+
             <div className="flex flex-wrap items-center gap-2">
-                <button
-                    type="button"
-                    onClick={() => setTypeFilter('all')}
-                    className={`px-3 py-1 rounded-full text-xs font-medium ${typeFilter === 'all' ? 'rohy-admin-tab-active' : 'rohy-admin-tab'}`}
-                >
-                    {t('category_all', { ns: 'authoring_case' })} ({counts.all})
-                </button>
-                {TREATMENT_TYPES.map((type) => {
-                    const Icon = TYPE_META[type].icon;
-                    return (
+                <div className="flex flex-wrap items-center gap-2" role="group" aria-label={t('tl_type_filter_label')}>
+                    <button
+                        type="button"
+                        onClick={() => setTypeFilter('all')}
+                        className={`px-3 py-1 rounded-full text-xs font-medium ${typeFilter === 'all' ? 'rohy-admin-tab-active' : 'rohy-admin-tab'}`}
+                    >
+                        {t('category_all', { ns: 'authoring_case' })} ({counts.all})
+                    </button>
+                    {TREATMENT_TYPES.map((type) => {
+                        const Icon = TYPE_META[type].icon;
+                        return (
+                            <button
+                                key={type}
+                                type="button"
+                                onClick={() => setTypeFilter(type)}
+                                className={`px-3 py-1 rounded-full text-xs font-medium inline-flex items-center gap-1 ${typeFilter === type ? 'rohy-admin-tab-active' : 'rohy-admin-tab'}`}
+                            >
+                                <Icon className="w-3 h-3" />
+                                {typeLabel(t, type)} ({counts[type]})
+                            </button>
+                        );
+                    })}
+                </div>
+                <div className="ml-auto inline-flex rounded-full overflow-hidden border border-neutral-300" role="group" aria-label={t('tl_status_filter_label')}>
+                    {STATUS_VIEWS.map((view) => (
                         <button
-                            key={type}
+                            key={view}
                             type="button"
-                            onClick={() => setTypeFilter(type)}
-                            className={`px-3 py-1 rounded-full text-xs font-medium inline-flex items-center gap-1 ${typeFilter === type ? 'rohy-admin-tab-active' : 'rohy-admin-tab'}`}
+                            onClick={() => setStatusView(view)}
+                            aria-pressed={statusView === view}
+                            className={`px-3 py-1 text-xs font-medium ${statusView === view ? 'rohy-admin-tab-active' : 'rohy-admin-tab'}`}
                         >
-                            <Icon className="w-3 h-3" />
-                            {typeLabel(t, type)} ({counts[type]})
+                            {t(STATUS_LABEL_KEYS[view])} ({statusCounts[view]})
                         </button>
-                    );
-                })}
-                <label className="ml-auto flex items-center gap-2 text-xs text-neutral-500">
-                    <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />
-                    {t('tl_show_inactive')}
-                </label>
+                    ))}
+                </div>
             </div>
 
             <div className="relative">
@@ -573,7 +801,7 @@ export default function TreatmentsLibraryManager() {
                         {filtered.length === 0 ? (
                             <tr>
                                 <td colSpan="7" className="text-center py-8 text-neutral-500">
-                                    {search ? t('tl_empty_no_match') : t('tl_empty')}
+                                    {search ? t('tl_empty_no_match') : (statusView === 'inactive' ? t('tl_empty_inactive') : t('tl_empty'))}
                                 </td>
                             </tr>
                         ) : filtered.map((row) => {
@@ -649,6 +877,7 @@ export default function TreatmentsLibraryManager() {
             {editor && (
                 <TreatmentEditor
                     row={editor.row}
+                    prefill={editor.prefill}
                     currentUser={currentUser}
                     onClose={() => setEditor(null)}
                     onSaved={() => { setEditor(null); fetchRows(); }}

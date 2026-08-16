@@ -3,16 +3,20 @@ import { useTranslation } from 'react-i18next';
 import {
     Pill, Droplets, Wind, HeartPulse,
     Search, X, Save, AlertTriangle,
-    Check, ChevronDown, ChevronUp, Loader2
+    Check, ChevronDown, ChevronUp, Loader2, Library
 } from 'lucide-react';
 import { useToast } from '../../contexts/ToastContext';
 import { ApiError, apiFetch, apiPut } from '../../services/apiClient';
 
 /**
  * CaseTreatmentConfig - Configure treatments for a case in the admin panel
- * Allows setting expected, contraindicated, and available treatments with feedback
+ * Allows setting expected, contraindicated, and available treatments with feedback.
+ *
+ * `onManageLibrary` (optional): opens Settings → Libraries → Treatments so a
+ * missing drug can be added without leaving the editor flow. Without it a
+ * plain hint tells the educator where the library lives.
  */
-export default function CaseTreatmentConfig({ caseId, caseTreatments = [], onUpdate }) {
+export default function CaseTreatmentConfig({ caseId, caseTreatments = [], onUpdate, onManageLibrary }) {
     const { t } = useTranslation('authoring_case');
     const [treatments, setTreatments] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -160,8 +164,21 @@ export default function CaseTreatmentConfig({ caseId, caseTreatments = [], onUpd
                 catalog later affects every case using that treatment. */}
             <div className="bg-amber-900/20 border border-amber-700/40 rounded-lg p-3 flex items-start gap-2 text-xs">
                 <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
-                <div className="text-amber-200">
+                <div className="text-amber-200 flex-1">
                     {t('master_catalog_warning_before')}<span className="font-mono text-amber-100">treatment_effects</span>{t('master_catalog_warning_after')}
+                    {' '}
+                    {onManageLibrary
+                        ? (
+                            <button
+                                type="button"
+                                onClick={onManageLibrary}
+                                className="inline-flex items-center gap-1 underline underline-offset-2 text-amber-100 hover:text-white"
+                            >
+                                <Library className="w-3 h-3" />
+                                {t('manage_library_link')}
+                            </button>
+                        )
+                        : <span className="text-amber-100">{t('manage_library_hint')}</span>}
                 </div>
             </div>
 
