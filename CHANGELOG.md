@@ -9,6 +9,22 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.45] — 2026-08-16
+
+### Added
+
+- **Treatments library.** Settings → Libraries → *Treatments* (next to
+  Medications) edits the list students actually order from —
+  medications, IV fluids, oxygen and nursing procedures with their
+  onset/peak/duration and per-vital effects, RxCUI and evidence links.
+  Until now that table (`treatment_effects`) could only be changed by
+  editing the seed JSON and reseeding. New audited routes
+  `POST/PUT/DELETE /treatment-effects` (+ `/restore`); educators add
+  rows for their own tenant, admins manage platform rows. Migration
+  0046 adds `scope`/`tenant_id`/`created_by`/`updated_at` (additive,
+  defaults keep every existing row platform-wide and visible exactly as
+  before). The Medications reference catalogue is unchanged.
+
 ## [2.9.44] — 2026-08-16
 
 ### Added

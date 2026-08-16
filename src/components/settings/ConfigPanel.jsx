@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Settings, Save, Plus, Cpu, FileText, Database, Image, Loader2, Upload, Users, ClipboardList, X, FileDown, FileUp, Layers, Activity, User, Shield, Zap, Monitor, RefreshCw, Copy, Mic, Camera, ScanFace } from 'lucide-react';
+import { Settings, Save, Plus, Cpu, FileText, Database, Image, Loader2, Upload, Users, ClipboardList, X, FileDown, FileUp, Layers, Activity, User, Shield, Zap, Monitor, RefreshCw, Copy, Mic, Camera, ScanFace, Stethoscope } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { ApiError, apiDelete, apiFetch, apiPost, apiPut } from '../../services/apiClient';
@@ -24,6 +24,7 @@ import LabTestManager from './LabTestManager';
 import UsersWorkspace from './users/UsersWorkspace';
 import RegistrationPolicySettings from './RegistrationPolicySettings';
 import MedicationManager from './MedicationManager';
+import TreatmentsLibraryManager from './TreatmentsLibraryManager';
 import AgentTemplateManager from './AgentTemplateManager';
 import CaseTreatmentConfig from './CaseTreatmentConfig';
 import VoiceSettingsTab from './VoiceSettingsTab';
@@ -240,6 +241,11 @@ const SETTINGS_CARD_COPY = {
         description: 'Maintain medication catalogues and treatment metadata.',
         accent: 'from-green-500 to-emerald-500',
         metric: 'Medication library',
+    },
+    treatments_library: {
+        description: 'Edit the treatment catalogue students order from: PK timings, vital-sign effects, dosing.',
+        accent: 'from-teal-500 to-cyan-500',
+        metric: 'Treatment library',
     },
     platform: {
         description: 'Control global runtime, defaults, AI, and monitor settings.',
@@ -676,6 +682,7 @@ export default function ConfigPanel({ onClose, onLoadCase, fullPage = false, ini
                 { id: 'bodymap', label: t('tab_bodymap'), icon: Image, visible: admin },
                 { id: 'labdb', label: t('tab_labdb'), icon: Database, visible: admin },
                 { id: 'medications', label: t('tab_medications'), icon: Database, visible: admin },
+                { id: 'treatments_library', label: t('tab_treatments_library'), icon: Stethoscope, visible: canManageCohorts },
             ],
         },
         {
@@ -1229,6 +1236,13 @@ export default function ConfigPanel({ onClose, onLoadCase, fullPage = false, ini
                     {activeTab === 'medications' && isAdmin() && (
                         <div className="space-y-6">
                             <MedicationManager />
+                        </div>
+                    )}
+
+                    {/* --- TREATMENTS LIBRARY TAB (Educator+) --- */}
+                    {activeTab === 'treatments_library' && canManageCohorts && (
+                        <div className="space-y-6">
+                            <TreatmentsLibraryManager />
                         </div>
                     )}
 

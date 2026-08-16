@@ -11,6 +11,7 @@ import sessionsRoutes from './routes/sessions-routes.js';
 import analyticsRoutes from './routes/analytics-routes.js';
 import notificationRoutes from './routes/notification-routes.js';
 import ordersRoutes from './routes/orders-routes.js';
+import treatmentsLibraryRoutes from './routes/treatments-library-routes.js';
 import proxyRoutes from './routes/proxy-routes.js';
 import adminRoutes from './routes/admin-routes.js';
 import patientRecordRoutes from './routes/patient-record-routes.js';
@@ -103,6 +104,7 @@ router.use(sessionsRoutes);
 router.use(analyticsRoutes);
 router.use(notificationRoutes);
 router.use(ordersRoutes);
+router.use(treatmentsLibraryRoutes);
 router.use(proxyRoutes);
 router.use(adminRoutes);
 router.use(patientRecordRoutes);
@@ -299,6 +301,10 @@ if (oyonRoutes) {
 // router.get('/sessions/:sessionId/active-effects', authenticateToken, (req, res) => {
 // router.put('/cases/:caseId/treatments', authenticateToken, requireEducator, (req, res) => {
 // router.get('/treatment-effects', authenticateToken, (req, res) => {
+// router.post('/treatment-effects', authenticateToken, requireEducator, async (req, res) => {
+// router.put('/treatment-effects/:id', authenticateToken, requireEducator, async (req, res) => {
+// router.delete('/treatment-effects/:id', authenticateToken, requireEducator, (req, res) => setActive(req, res, false));
+// router.put('/treatment-effects/:id/restore', authenticateToken, requireEducator, (req, res) => setActive(req, res, true));
 // router.post('/patient-record/sync', authenticateToken, async (req, res) => {
 // router.get('/patient-record/:sessionId', authenticateToken, async (req, res) => {
 // router.get('/patient-record/:sessionId/events', authenticateToken, async (req, res) => {

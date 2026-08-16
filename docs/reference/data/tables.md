@@ -1679,6 +1679,7 @@ Stores scenarios records.
 | `created_at` | DATETIME | DEFAULT CURRENT_TIMESTAMP | — |
 | `tenant_id` | INTEGER | NOT NULL DEFAULT 1 | `0004_tenants.sql` |
 | `deleted_at` | DATETIME | — | `0005_retention.sql` |
+| `language` | TEXT | NOT NULL DEFAULT 'en' | `0045_scenarios_language.sql` |
 
 ## `search_aliases`
 
@@ -1954,7 +1955,7 @@ Stores treatment effects records.
 
 **Introduced by:** base schema (`migrations/0001_initial.sql`)
 
-**Cross-cutting:** `audit (created_at)`
+**Cross-cutting:** `tenant-scoped` · `audit (created_by, created_at, updated_at)`
 
 | Column | Type | Constraints | Added by |
 | --- | --- | --- | --- |
@@ -1984,6 +1985,10 @@ Stores treatment effects records.
 | `data_source_id` | INTEGER | REFERENCES data_sources(id) | `0007_drug_lab_catalogue.sql` |
 | `pk_source` | TEXT | — | `0007_drug_lab_catalogue.sql` |
 | `pk_evidence_url` | TEXT | — | `0007_drug_lab_catalogue.sql` |
+| `scope` | TEXT | NOT NULL DEFAULT 'platform' | `0046_treatment_effects_scope.sql` |
+| `tenant_id` | INTEGER | NOT NULL DEFAULT 1 | `0046_treatment_effects_scope.sql` |
+| `created_by` | INTEGER | REFERENCES users(id) | `0046_treatment_effects_scope.sql` |
+| `updated_at` | DATETIME | — | `0046_treatment_effects_scope.sql` |
 
 ## `treatment_orders`
 

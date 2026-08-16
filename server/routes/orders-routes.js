@@ -15,6 +15,7 @@ import {
 import * as labDb from '../services/labDatabase.js';
 import { resolvePatientGender } from '../shared/patientDemographics.js';
 import { DEFAULT_TURNAROUND_MINUTES, resolveTurnaroundMinutes } from '../lib/turnaround.js';
+import { VISIBILITY_SQL as TREATMENT_VISIBILITY_SQL } from './treatments-library-routes.js';
 
 
 import { logger } from '../logger.js';
@@ -1757,9 +1758,11 @@ router.get('/sessions/:sessionId/available-treatments', authenticateToken, (req,
         // Get case-specific treatment configuration
         const treatmentConfig = caseConfig.treatments || {};
 
-        // Get all treatment effects (master data) as available treatments
-        let effectsSql = `SELECT * FROM treatment_effects WHERE is_active = 1`;
-        const params = [];
+        // Get all treatment effects (master data) as available treatments.
+        // Platform rows plus this tenant's own library rows (0046 scope model)
+        // — another tenant's rows must never reach these students.
+        let effectsSql = `SELECT * FROM treatment_effects WHERE is_active = 1 AND ${TREATMENT_VISIBILITY_SQL}`;
+        const params = [tenantId(req)];
         if (type) {
             effectsSql += ` AND treatment_type = ?`;
             params.push(type);
@@ -1880,9 +1883,9 @@ router.post('/sessions/:sessionId/order-treatment', authenticateToken, (req, res
             const pointsIfOrdered = caseConfig?.points_if_ordered ?? 0;
             const feedback = caseConfig?.feedback_if_ordered ?? null;
 
-            // Get treatment effect data
-            dbAdapter.get(`SELECT * FROM treatment_effects WHERE treatment_type = ? AND treatment_name = ? AND is_active = 1`,
-                [treatment_type, treatment_name], (err, effect) => {
+            // Get treatment effect data (platform rows + this tenant's library rows)
+            dbAdapter.get(`SELECT * FROM treatment_effects WHERE treatment_type = ? AND treatment_name = ? AND is_active = 1 AND ${TREATMENT_VISIBILITY_SQL}`,
+                [treatment_type, treatment_name, tenantId(req)], (err, effect) => {
                 if (err) return res.status(500).json({ error: err.message });
 
                 const isHighAlert = effect?.treatment_name?.match(/epinephrine|norepinephrine|insulin|heparin|morphine|fentanyl|propofol/i) !== null;
@@ -2004,9 +2007,9 @@ router.post('/sessions/:sessionId/administer/:orderId', authenticateToken, (req,
             return sendError(500, e, { phase: 'order-validate' });
         }
 
-        // Get treatment effect
-        dbAdapter.get(`SELECT * FROM treatment_effects WHERE treatment_type = ? AND treatment_name = ? AND is_active = 1`,
-            [order.treatment_type, order.treatment_item], (err, effect) => {
+        // Get treatment effect (platform rows + this tenant's library rows)
+        dbAdapter.get(`SELECT * FROM treatment_effects WHERE treatment_type = ? AND treatment_name = ? AND is_active = 1 AND ${TREATMENT_VISIBILITY_SQL}`,
+            [order.treatment_type, order.treatment_item, tenantId(req)], (err, effect) => {
             let isContinuous, now;
             try {
                 if (err) return sendError(500, err, { phase: 'effect-lookup' });
@@ -2496,12 +2499,21 @@ router.put('/cases/:caseId/treatments', authenticateToken, requireEducator, (req
     });
 });
 
-// GET /api/treatment-effects - Get all treatment effects (master data)
+// GET /api/treatment-effects - Get all treatment effects (master data).
+// Returns platform rows plus the caller's tenant rows (0046 scope model), with
+// the ownership columns so the Treatments library UI can badge scope and gate
+// its Edit button. `?include_inactive=1` (educator+) also returns deactivated
+// rows so they can be restored; students only ever see active rows.
+// Mutations live in treatments-library-routes.js.
 router.get('/treatment-effects', authenticateToken, (req, res) => {
-    const { type } = req.query;
+    const { type, include_inactive } = req.query;
 
-    let sql = 'SELECT * FROM treatment_effects WHERE is_active = 1';
-    const params = [];
+    const showInactive = include_inactive === '1' || include_inactive === 'true';
+    let sql = `SELECT * FROM treatment_effects WHERE ${TREATMENT_VISIBILITY_SQL}`;
+    const params = [tenantId(req)];
+    if (!(showInactive && hasRoleAtLeast(req.user, ROLE_RANKS.educator))) {
+        sql += ' AND is_active = 1';
+    }
     if (type) {
         sql += ' AND treatment_type = ?';
         params.push(type);

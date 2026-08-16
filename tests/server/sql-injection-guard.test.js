@@ -111,6 +111,11 @@ const ALLOWLIST = [
         why: '`where` is built earlier in the function with `where += " AND col = ?"` shapes; values go through the params array.',
     },
     {
+        file: 'server/routes/orders-routes.js',
+        lineSubstring: '${TREATMENT_VISIBILITY_SQL}',
+        why: 'Module-level constant SQL fragment (VISIBILITY_SQL in treatments-library-routes.js) containing only column names and a `?` placeholder; the tenant id is bound as a parameter.',
+    },
+    {
         file: 'server/routes/analytics-routes.js',
         lineSubstring: 'FROM learning_events le WHERE ${whereClause}',
         why: 'whereClause = filters.join(" AND ") where each filter is a hardcoded "le.col = ?" string; all values flow through params[]. Pre-flight count for /export/learning-events.',
