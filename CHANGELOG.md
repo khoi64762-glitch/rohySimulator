@@ -9,6 +9,26 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.46] — 2026-08-16
+
+### Added
+
+- **XLIFF 1.2 review pipeline (phase 1).** Human translation review now
+  has a place to live: a committed per-language status sidecar
+  (`src/locales/.status/<lang>.json` — source hash, state
+  new/machine/reviewed/approved, reviewer, clinical-risk level derived
+  from the namespace) plus three npm commands. `i18n:status` classifies
+  every key (new / stale / machine / reviewed / approved / removed, with
+  an opt-in `--check` release gate for clinical keys); `i18n:xliff:export
+  <lang>` writes an incremental XLIFF 1.2 file per language pair (one
+  `<file>` per namespace, states mapped, glossary in the header, ICU
+  argument names in notes); `i18n:xliff:import <file>` validates (ICU
+  compiles and keeps the same arguments, braces balanced, glossary
+  renderings honoured — fail on clinical, warn on low, stale source hash
+  skipped) and writes the reviewed targets back into the existing JSON
+  catalogues without changing their structure. All five languages
+  bootstrapped as `machine`. Docs: `docs/integrator/i18n-review.md`.
+
 ## [2.9.45] — 2026-08-16
 
 ### Added

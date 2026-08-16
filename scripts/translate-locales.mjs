@@ -23,8 +23,8 @@
 import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHash } from 'node:crypto';
 import { LANGUAGES, DEFAULT_LANGUAGE } from '../server/shared/languages.js';
+import { hash } from './i18n/lib.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const LOCALES = join(ROOT, 'src', 'locales');
@@ -39,7 +39,8 @@ const requestedLangs = argv.filter(a => !a.startsWith('--'));
 const targets = (requestedLangs.length ? requestedLangs : Object.keys(LANGUAGES))
     .filter(code => code !== DEFAULT_LANGUAGE && LANGUAGES[code]);
 
-const hash = (s) => createHash('sha256').update(s).digest('hex').slice(0, 12);
+// hash(): sha256[:12] shared with the review pipeline (scripts/i18n/lib.mjs) so
+// .en-hashes.json and .status/<lang>.json agree on what "the en value" hashes to.
 const readJson = (p) => JSON.parse(readFileSync(p, 'utf8'));
 const namespaces = readdirSync(EN_DIR).filter(f => f.endsWith('.json'));
 

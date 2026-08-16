@@ -1,7 +1,7 @@
 {
   "name": "rohy",
   "private": true,
-  "version": "2.9.45",
+  "version": "2.9.46",
   "description": "Virtual Patient Simulation Platform for Medical Education",
   "author": {
     "name": "Mohammed Saqr",
@@ -49,7 +49,10 @@
     "i18n:extract": "node node_modules/i18next-parser/bin/cli.js",
     "i18n:check": "node node_modules/i18next-parser/bin/cli.js --fail-on-update",
     "i18n:pseudo": "node scripts/generate-pseudo-locale.mjs",
-    "i18n:translate": "node scripts/translate-locales.mjs"
+    "i18n:translate": "node scripts/translate-locales.mjs",
+    "i18n:status": "node scripts/i18n/status.mjs",
+    "i18n:xliff:export": "node scripts/i18n/xliff-export.mjs",
+    "i18n:xliff:import": "node scripts/i18n/xliff-import.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",

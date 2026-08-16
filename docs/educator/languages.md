@@ -33,6 +33,9 @@ Language**; it is stored per user.
 UI strings live in `src/locales/<lang>/*.json` (English is canonical).
 Machine-first translations are produced with `npm run i18n:translate` (uses
 the pinned clinical glossary in `scripts/i18n-glossary.json`); native-speaker
-review of the git diff is the release gate per language. Adding a whole new
-language is a data change — one entry in `server/shared/languages.js` plus a
-`src/locales/<code>/` folder; see `I18N_PLAN.md`.
+review is the release gate per language — reviewers work from XLIFF files
+(`npm run i18n:status`, `npm run i18n:xliff:export`, `npm run
+i18n:xliff:import`; see [Translation review (XLIFF)](/integrator/i18n-review)).
+Adding a whole new language is a data change — one entry in
+`server/shared/languages.js` plus a `src/locales/<code>/` folder; see
+`I18N_PLAN.md`.

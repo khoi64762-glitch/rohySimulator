@@ -135,4 +135,8 @@ tests/e2e/.auth/
 # "key": "<hex>" shape trips secret scanners (the hexes are hashes of UI
 # labels like "Password"/"API key", never credentials).
 /src/locales/.en-hashes.json
+# XLIFF review exports (npm run i18n:xliff:export) are transient hand-offs to
+# translators; the committed truth is src/locales/<lang>/*.json plus the
+# per-string review status in src/locales/.status/<lang>.json (tracked).
+/i18n/xliff/
 googlekey.text
