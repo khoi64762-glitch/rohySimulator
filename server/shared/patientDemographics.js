@@ -33,7 +33,7 @@
  * English worked purely by coincidence, because `t('demo_gender_male')` is the
  * word "Male", which happens to satisfy the constraint.
  *
- * `tests/server/i18n-enum-options.test.js` now fails on any `<option>` that
+ * `tests/server/patient-demographics.test.js` now fails on any `<option>` that
  * has a `t(…)` label and no explicit `value`, so this cannot recur.
  */
 
@@ -62,6 +62,38 @@ export const PERSONA_TYPES = [
 export const DEFAULT_PERSONA_TYPE = PERSONA_TYPES[0];
 
 /**
+ * Localized gender labels → canonical value.
+ *
+ * These are the `demo_gender_male` / `demo_gender_female` / `demo_gender_other`
+ * values from `src/locales/{de,es,it,fi,sv}/authoring_config.json` (the `en`
+ * catalogue IS the canonical set; `en-XA` is pseudo-locale noise and skipped).
+ * They are hardcoded rather than read from the catalogues because this module
+ * runs in the Docker image, which ships `server/` without `src/`.
+ *
+ * Why accept them at all: an exported case carries `demographics.gender` as
+ * whatever the editor stored, and cases authored before v2.9.15 stored the
+ * TRANSLATED LABEL (see the module comment). Importing such a case — or one
+ * hand-written in a German/Italian/… teaching team's own words — should land
+ * as the canonical value, not bounce with a 400 the author cannot act on.
+ *
+ * Keys are lowercase (matching is case-insensitive). If a catalogue string
+ * changes, add the new label here — old exports still carry the old one, so
+ * never remove an entry.
+ */
+export const PATIENT_GENDER_ALIASES = Object.freeze({
+    // de
+    'männlich': 'Male', 'weiblich': 'Female', 'andere': 'Other',
+    // es
+    'masculino': 'Male', 'femenino': 'Female', 'otro': 'Other',
+    // it
+    'maschio': 'Male', 'femmina': 'Female', 'altro': 'Other',
+    // fi
+    'mies': 'Male', 'nainen': 'Female', 'muu': 'Other',
+    // sv
+    'man': 'Male', 'kvinna': 'Female', 'annat': 'Other',
+});
+
+/**
  * Resolve a submitted gender to its canonical form.
  *
  * Three outcomes, kept distinct on purpose — collapsing "absent" and
@@ -74,16 +106,17 @@ export const DEFAULT_PERSONA_TYPE = PERSONA_TYPES[0];
  * Matching is case-insensitive and trims, so a legacy or API client sending
  * `'male'` is repaired rather than rejected — that casing was never valid
  * against the constraint, and failing it would be pedantry rather than safety.
- * A translated label ('Männlich', 'Maschio') is genuinely unrecognised and
- * comes back `ok: false`.
+ * The localized editor labels ('Männlich', 'Maschio', …) are recognised as
+ * aliases via `PATIENT_GENDER_ALIASES` and resolve to the canonical value;
+ * anything else ('Homme', 'M', a typo) comes back `ok: false`.
  */
 export function resolvePatientGender(value) {
     if (value === null || value === undefined) return { ok: true, value: null };
     const trimmed = String(value).trim();
     if (trimmed === '') return { ok: true, value: null };
-    const match = PATIENT_GENDERS.find(
-        (gender) => gender.toLowerCase() === trimmed.toLowerCase(),
-    );
+    const needle = trimmed.toLowerCase();
+    const match = PATIENT_GENDERS.find((gender) => gender.toLowerCase() === needle)
+        || PATIENT_GENDER_ALIASES[needle];
     return match ? { ok: true, value: match } : { ok: false, received: trimmed };
 }
 
@@ -99,7 +132,8 @@ export function resolvePatientGender(value) {
  * replaces — but those made it *invisible*: a German case with gender
  * "Weiblich" silently rendered a MALE body map, because "weiblich" is not
  * "female". Centralising it means the default is one documented decision
- * rather than four accidental ones.
+ * rather than four accidental ones — and, now that the resolver knows the
+ * localized labels, "Weiblich" renders the female body map it always meant.
  */
 export function bodyMapGender(value) {
     const resolved = resolvePatientGender(value);

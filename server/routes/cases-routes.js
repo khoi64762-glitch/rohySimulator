@@ -57,28 +57,60 @@ try {
 const router = express.Router();
 
 /**
- * Resolve `config.demographics.gender` for the denormalized, CHECK-constrained
+ * Resolve the patient gender for the denormalized, CHECK-constrained
  * `cases.patient_gender` column — or answer 400 and return null.
+ *
+ * Reads `config.demographics.gender` first; when that is absent/blank, falls
+ * back to `topLevelGender` (the body's `patient_gender`). The fallback exists
+ * for the import round-trip: an exported case carries the denormalized
+ * `patient_gender` column at the top level, and a hand-edited import may have
+ * only that. Without it, the import silently landed as a case with no gender.
  *
  * Guards the write rather than trusting the client, because the column's CHECK
  * is the only thing that used to stop a bad value, and it does so by throwing
  * SQLITE_CONSTRAINT from inside the driver callback. That surfaced as a 500
  * carrying raw SQL to the caller ("CHECK constraint failed: patient_gender
  * IN (…)"), which is both a poor error and a needless disclosure of schema
- * internals. A translated label from a stale client bundle is a client bug, so
- * it deserves an honest 4xx naming the accepted values.
+ * internals. Localized editor labels are accepted as aliases (see
+ * `PATIENT_GENDER_ALIASES`); anything else is a client bug and deserves an
+ * honest 4xx naming the accepted values.
  *
  * Returns `{ value }` on success (value may be null — absent is legitimate)
  * and null once it has already responded.
  */
-function resolvePatientGenderOr400(res, config) {
-    const resolved = resolvePatientGender(config?.demographics?.gender);
+function resolvePatientGenderOr400(res, config, topLevelGender) {
+    let resolved = resolvePatientGender(config?.demographics?.gender);
+    if (resolved.ok && resolved.value === null) resolved = resolvePatientGender(topLevelGender);
     if (resolved.ok) return { value: resolved.value };
     res.status(400).json({
         error: `Unrecognised patient gender "${resolved.received}". Expected one of: ${PATIENT_GENDERS.join(', ')}.`,
         code: 'invalid_patient_gender',
     });
     return null;
+}
+
+/**
+ * Write the resolved canonical gender back into the config that is about to
+ * be stored, so `cases.patient_gender` and `config.demographics.gender` never
+ * disagree — an alias ('Femmina') or a top-level-only `patient_gender` would
+ * otherwise leave the config carrying a different string from the column.
+ * A null gender leaves the config untouched (nothing to reconcile).
+ */
+function writeBackPatientGender(config, gender) {
+    if (!gender || !config || typeof config !== 'object') return;
+    config.demographics = { ...(config.demographics || {}), gender };
+}
+
+/**
+ * The denormalized `patient_name` / `patient_age` columns, derived from a
+ * case config exactly as POST/PUT do (the editor writes the name to
+ * `config.patient_name`; `demographics.name` is the legacy path).
+ */
+function derivePatientColumns(config) {
+    return {
+        patientName: config?.patient_name || config?.demographics?.name || null,
+        patientAge: config?.demographics?.age || null,
+    };
 }
 
 // Stamp the visible case code after an INSERT. The audit chain writes on its
@@ -300,11 +332,10 @@ router.post('/cases', authenticateToken, requireEducator, (req, res) => {
     // fallbacks. Reading only the legacy paths left these columns null for
     // editor-created cases — which made the debrief fall back to the case
     // description and show the patient name as the chief complaint (bug #2).
-    const gender = resolvePatientGenderOr400(res, config);
+    const gender = resolvePatientGenderOr400(res, config, req.body.patient_gender);
     if (!gender) return;
     const patientGender = gender.value;
-    const patientAge = config?.demographics?.age || null;
-    const patientName = config?.patient_name || config?.demographics?.name || null;
+    const { patientName, patientAge } = derivePatientColumns(config);
     const chiefComplaint = config?.structuredHistory?.chiefComplaint || config?.chiefComplaint || null;
     const difficultyLevel = config?.difficulty_level || null;
 
@@ -313,6 +344,7 @@ router.post('/cases', authenticateToken, requireEducator, (req, res) => {
     // these as top-level fields; without this merge they were silently dropped.
     const scenarioWithSource = mergeScenarioSource(scenario, { scenario_template, scenario_from_repository, scenario_duration });
     const safeConfig = clampInitialVitals(config || {});
+    writeBackPatientGender(safeConfig, patientGender);
     if (!canonicaliseCaseRhythmsOr400(res, safeConfig, scenarioWithSource)) return;
     // Case language is pinned at creation and immutable afterwards: normalize
     // the author's pick to a concrete registry code (absent/junk → default).
@@ -402,18 +434,18 @@ router.put('/cases/:id', authenticateToken, requireEducator, (req, res) => {
     // Extract patient info from config for denormalized storage. Mirror the
     // POST handler: prefer the editor's `config.patient_name` /
     // `config.structuredHistory.chiefComplaint`, fall back to legacy paths.
-    const gender = resolvePatientGenderOr400(res, config);
+    const gender = resolvePatientGenderOr400(res, config, req.body.patient_gender);
     if (!gender) return;
     const patientGender = gender.value;
-    const patientAge = config?.demographics?.age || null;
-    const patientName = config?.patient_name || config?.demographics?.name || null;
+    const { patientName, patientAge } = derivePatientColumns(config);
     const chiefComplaint = config?.structuredHistory?.chiefComplaint || config?.chiefComplaint || null;
     const difficultyLevel = config?.difficulty_level || null;
 
     // Same scenario-source merge as the POST handler — see comment there.
     const scenarioWithSource = mergeScenarioSource(scenario, { scenario_template, scenario_from_repository, scenario_duration });
-    if (!canonicaliseCaseRhythmsOr400(res, safeConfig, scenarioWithSource)) return;
     const safeConfig = clampInitialVitals(config || {});
+    writeBackPatientGender(safeConfig, patientGender);
+    if (!canonicaliseCaseRhythmsOr400(res, safeConfig, scenarioWithSource)) return;
 
     // First, get the old case data for audit trail
     dbAdapter.get(`SELECT * FROM cases WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`, [caseId, tenantId(req)], (err, oldCase) => {
@@ -586,42 +618,6 @@ router.get('/scenarios/:id', authenticateToken, (req, res) => {
     });
 });
 
-// Create scenario
-// Stage-5 audit: validate every timeline frame on write so the runtime
-// engine doesn't have to defend against malformed scenarios. Pre-fix
-// `params: {hr: "invalid"}` or `rhythm: "ASYSTOLE_TYPO"` were accepted
-// and JSON.stringify'd into the DB; PatientMonitor's interpolator then
-// produced NaN or hit an unknown rhythm in the ECG generator. Rhythm
-// VALUES are canonicalised (and unknowns rejected) by
-// canonicaliseTimelineRhythmsOr400 above; this checks shape only.
-function validateScenarioTimeline(timeline) {
-    if (!Array.isArray(timeline)) return 'timeline must be an array';
-    for (let i = 0; i < timeline.length; i++) {
-        const frame = timeline[i];
-        if (!frame || typeof frame !== 'object') return `frame[${i}] is not an object`;
-        if (!Number.isFinite(frame.time) || frame.time < 0) {
-            return `frame[${i}].time must be a non-negative number`;
-        }
-        if (frame.params !== undefined && frame.params !== null) {
-            if (typeof frame.params !== 'object') return `frame[${i}].params must be an object`;
-            for (const [k, v] of Object.entries(frame.params)) {
-                if (v !== null && v !== undefined && !Number.isFinite(Number(v))) {
-                    return `frame[${i}].params.${k} must be numeric`;
-                }
-            }
-        }
-        if (frame.conditions !== undefined && frame.conditions !== null && typeof frame.conditions !== 'object') {
-            return `frame[${i}].conditions must be an object`;
-        }
-        if (frame.rhythm !== undefined && frame.rhythm !== null && frame.rhythm !== '') {
-            // Don't be strict about case; accept anything reasonably named.
-            // The known list is informational — log a warning for unknowns
-            // rather than reject (admins occasionally invent rhythm names).
-            if (typeof frame.rhythm !== 'string') return `frame[${i}].rhythm must be a string`;
-        }
-    }
-    return null;
-}
 // ---- ECG rhythm canonicalisation (server/shared/rhythms.js) ----
 //
 // Rhythm strings arrive from three authoring surfaces that historically
@@ -665,6 +661,42 @@ function canonicaliseCaseRhythmsOr400(res, config, scenario) {
     return canonicaliseTimelineRhythmsOr400(res, scenario?.timeline);
 }
 
+// Create scenario
+// Stage-5 audit: validate every timeline frame on write so the runtime
+// engine doesn't have to defend against malformed scenarios. Pre-fix
+// `params: {hr: "invalid"}` or `rhythm: "ASYSTOLE_TYPO"` were accepted
+// and JSON.stringify'd into the DB; PatientMonitor's interpolator then
+// produced NaN or hit an unknown rhythm in the ECG generator. Rhythm
+// VALUES are canonicalised (and unknowns rejected) by
+// canonicaliseTimelineRhythmsOr400 above; this checks shape only.
+function validateScenarioTimeline(timeline) {
+    if (!Array.isArray(timeline)) return 'timeline must be an array';
+    for (let i = 0; i < timeline.length; i++) {
+        const frame = timeline[i];
+        if (!frame || typeof frame !== 'object') return `frame[${i}] is not an object`;
+        if (!Number.isFinite(frame.time) || frame.time < 0) {
+            return `frame[${i}].time must be a non-negative number`;
+        }
+        if (frame.params !== undefined && frame.params !== null) {
+            if (typeof frame.params !== 'object') return `frame[${i}].params must be an object`;
+            for (const [k, v] of Object.entries(frame.params)) {
+                if (v !== null && v !== undefined && !Number.isFinite(Number(v))) {
+                    return `frame[${i}].params.${k} must be numeric`;
+                }
+            }
+        }
+        if (frame.conditions !== undefined && frame.conditions !== null && typeof frame.conditions !== 'object') {
+            return `frame[${i}].conditions must be an object`;
+        }
+        if (frame.rhythm !== undefined && frame.rhythm !== null && frame.rhythm !== '') {
+            // Don't be strict about case; accept anything reasonably named.
+            // The known list is informational — log a warning for unknowns
+            // rather than reject (admins occasionally invent rhythm names).
+            if (typeof frame.rhythm !== 'string') return `frame[${i}].rhythm must be a string`;
+        }
+    }
+    return null;
+}
 
 router.post('/scenarios', authenticateToken, (req, res) => {
     const { name, description, duration_minutes, category, timeline, is_public } = req.body;
@@ -677,6 +709,7 @@ router.post('/scenarios', authenticateToken, (req, res) => {
     if (tlError) {
         return res.status(400).json({ error: `Invalid scenario timeline: ${tlError}` });
     }
+    if (!canonicaliseTimelineRhythmsOr400(res, timeline)) return;
 
     const query = `
         INSERT INTO scenarios (name, description, duration_minutes, category, timeline, created_by, is_public, tenant_id)
@@ -712,12 +745,12 @@ router.put('/scenarios/:id', authenticateToken, (req, res) => {
     const { name, description, duration_minutes, category, timeline, is_public } = req.body;
 
     // Stage-5 audit: validate timeline shape before persisting (mirrors POST).
-    if (!canonicaliseTimelineRhythmsOr400(res, timeline)) return;
     if (timeline !== undefined) {
         const tlError = validateScenarioTimeline(timeline);
         if (tlError) {
             return res.status(400).json({ error: `Invalid scenario timeline: ${tlError}` });
         }
+        if (!canonicaliseTimelineRhythmsOr400(res, timeline)) return;
     }
     
     // Check ownership or educator/admin
@@ -753,7 +786,6 @@ router.put('/scenarios/:id', authenticateToken, (req, res) => {
                     oldValue: { ...row, timeline: parseAuditJson(row.timeline) },
                     newValue: { name, description, duration_minutes, category, timeline, is_public: is_public ? 1 : 0 }
                 });
-        if (!canonicaliseTimelineRhythmsOr400(res, timeline)) return;
                 res.json({ message: 'Scenario updated successfully' });
             }
         );
@@ -1048,8 +1080,20 @@ router.post('/cases/:caseId/restore/:versionId', authenticateToken, requireAdmin
                 } catch { /* malformed legacy config — normalization below covers it */ }
                 restoredConfig.case_language = normalizeCaseLanguage(currentConfig || restoredConfig);
 
+                // Re-derive the denormalized patient columns from the restored
+                // config exactly as create/update do. A restore used to bring
+                // back the config alone and leave patient_gender/name/age at
+                // whatever the CURRENT version had — so the case list, debrief
+                // and lab ranges kept describing the wrong patient.
+                const gender = resolvePatientGenderOr400(res, restoredConfig, config.patient_gender);
+                if (!gender) return;
+                const patientGender = gender.value;
+                writeBackPatientGender(restoredConfig, patientGender);
+                const { patientName, patientAge } = derivePatientColumns(restoredConfig);
+
                 const sql = `UPDATE cases SET
                              name = ?, description = ?, system_prompt = ?, config = ?, scenario = ?,
+                             patient_name = ?, patient_gender = ?, patient_age = ?,
                              last_modified_by = ?, updated_at = CURRENT_TIMESTAMP, version = version + 1
                              WHERE id = ?`;
 
@@ -1059,6 +1103,9 @@ router.post('/cases/:caseId/restore/:versionId', authenticateToken, requireAdmin
                     config.system_prompt,
                     JSON.stringify(restoredConfig),
                     config.scenario ? JSON.stringify(config.scenario) : null,
+                    patientName,
+                    patientGender,
+                    patientAge,
                     req.user.id,
                     caseId
                 ], function(err) {

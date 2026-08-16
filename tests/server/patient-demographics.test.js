@@ -20,6 +20,7 @@ import {
     DEFAULT_PERSONA_TYPE,
     MARITAL_STATUSES,
     PATIENT_GENDERS,
+    PATIENT_GENDER_ALIASES,
     PERSONA_TYPES,
     bodyMapGender,
     resolvePatientGender,
@@ -27,6 +28,17 @@ import {
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const srcDir = join(repoRoot, 'src');
+const localesDir = join(repoRoot, 'src', 'locales');
+
+/** The gender labels every real (non-pseudo, non-English) catalogue ships. */
+const LOCALIZED_GENDER_LABELS = ['de', 'es', 'it', 'fi', 'sv'].flatMap((locale) => {
+    const catalogue = JSON.parse(readFileSync(join(localesDir, locale, 'authoring_config.json'), 'utf8'));
+    return [
+        [locale, catalogue.demo_gender_male, 'Male'],
+        [locale, catalogue.demo_gender_female, 'Female'],
+        [locale, catalogue.demo_gender_other, 'Other'],
+    ];
+});
 
 function jsxFiles(dir, found = []) {
     for (const entry of readdirSync(dir)) {
@@ -101,14 +113,43 @@ describe('patient demographic vocabularies', () => {
             }
         });
 
-        it.each([
-            ['de', 'Männlich'],
-            ['it', 'Maschio'],
-            ['fi', 'Mies'],
-            ['sv', 'Kvinna'],
-            ['es', 'Masculino'],
-        ])('rejects the %s label instead of letting it reach the CHECK', (_locale, label) => {
-            expect(resolvePatientGender(label)).toEqual({ ok: false, received: label });
+        // Regression lock: an imported case (or one authored before v2.9.15,
+        // when the editor stored the translated label) carries 'Femmina' /
+        // 'Weiblich' / … as its gender. Rejecting it with 400 left the author
+        // with an import they could not repair from the UI. The localized
+        // labels are aliases now — resolved to the canonical column value.
+        it.each(LOCALIZED_GENDER_LABELS)(
+            'resolves the %s label %s to %s',
+            (_locale, label, canonical) => {
+                expect(resolvePatientGender(label)).toEqual({ ok: true, value: canonical });
+                expect(resolvePatientGender(`  ${label.toUpperCase()}  `)).toEqual({ ok: true, value: canonical });
+            },
+        );
+
+        it('the hardcoded alias map covers every catalogue label (server ships without src/)', () => {
+            // PATIENT_GENDER_ALIASES cannot read the catalogues at runtime —
+            // the Docker image copies server/ but not src/ — so it is a copy.
+            // This is the drift guard: a retranslated label must be ADDED here.
+            for (const [locale, label, canonical] of LOCALIZED_GENDER_LABELS) {
+                expect(
+                    PATIENT_GENDER_ALIASES[label.toLowerCase()],
+                    `${locale} label "${label}" is missing from PATIENT_GENDER_ALIASES`,
+                ).toBe(canonical);
+            }
+            expect(LOCALIZED_GENDER_LABELS.length).toBe(15);
+        });
+
+        it('every alias maps to a canonical value', () => {
+            for (const [alias, canonical] of Object.entries(PATIENT_GENDER_ALIASES)) {
+                expect(alias, 'alias keys are lowercase').toBe(alias.toLowerCase());
+                expect(PATIENT_GENDERS).toContain(canonical);
+            }
+        });
+
+        it('still rejects a value that is neither canonical nor a known label', () => {
+            for (const unknown of ['Homme', 'M', 'F', 'Femal', 'divers']) {
+                expect(resolvePatientGender(unknown)).toEqual({ ok: false, received: unknown });
+            }
         });
     });
 
@@ -125,10 +166,11 @@ describe('patient demographic vocabularies', () => {
         it('no longer silently mislabels a translated value as male', () => {
             // Regression lock: the old `gender.toLowerCase() === 'female'` test
             // rendered a MALE body map for a German female patient, with no
-            // error. The value is still unrecognised — but it is now
-            // unrecognised in exactly one documented place, and the server
-            // rejects it at write time so it cannot be stored at all.
-            expect(resolvePatientGender('Weiblich').ok).toBe(false);
+            // error. The resolver now knows the localized labels, so the
+            // German female patient gets the female body map she always meant.
+            expect(bodyMapGender('Weiblich')).toBe('female');
+            expect(bodyMapGender('Femmina')).toBe('female');
+            expect(bodyMapGender('Männlich')).toBe('male');
         });
     });
 

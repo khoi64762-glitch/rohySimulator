@@ -9,6 +9,22 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.42] — 2026-08-16
+
+### Fixed
+
+- **Importing a case whose gender is written in the UI language works.**
+  `resolvePatientGender()` now accepts every locale's own labels
+  (Femmina, Weiblich, Mujer, Nainen, Kvinna, …) as aliases for the three
+  canonical values, so a hand-authored Italian JSON no longer stops at
+  `invalid_patient_gender`. `POST/PUT /cases` also fall back to the
+  top-level `patient_gender` an export carries when
+  `config.demographics.gender` is absent (that was the "gender doesn't
+  show after import" symptom), and write the canonical value back into
+  the config so column and config agree. Version restore now re-derives
+  `patient_name/gender/age`; the lab reference-range lookup routes
+  through the resolver instead of `|| 'Male'`.
+
 ## [2.9.41] — 2026-08-16
 
 ### Fixed

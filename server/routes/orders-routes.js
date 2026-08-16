@@ -13,6 +13,7 @@ import {
 
 
 import * as labDb from '../services/labDatabase.js';
+import { resolvePatientGender } from '../shared/patientDemographics.js';
 import { DEFAULT_TURNAROUND_MINUTES, resolveTurnaroundMinutes } from '../lib/turnaround.js';
 
 
@@ -915,7 +916,10 @@ router.get('/sessions/:sessionId/available-labs', authenticateToken, async (req,
             if (defaultLabsEnabled) {
                 // Return ALL labs from database, with configured abnormals overriding normals
                 const allLabs = labDb.loadLabDatabase();
-                const patientGender = caseConfig.demographics?.gender || 'Male';
+                // Canonicalise before the lab lookup: labDatabase keys sex-specific
+                // ranges by the literal strings 'Male'/'Female' ('Both' when shared), so
+                // a localized label ('Weiblich') would silently miss the female range.
+                const patientGender = resolvePatientGender(caseConfig.demographics?.gender).value || 'Male';
                 
                 // Get unique test names from database
                 const uniqueTests = {};
@@ -1023,7 +1027,10 @@ router.post('/sessions/:sessionId/order-labs', authenticateToken, (req, res) => 
 
             // Merge: snapshot from session row + live config as fallback
             const caseConfig = resolveSessionCaseConfig({ case_snapshot: session.case_snapshot, config: caseRow?.config });
-            const patientGender = caseConfig.demographics?.gender || 'Male';
+            // Canonicalise before the lab lookup: labDatabase keys sex-specific
+            // ranges by the literal strings 'Male'/'Female' ('Both' when shared), so
+            // a localized label ('Weiblich') would silently miss the female range.
+            const patientGender = resolvePatientGender(caseConfig.demographics?.gender).value || 'Male';
             const configJsonLabs = caseConfig.investigations?.labs || [];
 
             (req.log || routesOrdersLog).debug('lab order case config loaded', {
