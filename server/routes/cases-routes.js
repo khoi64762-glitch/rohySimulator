@@ -136,6 +136,73 @@ function stampCaseCode(caseCode, caseId, tenant, cb, attempt = 0) {
     );
 }
 
+/**
+ * Normalise an incoming case (create, update, or a restored snapshot) into
+ * exactly what gets STORED — one pipeline for all three writers so a version
+ * snapshot always equals the live row and a restore re-applies every guard.
+ *
+ *   - resolves the CHECK-constrained patient gender (400 on junk → returns null
+ *     once it has already responded);
+ *   - merges the wizard's scenario provenance into the scenario JSON;
+ *   - clamps initialVitals to VITAL_RANGES;
+ *   - writes the canonical gender back into config.demographics;
+ *   - canonicalises rhythm strings (lenient — unknowns kept + warned);
+ *   - derives the denormalised columns (patient_name/gender/age,
+ *     chief_complaint, difficulty_level) from the normalised config.
+ *
+ * `case_language` is NOT set here — it depends on the stored row (immutable
+ * after creation), see `pinCaseLanguage`.
+ */
+function normaliseCaseForStorage(req, res, body) {
+    const { config, scenario, scenario_template, scenario_from_repository, scenario_duration } = body;
+    const gender = resolvePatientGenderOr400(res, config, body.patient_gender);
+    if (!gender) return null;
+    const patientGender = gender.value;
+
+    // Tuck the scenario provenance ({template_id|repository_id, name, duration})
+    // into the scenario JSON so it survives the round-trip. The wizard sends
+    // these as top-level fields; without this merge they were silently dropped.
+    const scenarioWithSource = mergeScenarioSource(scenario, { scenario_template, scenario_from_repository, scenario_duration });
+    const safeConfig = clampInitialVitals(config || {});
+    writeBackPatientGender(safeConfig, patientGender);
+    const warnings = [];
+    canonicaliseCaseRhythms(safeConfig, scenarioWithSource, warnings);
+    logVocabularyWarnings(req, 'case', warnings);
+
+    // Denormalised columns. The case editor writes the patient name to
+    // `config.patient_name` and the chief complaint to
+    // `config.structuredHistory.chiefComplaint`; older/top-level shapes
+    // (`demographics.name`, `config.chiefComplaint`) are kept as fallbacks.
+    // Reading only the legacy paths left these columns null for
+    // editor-created cases — which made the debrief fall back to the case
+    // description and show the patient name as the chief complaint (bug #2).
+    const { patientName, patientAge } = derivePatientColumns(safeConfig);
+    const chiefComplaint = safeConfig?.structuredHistory?.chiefComplaint || safeConfig?.chiefComplaint || null;
+    const difficultyLevel = safeConfig?.difficulty_level || null;
+
+    return {
+        safeConfig,
+        scenarioWithSource,
+        warnings,
+        columns: { patientName, patientGender, patientAge, chiefComplaint, difficultyLevel },
+    };
+}
+
+/**
+ * Case language is IMMUTABLE after creation: whatever the client (or a
+ * restored snapshot) carries, the stored language wins. Pins
+ * `safeConfig.case_language` from the current row's config JSON string
+ * (create passes null → normalise the author's pick to a concrete code).
+ * Malformed legacy JSON falls through to normalising the incoming config.
+ */
+function pinCaseLanguage(safeConfig, storedConfigJson) {
+    let storedConfig = null;
+    try {
+        storedConfig = storedConfigJson ? JSON.parse(storedConfigJson) : null;
+    } catch { /* malformed legacy config — fall through to normalization */ }
+    safeConfig.case_language = normalizeCaseLanguage(storedConfig || safeConfig);
+}
+
 router.get('/cases', authenticateToken, async (req, res) => {
     const canReview = canReadAcrossUsers(req.user);
     const enforced = await caseAccessEnforcedFor(req.user);
@@ -322,38 +389,18 @@ router.put('/cases/:id/default', authenticateToken, requireEducator, (req, res) 
 
 // POST /api/cases - Admin only
 router.post('/cases', authenticateToken, requireEducator, (req, res) => {
-    const { name, description, system_prompt, config, scenario,
-            scenario_template, scenario_from_repository, scenario_duration } = req.body;
+    const { name, description, system_prompt, config } = req.body;
     const ipAddress = req.ip || req.connection?.remoteAddress;
     const userAgent = req.headers['user-agent'];
 
-    // Extract patient info from config for denormalized storage. The case
-    // editor writes the patient name to `config.patient_name` and the chief
-    // complaint to `config.structuredHistory.chiefComplaint`; older/top-level
-    // shapes (`demographics.name`, `config.chiefComplaint`) are kept as
-    // fallbacks. Reading only the legacy paths left these columns null for
-    // editor-created cases — which made the debrief fall back to the case
-    // description and show the patient name as the chief complaint (bug #2).
-    const gender = resolvePatientGenderOr400(res, config, req.body.patient_gender);
-    if (!gender) return;
-    const patientGender = gender.value;
-    const { patientName, patientAge } = derivePatientColumns(config);
-    const chiefComplaint = config?.structuredHistory?.chiefComplaint || config?.chiefComplaint || null;
-    const difficultyLevel = config?.difficulty_level || null;
-
-    // Tuck the scenario provenance ({template_id|repository_id, name, duration})
-    // into the scenario JSON so it survives the round-trip. The wizard sends
-    // these as top-level fields; without this merge they were silently dropped.
-    const scenarioWithSource = mergeScenarioSource(scenario, { scenario_template, scenario_from_repository, scenario_duration });
-    const safeConfig = clampInitialVitals(config || {});
-    writeBackPatientGender(safeConfig, patientGender);
-    const warnings = [];
-    canonicaliseCaseRhythms(safeConfig, scenarioWithSource, warnings);
-    logVocabularyWarnings(req, 'case', warnings);
+    const normalised = normaliseCaseForStorage(req, res, req.body);
+    if (!normalised) return;
+    const { safeConfig, scenarioWithSource, warnings } = normalised;
+    const { patientName, patientGender, patientAge, chiefComplaint, difficultyLevel } = normalised.columns;
     // Case language is pinned at creation and immutable afterwards: normalize
     // the author's pick to a concrete registry code (absent/junk → default).
     // The visible case_code prefix derives from it and therefore never changes.
-    safeConfig.case_language = normalizeCaseLanguage(safeConfig);
+    pinCaseLanguage(safeConfig, null);
 
     const sql = `INSERT INTO cases (name, description, system_prompt, config, scenario,
                  patient_name, patient_gender, patient_age, chief_complaint, difficulty_level,
@@ -408,9 +455,11 @@ router.post('/cases', authenticateToken, requireEducator, (req, res) => {
             status: 'success'
         });
 
-        // Create initial version snapshot
+        // Create initial version snapshot — of what was STORED (clamped,
+        // canonicalised, gender written back), not the raw request body, so
+        // a restore brings back exactly the row that existed.
         createCaseVersion(caseId, req.user.id, 'created', 'Initial case creation', {
-            name, description, system_prompt, config, scenario, tenant_id: tenantId(req)
+            name, description, system_prompt, config: safeConfig, scenario: scenarioWithSource, tenant_id: tenantId(req)
         });
 
         // Stamp the visible case code (needs the autoincrement id, hence a
@@ -429,29 +478,16 @@ router.post('/cases', authenticateToken, requireEducator, (req, res) => {
 
 // PUT /api/cases/:id - Admin only
 router.put('/cases/:id', authenticateToken, requireEducator, (req, res) => {
-    const { name, description, system_prompt, config, scenario,
-            scenario_template, scenario_from_repository, scenario_duration } = req.body;
+    const { name, description, system_prompt } = req.body;
     const caseId = req.params.id;
     const ipAddress = req.ip || req.connection?.remoteAddress;
     const userAgent = req.headers['user-agent'];
 
-    // Extract patient info from config for denormalized storage. Mirror the
-    // POST handler: prefer the editor's `config.patient_name` /
-    // `config.structuredHistory.chiefComplaint`, fall back to legacy paths.
-    const gender = resolvePatientGenderOr400(res, config, req.body.patient_gender);
-    if (!gender) return;
-    const patientGender = gender.value;
-    const { patientName, patientAge } = derivePatientColumns(config);
-    const chiefComplaint = config?.structuredHistory?.chiefComplaint || config?.chiefComplaint || null;
-    const difficultyLevel = config?.difficulty_level || null;
-
-    // Same scenario-source merge as the POST handler — see comment there.
-    const scenarioWithSource = mergeScenarioSource(scenario, { scenario_template, scenario_from_repository, scenario_duration });
-    const safeConfig = clampInitialVitals(config || {});
-    writeBackPatientGender(safeConfig, patientGender);
-    const warnings = [];
-    canonicaliseCaseRhythms(safeConfig, scenarioWithSource, warnings);
-    logVocabularyWarnings(req, 'case', warnings);
+    // Same normalisation pipeline as POST (and restore) — see the helper.
+    const normalised = normaliseCaseForStorage(req, res, req.body);
+    if (!normalised) return;
+    const { safeConfig, scenarioWithSource, warnings } = normalised;
+    const { patientName, patientGender, patientAge, chiefComplaint, difficultyLevel } = normalised.columns;
 
     // First, get the old case data for audit trail
     dbAdapter.get(`SELECT * FROM cases WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`, [caseId, tenantId(req)], (err, oldCase) => {
@@ -462,13 +498,7 @@ router.put('/cases/:id', authenticateToken, requireEducator, (req, res) => {
         // Case language is IMMUTABLE: whatever the client sends, the stored
         // language wins. This keeps the case's dialogue behavior (and its
         // visible case_code prefix) fixed for the case's whole life.
-        let storedConfig = null;
-        try {
-            storedConfig = oldCase?.config ? JSON.parse(oldCase.config) : null;
-        } catch { /* malformed legacy config — fall through to normalization */ }
-        safeConfig.case_language = storedConfig
-            ? normalizeCaseLanguage(storedConfig)
-            : normalizeCaseLanguage(safeConfig);
+        pinCaseLanguage(safeConfig, oldCase?.config);
 
         const sql = `UPDATE cases SET
                      name = ?, description = ?, system_prompt = ?, config = ?, scenario = ?,
@@ -526,9 +556,9 @@ router.put('/cases/:id', authenticateToken, requireEducator, (req, res) => {
                 status: 'success'
             });
 
-            // Create version snapshot
+            // Create version snapshot — of what was STORED (see POST).
             createCaseVersion(caseId, req.user.id, 'updated', 'Case configuration updated', {
-                name, description, system_prompt, config, scenario, tenant_id: tenantId(req)
+                name, description, system_prompt, config: safeConfig, scenario: scenarioWithSource, tenant_id: tenantId(req)
             });
 
             // Echo the config actually stored (immutable case_language pinned).
@@ -989,45 +1019,60 @@ router.post('/scenarios/seed', authenticateToken, requireAdmin, (req, res) => {
         }
     ];
     
-    let inserted = 0;
-    let errors = 0;
-    
     // The built-ins are English prose (names, step labels), so they are
     // stamped with the default language explicitly rather than relying on the
     // column default; categories are canonical ids from scenarioCategories.js.
-    defaultScenarios.forEach(scenario => {
-        const query = `
-            INSERT INTO scenarios (name, description, duration_minutes, category, language, timeline, created_by, is_public)
-            VALUES (?, ?, ?, ?, ?, ?, NULL, 1)
-        `;
-        
-        dbAdapter.run(
-            query,
-            [scenario.name, scenario.description, scenario.duration_minutes, scenario.category, DEFAULT_LANGUAGE, JSON.stringify(scenario.timeline)],
-            (err) => {
-                if (err) {
-                    routesAdminLog.error('scenario seed failed', { scenario_name: scenario.name, error: err.message });
-                    errors++;
-                } else {
-                    inserted++;
-                }
-                
-                // After all scenarios processed
-                if (inserted + errors === defaultScenarios.length) {
-                    auditSuccess(req, {
-                        action: 'seed_scenarios',
-                        resourceType: 'scenario',
-                        resourceId: 'default_scenarios',
-                        newValue: { inserted, errors, total: defaultScenarios.length }
-                    });
-                    res.json({ 
-                        message: `Seeded ${inserted} scenarios, ${errors} errors`,
-                        inserted,
-                        errors
-                    });
-                }
-            }
+    //
+    // Tenant-scoped and idempotent: rows land in the CALLER's tenant (the
+    // INSERT used to omit tenant_id, so a tenant-2 admin injected public rows
+    // into tenant 1), and a built-in whose name already exists live in that
+    // tenant is skipped instead of duplicated on every click.
+    const tenant = tenantId(req);
+    (async () => {
+        const placeholders = defaultScenarios.map(() => '?').join(',');
+        const existing = await dbAdapter.all(
+            `SELECT name FROM scenarios
+             WHERE tenant_id = ? AND deleted_at IS NULL AND name IN (${placeholders})`,
+            [tenant, ...defaultScenarios.map((scenario) => scenario.name)]
         );
+        const present = new Set((existing || []).map((row) => row.name));
+
+        const query = `
+            INSERT INTO scenarios (name, description, duration_minutes, category, language, timeline, created_by, is_public, tenant_id)
+            VALUES (?, ?, ?, ?, ?, ?, NULL, 1, ?)
+        `;
+        let inserted = 0;
+        let errors = 0;
+        let skipped = 0;
+        for (const scenario of defaultScenarios) {
+            if (present.has(scenario.name)) { skipped++; continue; }
+            try {
+                await dbAdapter.run(
+                    query,
+                    [scenario.name, scenario.description, scenario.duration_minutes, scenario.category, DEFAULT_LANGUAGE, JSON.stringify(scenario.timeline), tenant]
+                );
+                inserted++;
+            } catch (err) {
+                (req.log || routesAdminLog).error('scenario seed failed', { scenario_name: scenario.name, error: err.message });
+                errors++;
+            }
+        }
+
+        auditSuccess(req, {
+            action: 'seed_scenarios',
+            resourceType: 'scenario',
+            resourceId: 'default_scenarios',
+            newValue: { inserted, skipped, errors, total: defaultScenarios.length }
+        });
+        res.json({
+            message: `Seeded ${inserted} scenarios, ${skipped} already present, ${errors} errors`,
+            inserted,
+            skipped,
+            errors
+        });
+    })().catch((err) => {
+        (req.log || routesAdminLog).error('scenario seed failed', { error: err.message });
+        res.status(500).json({ error: err.message });
     });
 });
 
@@ -1126,82 +1171,102 @@ router.get('/sessions/:sessionId/exam-findings', authenticateToken, async (req, 
 // --- CASE VERSIONS ---
 
 // GET /api/cases/:caseId/versions - Get version history for a case
+//
+// Tenant-scoped through the case row: an admin of tenant A asking for tenant
+// B's case gets the same 404 as for a case that never existed (no
+// disclosure). Version rows themselves are looked up by case_id only —
+// legacy rows may carry tenant_id 1 regardless of the case's tenant.
 router.get('/cases/:caseId/versions', authenticateToken, requireAdmin, (req, res) => {
     const { caseId } = req.params;
 
-    dbAdapter.all(
-        `SELECT cv.*, u.username as changed_by_username
-         FROM case_versions cv
-         LEFT JOIN users u ON cv.changed_by = u.id
-         WHERE cv.case_id = ?
-         ORDER BY cv.version_number DESC`,
-        [caseId],
-        (err, versions) => {
-            if (err) return res.status(500).json({ error: err.message });
-            res.json({ versions });
-        }
-    );
+    dbAdapter.get(`SELECT id FROM cases WHERE id = ? AND tenant_id = ?`, [caseId, tenantId(req)], (caseErr, caseRow) => {
+        if (caseErr) return res.status(500).json({ error: caseErr.message });
+        if (!caseRow) return res.status(404).json({ error: 'Case not found' });
+
+        dbAdapter.all(
+            `SELECT cv.*, u.username as changed_by_username
+             FROM case_versions cv
+             LEFT JOIN users u ON cv.changed_by = u.id
+             WHERE cv.case_id = ?
+             ORDER BY cv.version_number DESC`,
+            [caseRow.id],
+            (err, versions) => {
+                if (err) return res.status(500).json({ error: err.message });
+                res.json({ versions });
+            }
+        );
+    });
 });
 
 // POST /api/cases/:caseId/restore/:versionId - Restore a case to a previous version
+//
+// The snapshot goes through the SAME normalisation pipeline as POST/PUT
+// (`normaliseCaseForStorage`): clamp initialVitals, canonicalise rhythms
+// (lenient), write the gender back, pin the immutable case_language, and
+// re-derive EVERY denormalised column. Snapshots written before this fix
+// hold pre-validation data (e.g. hr 999), so restoring one must not put a
+// value the live writers would have clamped back into the row.
 router.post('/cases/:caseId/restore/:versionId', authenticateToken, requireAdmin, (req, res) => {
     const { caseId, versionId } = req.params;
     const ipAddress = req.ip || req.connection?.remoteAddress;
     const userAgent = req.headers['user-agent'];
 
-    dbAdapter.get(
-        `SELECT * FROM case_versions WHERE id = ? AND case_id = ?`,
-        [versionId, caseId],
-        (err, version) => {
-            if (err) return res.status(500).json({ error: err.message });
-            if (!version) return res.status(404).json({ error: 'Version not found' });
+    dbAdapter.get(`SELECT id, config FROM cases WHERE id = ? AND tenant_id = ?`, [caseId, tenantId(req)], (caseErr, currentCase) => {
+        if (caseErr) return res.status(500).json({ error: caseErr.message });
+        if (!currentCase) return res.status(404).json({ error: 'Case not found' });
 
-            const config = JSON.parse(version.config_snapshot);
-            const restoredConfig = config.config || {};
+        dbAdapter.get(
+            `SELECT * FROM case_versions WHERE id = ? AND case_id = ?`,
+            [versionId, currentCase.id],
+            (err, version) => {
+                if (err) return res.status(500).json({ error: err.message });
+                if (!version) return res.status(404).json({ error: 'Version not found' });
 
-            dbAdapter.get(`SELECT config FROM cases WHERE id = ?`, [caseId], (curErr, currentCase) => {
-                if (curErr) return res.status(500).json({ error: curErr.message });
+                let snapshot;
+                try {
+                    snapshot = JSON.parse(version.config_snapshot);
+                } catch {
+                    return res.status(500).json({ error: 'Version snapshot is not valid JSON', code: 'corrupt_snapshot' });
+                }
+                if (!snapshot || typeof snapshot !== 'object') snapshot = {};
+
+                const normalised = normaliseCaseForStorage(req, res, {
+                    config: snapshot.config || {},
+                    scenario: snapshot.scenario,
+                    patient_gender: snapshot.patient_gender,
+                });
+                if (!normalised) return;
+                const { safeConfig, scenarioWithSource, warnings } = normalised;
+                const { patientName, patientGender, patientAge, chiefComplaint, difficultyLevel } = normalised.columns;
 
                 // Case language is IMMUTABLE — a restore brings back content,
                 // never a different language. Pin the current stored language
                 // over whatever the snapshot carried (pre-0035 snapshots may
                 // lack the field entirely).
-                let currentConfig = null;
-                try {
-                    currentConfig = currentCase?.config ? JSON.parse(currentCase.config) : null;
-                } catch { /* malformed legacy config — normalization below covers it */ }
-                restoredConfig.case_language = normalizeCaseLanguage(currentConfig || restoredConfig);
-
-                // Re-derive the denormalized patient columns from the restored
-                // config exactly as create/update do. A restore used to bring
-                // back the config alone and leave patient_gender/name/age at
-                // whatever the CURRENT version had — so the case list, debrief
-                // and lab ranges kept describing the wrong patient.
-                const gender = resolvePatientGenderOr400(res, restoredConfig, config.patient_gender);
-                if (!gender) return;
-                const patientGender = gender.value;
-                writeBackPatientGender(restoredConfig, patientGender);
-                const { patientName, patientAge } = derivePatientColumns(restoredConfig);
+                pinCaseLanguage(safeConfig, currentCase.config);
 
                 const sql = `UPDATE cases SET
                              name = ?, description = ?, system_prompt = ?, config = ?, scenario = ?,
-                             patient_name = ?, patient_gender = ?, patient_age = ?,
-                             last_modified_by = ?, updated_at = CURRENT_TIMESTAMP, version = version + 1
-                             WHERE id = ?`;
+                             patient_name = ?, patient_gender = ?, patient_age = ?, chief_complaint = ?, difficulty_level = ?,
+                             last_modified_by = ?, updated_at = CURRENT_TIMESTAMP, version = COALESCE(version, 0) + 1
+                             WHERE id = ? AND tenant_id = ?`;
 
                 dbAdapter.run(sql, [
-                    config.name,
-                    config.description,
-                    config.system_prompt,
-                    JSON.stringify(restoredConfig),
-                    config.scenario ? JSON.stringify(config.scenario) : null,
+                    snapshot.name,
+                    snapshot.description,
+                    snapshot.system_prompt,
+                    JSON.stringify(safeConfig),
+                    scenarioWithSource ? JSON.stringify(scenarioWithSource) : null,
                     patientName,
                     patientGender,
                     patientAge,
+                    chiefComplaint,
+                    difficultyLevel,
                     req.user.id,
-                    caseId
-                ], function(err) {
-                    if (err) return res.status(500).json({ error: err.message });
+                    currentCase.id,
+                    tenantId(req)
+                ], function(updateErr) {
+                    if (updateErr) return res.status(500).json({ error: updateErr.message });
 
                     // Log audit and create new version
                     logAudit({
@@ -1213,16 +1278,25 @@ router.post('/cases/:caseId/restore/:versionId', authenticateToken, requireAdmin
                         metadata: { restored_from_version: version.version_number },
                         ipAddress,
                         userAgent,
+                        tenantId: tenantId(req),
                         status: 'success'
                     });
 
-                    createCaseVersion(caseId, req.user.id, 'restored', `Restored from version ${version.version_number}`, config);
+                    // Snapshot what was STORED (normalised), same as POST/PUT.
+                    createCaseVersion(currentCase.id, req.user.id, 'restored', `Restored from version ${version.version_number}`, {
+                        name: snapshot.name,
+                        description: snapshot.description,
+                        system_prompt: snapshot.system_prompt,
+                        config: safeConfig,
+                        scenario: scenarioWithSource,
+                        tenant_id: tenantId(req),
+                    });
 
-                    res.json({ message: 'Case restored successfully', restoredFromVersion: version.version_number });
+                    res.json({ message: 'Case restored successfully', restoredFromVersion: version.version_number, ...withWarnings(warnings) });
                 });
-            });
-        }
-    );
+            }
+        );
+    });
 });
 
 // --- USER PREFERENCES ---

@@ -12,7 +12,7 @@
 // custom name, that seed links + auto-enrolment target the RENAMED course, and
 // that the partial unique index rejects a second live default per tenant.
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createTestDb } from '../utils/seedDb.js';
 
 const RENAMED = 'Corso base';
@@ -155,5 +155,108 @@ describe('default course is a flag, not a name (0044)', () => {
         expect(defaults).toHaveLength(1);
         expect(defaults[0].id).not.toBe(def.id);
         expect(defaults[0].name).toBe(DEFAULT_COURSE_NAME);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Regression lock: a default course RENAMED before the 0044 upgrade came out of
+// 0044 with is_default = 0 (0044 flagged by name), so the boot seeder created a
+// duplicate 'Basic course' beside it. 0047 flags the lowest-id live
+// auto_enroll = 1 cohort in every tenant that has no live default.
+//
+// Simulates a v2.9.12-shaped database: migrations up to 0043 (a temp copy of
+// the migrations folder without 0044+), the seeded 'Basic course' with
+// auto_enroll = 1 (0031 + 0033), renamed by an admin — THEN 0044..0047 apply
+// (the real files, so checksums match) and the boot seeder runs against it via
+// a fresh import of the singleton modules.
+describe('renamed-before-upgrade default course (0047 backfill)', () => {
+    const RENAMED_BEFORE_UPGRADE = 'Cardiology 101';
+    let stagedDb;
+    let stagedAdapter;
+    let stagedEnsureBasicCourses;
+    let stagedSeedStemiCourse;
+    let stagedSeedLanguageCases;
+
+    beforeAll(async () => {
+        const [{ default: fs }, { default: os }, { default: path }, { default: sqlite3 }, { runMigrations }] = await Promise.all([
+            import('node:fs'), import('node:os'), import('node:path'), import('sqlite3'),
+            import('../../server/migrationRunner.js')
+        ]);
+        const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
+        const fullDir = path.join(repo, 'migrations');
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rohy-0047-'));
+        const partialDir = path.join(dir, 'migrations-upto-0043');
+        fs.mkdirSync(partialDir);
+        for (const f of fs.readdirSync(fullDir)) {
+            if (/^\d+_.+\.sql$/.test(f) && f.split('_', 1)[0] <= '0043') fs.copyFileSync(path.join(fullDir, f), path.join(partialDir, f));
+        }
+        const dbPath = path.join(dir, 'db.sqlite');
+        const raw = new (sqlite3.verbose().Database)(dbPath);
+        const run = (sql, params = []) => new Promise((res, rej) => raw.run(sql, params, function done(err) { err ? rej(err) : res(this); }));
+        const all = (sql, params = []) => new Promise((res, rej) => raw.all(sql, params, (err, rows) => err ? rej(err) : res(rows || [])));
+
+        await runMigrations(raw, { migrationsDir: partialDir });
+        expect((await all(`PRAGMA table_info(cohorts)`)).some((c) => c.name === 'is_default')).toBe(false);
+
+        // v2.9.12 shape: an admin, the seeded default course (auto_enroll = 1)
+        // and a teacher-made cohort — then the admin renames the default.
+        const { lastID: adminId } = await run(
+            `INSERT INTO users (username, name, email, password_hash, role, tenant_id, status)
+             VALUES ('upgrade-admin', 'upgrade-admin', 'upgrade-admin@example.com', 'x', 'admin', 1, 'active')`
+        );
+        const { lastID: basicId } = await run(
+            `INSERT INTO cohorts (name, owner_user_id, tenant_id, description, auto_enroll)
+             VALUES ('Basic course', ?, 1, 'Default class — every user is enrolled and receives the default case.', 1)`,
+            [adminId]
+        );
+        await run(`INSERT INTO cohorts (name, owner_user_id, tenant_id, auto_enroll) VALUES ('Semester 2 group', ?, 1, 0)`, [adminId]);
+        await run(`UPDATE cohorts SET name = ? WHERE id = ?`, [RENAMED_BEFORE_UPGRADE, basicId]);
+
+        // The upgrade: 0044 (by name — misses the renamed course) … 0047.
+        await runMigrations(raw, { migrationsDir: fullDir });
+        await new Promise((res) => raw.close(() => res()));
+
+        // Boot the seeder against the upgraded DB through fresh singleton
+        // modules (db.js binds ROHY_DB at import time).
+        vi.resetModules();
+        process.env.ROHY_DB = dbPath;
+        ({ default: stagedAdapter } = await import('../../server/dbAdapter.js'));
+        const { dbReady } = await import('../../server/db.js');
+        await dbReady;
+        ({ ensureBasicCourses: stagedEnsureBasicCourses, seedStemiCourse: stagedSeedStemiCourse } = await import('../../server/seedStemiCourse.js'));
+        ({ seedLanguageCases: stagedSeedLanguageCases } = await import('../../server/seedLanguageCases.js'));
+        stagedDb = { dir, dbPath, cleanup: () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ } } };
+    }, 60_000);
+
+    afterAll(() => stagedDb?.cleanup());
+
+    it('0047 flags the renamed course as the default; the boot seeder creates no second Basic course', async () => {
+        const before = await stagedAdapter.all(
+            `SELECT id, name, is_default, auto_enroll FROM cohorts WHERE tenant_id = 1 AND deleted_at IS NULL ORDER BY id ASC`
+        );
+        expect(before.map((c) => [c.name, c.is_default])).toEqual([[RENAMED_BEFORE_UPGRADE, 1], ['Semester 2 group', 0]]);
+
+        await stagedEnsureBasicCourses();
+        await stagedSeedStemiCourse();
+        await stagedSeedLanguageCases();
+        await stagedEnsureBasicCourses();
+
+        const defaults = await stagedAdapter.all(
+            `SELECT id, name FROM cohorts WHERE tenant_id = 1 AND is_default = 1 AND deleted_at IS NULL`
+        );
+        expect(defaults).toHaveLength(1);
+        expect(defaults[0].id).toBe(before[0].id);
+        expect(defaults[0].name).toBe(RENAMED_BEFORE_UPGRADE);
+        const live = await stagedAdapter.all(`SELECT name FROM cohorts WHERE tenant_id = 1 AND deleted_at IS NULL`);
+        expect(live.some((c) => c.name === 'Basic course')).toBe(false);
+        expect(live.filter((c) => c.name === RENAMED_BEFORE_UPGRADE)).toHaveLength(1);
+    });
+
+    it('0047 is recorded and does not touch a tenant that already has a live default', async () => {
+        const rows = await stagedAdapter.all(`SELECT version FROM schema_migrations WHERE version IN ('0044', '0047') ORDER BY version`);
+        expect(rows.map((r) => r.version)).toEqual(['0044', '0047']);
+        // The teacher-made cohort (auto_enroll = 0) was never a candidate.
+        const other = await stagedAdapter.get(`SELECT is_default FROM cohorts WHERE name = 'Semester 2 group'`);
+        expect(other.is_default).toBe(0);
     });
 });

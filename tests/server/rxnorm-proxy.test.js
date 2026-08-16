@@ -5,8 +5,8 @@
 // proxyCache.setFetch, the same seam catalogue-proxies.test.js uses.
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { setFetch, cacheClear } from '../../server/services/proxyCache.js';
-import { searchRxNorm, ttyRank, ENRICH_CAP } from '../../server/services/rxnormProxy.js';
+import { setFetch, cacheClear, cacheSet } from '../../server/services/proxyCache.js';
+import { searchRxNorm, lookupRxCui, ttyRank, ENRICH_CAP, DEFAULT_TIMEOUT_MS } from '../../server/services/rxnormProxy.js';
 
 function mockResponse(json, { status = 200 } = {}) {
     return {
@@ -157,6 +157,83 @@ describe('rxnormProxy.searchRxNorm — tty + name enrichment', () => {
         expect(second).toEqual(first);
         expect(termCalls(spy)).toHaveLength(1);
         expect(propsCalls(spy)).toHaveLength(ENRICH_CAP);
+    });
+
+    // Regression lock: adversarial review #10 — one search fanned out into
+    // 1 + 10 upstream requests, hits already carrying name + tty were still
+    // looked up, and cached rxcui rows counted against the cap.
+    it('ENRICH_CAP is 6 and only hits missing a name or a tty are looked up', async () => {
+        expect(ENRICH_CAP).toBe(6);
+        // Pre-seed the "already complete" state via the rxcui cache: after a
+        // first search resolved 100..102, hits 100..102 need no round-trip.
+        for (const id of ['100', '101', '102']) cacheSet('rxnorm', `rxcui:${id}`, { rxcui: id, name: `d${id}`, synonym: null, tty: 'IN' });
+        const candidates = Array.from({ length: 12 }, (_, i) => ({ rxcui: String(100 + i), name: `d${100 + i}`, score: String(90 - i) }));
+        const spy = rxnavFetch({ candidates, props: {} });
+        setFetch(spy);
+        const hits = await searchRxNorm('d');
+        // Cached rows are applied for free (tty filled) and do NOT consume the cap...
+        expect(hits.filter((h) => h.tty === 'IN').map((h) => h.rxcui).sort()).toEqual(['100', '101', '102']);
+        // ...so exactly ENRICH_CAP UNCACHED lookups go upstream, none for 100..102.
+        const looked = propsCalls(spy).map(([u]) => u.match(/rxcui\/(\d+)\//)[1]);
+        expect(looked).toHaveLength(ENRICH_CAP);
+        expect(looked).toEqual(['103', '104', '105', '106', '107', '108']);
+        expect(termCalls(spy)).toHaveLength(1);
+    });
+
+    it('a hit whose approximateTerm row already has both name and tty is never looked up', async () => {
+        // approximateTerm never returns tty today; if it ever does, the
+        // lookup must be skipped — the filter is "missing name OR missing tty".
+        const spy = rxnavFetch({ candidates: [{ rxcui: '1', name: 'alpha', score: '90' }], props: {} });
+        setFetch(spy);
+        cacheSet('rxnorm', 'rxcui:1', { rxcui: '1', name: 'alpha', synonym: null, tty: 'IN' });
+        await searchRxNorm('alpha');
+        expect(propsCalls(spy)).toHaveLength(0);
+    });
+
+    // Regression lock: adversarial review #10 — no abort signal, a stalled
+    // RxNav pinned the request for the full route timeout.
+    describe('upstream timeout / abort', () => {
+        // A fetch that never resolves on its own but honours the signal —
+        // exactly what undici does when the AbortSignal fires.
+        const hangingFetch = () => vi.fn((url, { signal } = {}) => new Promise((_, reject) => {
+            if (signal?.aborted) return reject(signal.reason);
+            signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+        }));
+
+        it('DEFAULT_TIMEOUT_MS is ~4 s and searchRxNorm rejects within the budget when RxNav hangs', async () => {
+            expect(DEFAULT_TIMEOUT_MS).toBe(4000);
+            setFetch(hangingFetch());
+            const started = Date.now();
+            await expect(searchRxNorm('hang', { timeoutMs: 60 })).rejects.toThrow(/timeout|abort/i);
+            expect(Date.now() - started).toBeLessThan(1500);
+        });
+
+        it('every fetch carries a signal; the caller\'s signal aborts the search and enrichment', async () => {
+            const spy = hangingFetch();
+            setFetch(spy);
+            const controller = new AbortController();
+            const p = searchRxNorm('abortme', { signal: controller.signal, timeoutMs: 5000 });
+            controller.abort(new Error('client went away'));
+            await expect(p).rejects.toThrow(/client went away/);
+            expect(spy.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+        });
+
+        it('a hanging /properties lookup does not sink the search — the hit keeps its approximateTerm fields', async () => {
+            const spy = vi.fn((url, { signal } = {}) => {
+                if (url.includes('/approximateTerm.json')) {
+                    return Promise.resolve(mockResponse({ approximateGroup: { candidate: [{ rxcui: '9', name: 'slow', score: '50' }] } }));
+                }
+                return new Promise((_, reject) => signal?.addEventListener('abort', () => reject(signal.reason), { once: true }));
+            });
+            setFetch(spy);
+            const hits = await searchRxNorm('slow', { timeoutMs: 60 });
+            expect(hits).toEqual([expect.objectContaining({ rxcui: '9', display_name: 'slow', tty: null })]);
+        });
+
+        it('bare lookupRxCui gets its own budget', async () => {
+            setFetch(hangingFetch());
+            await expect(lookupRxCui('1', { timeoutMs: 60 })).rejects.toThrow(/timeout|abort/i);
+        });
     });
 
     it('ttyRank groups term types', () => {

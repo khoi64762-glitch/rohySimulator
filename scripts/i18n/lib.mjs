@@ -14,11 +14,12 @@
 // Every script accepts `--root=<dir>` (or ROHY_LOCALES_ROOT) so tests run
 // against a throwaway copy of the tree and never touch the real catalogues.
 
-import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
+import { join, dirname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import IntlMessageFormat from 'intl-messageformat';
+import { LANGUAGES, DEFAULT_LANGUAGE } from '../../server/shared/languages.js';
 
 export const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const DEFAULT_LOCALES_ROOT = join(REPO_ROOT, 'src', 'locales');
@@ -59,6 +60,64 @@ export function parseArgs(argv) {
 export const resolveLocalesRoot = (flags = {}) =>
     (typeof flags.root === 'string' && flags.root) || process.env.ROHY_LOCALES_ROOT || DEFAULT_LOCALES_ROOT;
 
+// ---- Path guards (imported files name languages + namespaces) --------------
+//
+// An XLIFF is untrusted input: its `target-language` and `<file original>`
+// become path components under the locale root. Only a registry language
+// (server/shared/languages.js, minus the English source) in canonical shape,
+// and only a namespace that exists in <root>/en/, may be written — and the
+// resolved path is re-checked to sit under <root>/<lang>/ so no crafted
+// value (`x/../en`, absolute paths, `..`) can reach another folder.
+
+export const LANGUAGE_SHAPE = /^[a-z]{2}(-[A-Z]{2})?$/;
+export const NAMESPACE_FILE_SHAPE = /^[a-z_]+\.json$/;
+
+/** Every importable target language: registry keys minus the source language. */
+export const importableLanguages = () => Object.keys(LANGUAGES).filter(l => l !== DEFAULT_LANGUAGE);
+
+/** Returns the language or throws with a reviewer-readable reason. */
+export function assertTargetLanguage(lang) {
+    if (typeof lang !== 'string' || !LANGUAGE_SHAPE.test(lang)) {
+        throw new Error(`target-language "${lang}" is not a language code (expected xx or xx-XX)`);
+    }
+    if (lang === DEFAULT_LANGUAGE) throw new Error(`target-language "${lang}" is the English source — nothing to import into`);
+    if (!Object.prototype.hasOwnProperty.call(LANGUAGES, lang)) {
+        throw new Error(`target-language "${lang}" is not in the language registry (server/shared/languages.js: ${importableLanguages().join(', ')})`);
+    }
+    return lang;
+}
+
+/** `<file original="chat.json">` → "chat", or throws when the name is malformed or not an en namespace. */
+export function assertNamespaceFile(root, original) {
+    if (typeof original !== 'string' || !NAMESPACE_FILE_SHAPE.test(original)) {
+        throw new Error(`<file original="${original}"> is not a namespace file name (expected <ns>.json)`);
+    }
+    const ns = original.replace(/\.json$/, '');
+    if (!existsSync(join(root, SOURCE_LANGUAGE, original))) {
+        throw new Error(`<file original="${original}">: no such namespace under ${join(root, SOURCE_LANGUAGE)}`);
+    }
+    return ns;
+}
+
+/** Resolved <root>/<lang>/<ns>.json, guaranteed to sit under <root>/<lang>/. */
+export function safeCataloguePath(root, lang, ns) {
+    const langDir = resolve(root, lang);
+    const target = resolve(langDir, `${ns}.json`);
+    if (target !== join(langDir, `${ns}.json`) || !target.startsWith(langDir + sep)) {
+        throw new Error(`refusing to write outside ${langDir}: ${target}`);
+    }
+    return target;
+}
+
+/** A locale root must be an existing directory holding the English source folder. */
+export function assertLocalesRoot(root) {
+    const abs = resolve(String(root));
+    let ok = false;
+    try { ok = statSync(join(abs, SOURCE_LANGUAGE)).isDirectory(); } catch { ok = false; }
+    if (!ok) throw new Error(`--root "${root}" is not a locale tree (no ${SOURCE_LANGUAGE}/ folder under ${abs})`);
+    return abs;
+}
+
 export const packageVersion = () =>
     JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')).version;
 
@@ -87,15 +146,16 @@ export function listTargetLanguages(root, requested = []) {
 }
 
 export function readCatalogue(root, lang, ns) {
-    const p = join(root, lang, `${ns}.json`);
+    const p = safeCataloguePath(root, lang, ns);
     return existsSync(p) ? readJson(p) : {};
 }
 
 /** Sorted keys, 2-space indent, trailing newline — the shape every catalogue on disk already has. */
 export function writeCatalogue(root, lang, ns, obj) {
-    mkdirSync(join(root, lang), { recursive: true });
+    const p = safeCataloguePath(root, lang, ns);
+    mkdirSync(dirname(p), { recursive: true });
     const sorted = Object.fromEntries(Object.keys(obj).sort().map(k => [k, obj[k]]));
-    writeFileSync(join(root, lang, `${ns}.json`), JSON.stringify(sorted, null, 2) + '\n');
+    writeFileSync(p, JSON.stringify(sorted, null, 2) + '\n');
 }
 
 // ---- Status sidecar ---------------------------------------------------------

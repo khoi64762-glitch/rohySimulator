@@ -73,6 +73,7 @@
   "rhythm_sinus_brady": "Sinus Bradycardia",
   "rhythm_sinus_tach": "Sinus Tachycardia",
   "rhythm_svt": "Supraventricular Tachycardia (SVT)",
+  "rhythm_unrecognised": "Unrecognised rhythm “{value}” — rendering as sinus at the set heart rate. Pick a rhythm below to correct it.",
   "rhythm_vfib": "Ventricular Fibrillation",
   "rhythm_vtach": "Ventricular Tachycardia",
   "save_alarm_config": "Save Alarm Config",

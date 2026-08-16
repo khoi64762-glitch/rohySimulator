@@ -73,6 +73,7 @@
   "rhythm_sinus_brady": "Sinusbradykardie",
   "rhythm_sinus_tach": "Sinustachykardie",
   "rhythm_svt": "Supraventrikuläre Tachykardie (SVT)",
+  "rhythm_unrecognised": "Unbekannter Rhythmus „{value}“ – wird als Sinusrhythmus mit der eingestellten Herzfrequenz dargestellt. Wählen Sie unten einen Rhythmus, um dies zu korrigieren.",
   "rhythm_vfib": "Kammerflimmern",
   "rhythm_vtach": "Kammertachykardie",
   "save_alarm_config": "Alarmkonfiguration speichern",

@@ -83,6 +83,34 @@ router.post('/sessions', authenticateToken, async (req, res) => {
         });
     });
     let caseSnapshot = null;
+    // Pin the treatment rubric (case_treatments) at session start too. The
+    // treatment debrief and the order path used to read expected / hidden /
+    // points / feedback from the LIVE case_treatments rows, so an educator
+    // editing the rubric after a session ran rewrote that session's history
+    // — a debrief graded against a rubric the learner never played.
+    //
+    // It is deliberately NOT stored in `sessions.case_snapshot`: that column
+    // is returned verbatim to the learner by GET /sessions/:id and the
+    // analytics session endpoints (`SELECT s.*`), and the rubric IS the
+    // answer key (bug report 2.9.15 #7). It goes into
+    // `session_settings.settings_snapshot`, a server-only row nothing returns
+    // wholesale. Readers (orders-routes.js `loadCaseTreatments`) prefer this
+    // snapshot and fall back to live rows for sessions written before it
+    // existed. custom_effect_override is carried verbatim (the JSON text as
+    // stored) so the merge code is shape-identical for both sources.
+    let treatmentRubric = null;
+    if (caseRow) {
+        try {
+            treatmentRubric = await dbAdapter.all(
+                `SELECT treatment_type, treatment_name, is_expected, is_available, is_contraindicated,
+                        points_if_ordered, feedback_if_ordered, feedback_if_missed, custom_effect_override
+                   FROM case_treatments WHERE case_id = ? ORDER BY id ASC`,
+                [caseRow.id]
+            );
+        } catch (e) {
+            (req.log || routesCasesLog).warn('session start case_treatments snapshot failed; readers will fall back to live rows', { error: e.message });
+        }
+    }
     if (caseRow) {
         let parsedConfig = {};
         let parsedScenario = null;
@@ -175,14 +203,25 @@ router.post('/sessions', authenticateToken, async (req, res) => {
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
 
+        // The settings row carries the pinned treatment rubric (see above);
+        // its failure must be visible in the log — a missing row silently
+        // degrades that session's debrief to the live rubric.
         dbAdapter.run(settingsSnapshotSql, [
             sessionId, case_id, user_id,
             effectiveLlmSettings?.provider, effectiveLlmSettings?.model, effectiveLlmSettings?.baseUrl,
             monitor_settings?.hr, monitor_settings?.rhythm, monitor_settings?.spo2,
             monitor_settings?.bp_sys, monitor_settings?.bp_dia, monitor_settings?.rr, monitor_settings?.temp,
-            JSON.stringify({ llm: effectiveLlmSettings, monitor: monitor_settings }),
+            JSON.stringify({
+                llm: effectiveLlmSettings,
+                monitor: monitor_settings,
+                ...(treatmentRubric ? { case_treatments: treatmentRubric, case_treatments_snapshot_at: new Date().toISOString() } : {})
+            }),
             tenantId(req)
-        ]);
+        ], (settingsErr) => {
+            if (settingsErr) {
+                (req.log || routesCasesLog).warn('session_settings snapshot insert failed', { session_id: sessionId, error: settingsErr.message });
+            }
+        });
 
         // Log case load event
         dbAdapter.run(

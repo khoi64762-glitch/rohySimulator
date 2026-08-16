@@ -1744,6 +1744,41 @@ router.post('/sessions/:sessionId/order-radiology', authenticateToken, (req, res
 
 // ==================== TREATMENT MODULE API ENDPOINTS ====================
 
+// The treatment rubric a session is graded against (case_treatments rows:
+// expected / hidden / contraindicated / points / feedback) is pinned at
+// session start into `session_settings.settings_snapshot.case_treatments`
+// (see POST /sessions in sessions-routes.js for why it is NOT in
+// `sessions.case_snapshot`: that column is returned to the learner). Every
+// reader in this module — available-treatments, order-treatment, the
+// debrief — resolves the rubric through this one function so a session
+// sees ONE rubric for its whole life: what the learner could order, what
+// scored, and what the debrief calls "missed" all agree even if the
+// educator edits the case afterwards. Sessions written before the snapshot
+// existed (or whose settings row failed to write) fall back to the live
+// rows, which is exactly the pre-snapshot behaviour.
+//
+// Returns { rows, source: 'snapshot' | 'live' }. Never throws on bad JSON.
+async function loadCaseTreatments({ sessionId, caseId, tenant, log }) {
+    const settings = await dbAdapter.get(
+        'SELECT settings_snapshot FROM session_settings WHERE session_id = ? AND tenant_id = ? ORDER BY id ASC LIMIT 1',
+        [sessionId, tenant]
+    );
+    if (settings?.settings_snapshot) {
+        try {
+            const snap = JSON.parse(settings.settings_snapshot);
+            if (Array.isArray(snap?.case_treatments)) {
+                return { rows: snap.case_treatments, source: 'snapshot' };
+            }
+        } catch (e) {
+            (log || routesOrdersLog).warn('session_settings snapshot json parse failed; using live case_treatments', { session_id: sessionId, error: e.message });
+        }
+    }
+    const rows = await dbAdapter.all('SELECT * FROM case_treatments WHERE case_id = ?', [caseId]);
+    return { rows, source: 'live' };
+}
+
+const treatmentKey = (type, name) => `${type}:${String(name || '').trim().toLowerCase()}`;
+
 // GET /api/sessions/:sessionId/available-treatments - Get available treatments for session's case
 router.get('/sessions/:sessionId/available-treatments', authenticateToken, (req, res) => {
     const { sessionId } = req.params;
@@ -1772,9 +1807,9 @@ router.get('/sessions/:sessionId/available-treatments', authenticateToken, (req,
         dbAdapter.all(effectsSql, params, (err, effects) => {
             if (err) return res.status(500).json({ error: err.message });
 
-            // Get case-specific treatments (restrictions/expected)
-            dbAdapter.all(`SELECT * FROM case_treatments WHERE case_id = ?`, [session.case_id], (err, caseTreatments) => {
-                if (err) return res.status(500).json({ error: err.message });
+            // Get case-specific treatments (restrictions/expected) — the
+            // session-pinned rubric, live rows for pre-snapshot sessions.
+            loadCaseTreatments({ sessionId, caseId: session.case_id, tenant: tenantId(req), log: req.log }).then(({ rows: caseTreatments }) => {
 
                 // Build treatment map with case-specific overrides
                 const caseTreatmentMap = {};
@@ -1795,7 +1830,7 @@ router.get('/sessions/:sessionId/available-treatments', authenticateToken, (req,
                         points_if_ordered: caseOverride?.points_if_ordered ?? 0,
                         feedback_if_ordered: caseOverride?.feedback_if_ordered ?? null,
                         feedback_if_missed: caseOverride?.feedback_if_missed ?? null,
-                        custom_effect_override: caseOverride?.custom_effect_override ? JSON.parse(caseOverride.custom_effect_override) : null
+                        custom_effect_override: parseCustomEffectOverride(caseOverride?.custom_effect_override)
                     };
                 });
 
@@ -1829,13 +1864,42 @@ router.get('/sessions/:sessionId/available-treatments', authenticateToken, (req,
                     treatments: type ? treatments : grouped,
                     config: treatmentConfig
                 });
+            }).catch((err) => {
+                (req.log || routesOrdersLog).error('available-treatments failed', { session_id: sessionId, error: err.message });
+                if (!res.headersSent) res.status(500).json({ error: err.message });
             });
         });
     });
 });
 
+// custom_effect_override is JSON text in the DB and travels verbatim in the
+// session snapshot; tolerate either text or an already-parsed object.
+function parseCustomEffectOverride(value) {
+    if (!value) return null;
+    if (typeof value !== 'string') return value;
+    try { return JSON.parse(value); } catch { return null; }
+}
+
 // POST /api/sessions/:sessionId/order-treatment - Order a treatment
-router.post('/sessions/:sessionId/order-treatment', authenticateToken, (req, res) => {
+//
+// Adversarial review (v2.9.37) closed three holes in this handler:
+//   1. a treatment the educator HID for the case (case_treatments
+//      is_available = 0) was still accepted → 409 TREATMENT_UNAVAILABLE;
+//   2. any free-text name was inserted, catalogue or not → 404
+//      TREATMENT_UNKNOWN unless it is a visible treatment_effects row or a
+//      case_treatments row (the student TreatmentPanel only ever orders
+//      what GET available-treatments listed, so valid flows are untouched;
+//      dose / route / notes stay free text);
+//   3. every repeat of an expected treatment awarded points_if_ordered
+//      again and the debrief summed all rows → unlimited replay. Points
+//      are now first-award-only: a repeat of the same (session, type,
+//      name) inserts with points_awarded 0 and answers `repeat: true`.
+//      is_expected / feedback still come back — immediate formative
+//      feedback is by design; only the score is one-shot.
+// The rubric (expected/hidden/points/feedback) is the session-pinned
+// snapshot via loadCaseTreatments, so it agrees with what the learner was
+// shown and with what the debrief will grade.
+router.post('/sessions/:sessionId/order-treatment', authenticateToken, async (req, res) => {
     const { sessionId } = req.params;
     const {
         treatment_type,
@@ -1853,14 +1917,18 @@ router.post('/sessions/:sessionId/order-treatment', authenticateToken, (req, res
         urgency = 'routine',
         notes
     } = req.body;
+    const log = req.log || routesOrdersLog;
 
     if (!treatment_type || !treatment_name) {
         return res.status(400).json({ error: 'treatment_type and treatment_name are required' });
     }
 
-    // Verify session and access (snapshot-aware select for downstream config)
-    dbAdapter.get('SELECT s.user_id, s.case_id, s.case_snapshot, s.status, s.end_time, c.config FROM sessions s JOIN cases c ON s.case_id = c.id WHERE s.id = ? AND s.tenant_id = ?', [sessionId, tenantId(req)], (err, session) => {
-        if (err) return res.status(500).json({ error: err.message });
+    try {
+        // Verify session and access (snapshot-aware select for downstream config)
+        const session = await dbAdapter.get(
+            'SELECT s.user_id, s.case_id, s.case_snapshot, s.status, s.end_time, c.config FROM sessions s JOIN cases c ON s.case_id = c.id WHERE s.id = ? AND s.tenant_id = ?',
+            [sessionId, tenantId(req)]
+        );
         if (!session) return res.status(404).json({ error: 'Session not found' });
         if (session.user_id !== req.user.id && !hasRoleAtLeast(req.user, ROLE_RANKS.educator)) {
             return res.status(403).json({ error: 'Access denied' });
@@ -1873,82 +1941,107 @@ router.post('/sessions/:sessionId/order-treatment', authenticateToken, (req, res
             return res.status(409).json({ error: 'Session has ended — no further orders can be placed', code: 'SESSION_ENDED' });
         }
 
-        // Check for contraindication
-        dbAdapter.get(`SELECT * FROM case_treatments WHERE case_id = ? AND treatment_type = ? AND treatment_name = ?`,
-            [session.case_id, treatment_type, treatment_name], (err, caseConfig) => {
-            if (err) return res.status(500).json({ error: err.message });
-
-            const isContraindicated = caseConfig?.is_contraindicated ?? false;
-            const isExpected = caseConfig?.is_expected ?? false;
-            const pointsIfOrdered = caseConfig?.points_if_ordered ?? 0;
-            const feedback = caseConfig?.feedback_if_ordered ?? null;
-
-            // Get treatment effect data (platform rows + this tenant's library rows)
-            dbAdapter.get(`SELECT * FROM treatment_effects WHERE treatment_type = ? AND treatment_name = ? AND is_active = 1 AND ${TREATMENT_VISIBILITY_SQL}`,
-                [treatment_type, treatment_name, tenantId(req)], (err, effect) => {
-                if (err) return res.status(500).json({ error: err.message });
-
-                const isHighAlert = effect?.treatment_name?.match(/epinephrine|norepinephrine|insulin|heparin|morphine|fentanyl|propofol/i) !== null;
-
-                // Insert the order
-                const insertSql = `
-                    INSERT INTO treatment_orders (
-                        session_id, tenant_id, treatment_type, medication_id, treatment_item,
-                        dose, dose_value, dose_unit, route, frequency,
-                        rate, rate_value, rate_unit, duration_minutes,
-                        urgency, is_high_alert, notes, feedback, points_awarded
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                `;
-
-                // tenant_id was omitted here while the reader (GET
-                // /sessions/:id/treatment-orders) filters on it, and the column
-                // defaults to 1 — so every treatment a tenant-2 learner ordered was
-                // written into tenant 1 and then vanished from their own MAR. Same
-                // bug the radiology path was fixed for; this path never got it.
-                dbAdapter.run(insertSql, [
-                    sessionId, tenantId(req), treatment_type, medication_id || null, treatment_name,
-                    dose || null, dose_value || null, dose_unit || null,
-                    route || effect?.route || null, frequency || null,
-                    rate || null, rate_value || null, rate_unit || null,
-                    duration_minutes || null, urgency, isHighAlert ? 1 : 0,
-                    notes || null, feedback, isExpected ? pointsIfOrdered : 0
-                ], function(err) {
-                    if (err) return res.status(500).json({ error: err.message });
-
-                    const orderId = this.lastID;
-
-                    // Log to audit
-                    logAudit({
-                        userId: req.user.id,
-                        username: req.user.username,
-                        action: 'ORDERED_TREATMENT',
-                        resourceType: 'treatment_order',
-                        resourceId: orderId,
-                        resourceName: treatment_name,
-                        sessionId: parseInt(sessionId),
-                        metadata: { treatment_type, dose, route, urgency, isContraindicated, isExpected }
-                    });
-
-                    res.status(201).json({
-                        message: 'Treatment ordered successfully',
-                        order_id: orderId,
-                        treatment_name,
-                        treatment_type,
-                        is_contraindicated: isContraindicated,
-                        contraindication_feedback: isContraindicated ? feedback : null,
-                        is_expected: isExpected,
-                        points_awarded: isExpected ? pointsIfOrdered : 0,
-                        is_high_alert: isHighAlert,
-                        effect: effect ? {
-                            onset_minutes: effect.onset_minutes,
-                            peak_minutes: effect.peak_minutes,
-                            duration_minutes: effect.duration_minutes
-                        } : null
-                    });
-                });
-            });
+        // Rubric row for this treatment (contraindication / expected /
+        // points / feedback / hidden) from the session-pinned snapshot.
+        const { rows: rubric, source: rubricSource } = await loadCaseTreatments({
+            sessionId, caseId: session.case_id, tenant: tenantId(req), log
         });
-    });
+        const caseConfig = rubric.find(ct => ct.treatment_type === treatment_type && ct.treatment_name === treatment_name) || null;
+
+        // Get treatment effect data (platform rows + this tenant's library rows)
+        const effect = await dbAdapter.get(
+            `SELECT * FROM treatment_effects WHERE treatment_type = ? AND treatment_name = ? AND is_active = 1 AND ${TREATMENT_VISIBILITY_SQL}`,
+            [treatment_type, treatment_name, tenantId(req)]
+        );
+
+        // (1) hidden for this case — the educator removed it from the menu.
+        if (caseConfig && !caseConfig.is_available) {
+            log.info('treatment order rejected: hidden for case', { session_id: sessionId, treatment_type, treatment_name, rubric_source: rubricSource });
+            return res.status(409).json({ error: 'This treatment is not available in this case', code: 'TREATMENT_UNAVAILABLE' });
+        }
+        // (2) not in any catalogue this session can see — a free-text order.
+        if (!caseConfig && !effect) {
+            log.info('treatment order rejected: unknown treatment', { session_id: sessionId, treatment_type, treatment_name });
+            return res.status(404).json({ error: 'Unknown treatment for this case', code: 'TREATMENT_UNKNOWN' });
+        }
+
+        const isContraindicated = !!(caseConfig?.is_contraindicated ?? false);
+        const isExpected = !!(caseConfig?.is_expected ?? false);
+        const pointsIfOrdered = Number(caseConfig?.points_if_ordered) || 0;
+        const feedback = caseConfig?.feedback_if_ordered ?? null;
+
+        // (3) first-award-only: has this exact treatment already been
+        // ordered in this session? Then the points were already granted.
+        const prior = await dbAdapter.get(
+            'SELECT id FROM treatment_orders WHERE session_id = ? AND tenant_id = ? AND treatment_type = ? AND treatment_item = ? LIMIT 1',
+            [sessionId, tenantId(req), treatment_type, treatment_name]
+        );
+        const isRepeat = !!prior;
+        const pointsAwarded = isExpected && !isRepeat ? pointsIfOrdered : 0;
+        if (isRepeat && isExpected) {
+            log.info('treatment re-ordered: points already awarded, none added', { session_id: sessionId, treatment_type, treatment_name, first_order_id: prior.id });
+        }
+
+        const isHighAlert = effect?.treatment_name?.match(/epinephrine|norepinephrine|insulin|heparin|morphine|fentanyl|propofol/i) !== null;
+
+        // Insert the order
+        const insertSql = `
+            INSERT INTO treatment_orders (
+                session_id, tenant_id, treatment_type, medication_id, treatment_item,
+                dose, dose_value, dose_unit, route, frequency,
+                rate, rate_value, rate_unit, duration_minutes,
+                urgency, is_high_alert, notes, feedback, points_awarded
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `;
+
+        // tenant_id was omitted here while the reader (GET
+        // /sessions/:id/treatment-orders) filters on it, and the column
+        // defaults to 1 — so every treatment a tenant-2 learner ordered was
+        // written into tenant 1 and then vanished from their own MAR. Same
+        // bug the radiology path was fixed for; this path never got it.
+        const inserted = await dbAdapter.run(insertSql, [
+            sessionId, tenantId(req), treatment_type, medication_id || null, treatment_name,
+            dose || null, dose_value || null, dose_unit || null,
+            route || effect?.route || null, frequency || null,
+            rate || null, rate_value || null, rate_unit || null,
+            duration_minutes || null, urgency, isHighAlert ? 1 : 0,
+            notes || null, feedback, pointsAwarded
+        ]);
+        const orderId = inserted.lastID;
+
+        // Log to audit
+        logAudit({
+            userId: req.user.id,
+            username: req.user.username,
+            action: 'ORDERED_TREATMENT',
+            resourceType: 'treatment_order',
+            resourceId: orderId,
+            resourceName: treatment_name,
+            sessionId: parseInt(sessionId),
+            metadata: { treatment_type, dose, route, urgency, isContraindicated, isExpected, repeat: isRepeat, points_awarded: pointsAwarded }
+        });
+
+        res.status(201).json({
+            message: 'Treatment ordered successfully',
+            order_id: orderId,
+            treatment_name,
+            treatment_type,
+            is_contraindicated: isContraindicated,
+            contraindication_feedback: isContraindicated ? feedback : null,
+            is_expected: isExpected,
+            points_awarded: pointsAwarded,
+            repeat: isRepeat,
+            is_high_alert: isHighAlert,
+            effect: effect ? {
+                onset_minutes: effect.onset_minutes,
+                peak_minutes: effect.peak_minutes,
+                duration_minutes: effect.duration_minutes
+            } : null
+        });
+    } catch (err) {
+        log.error('order-treatment failed', { session_id: sessionId, error: err.message });
+        return res.status(500).json({ error: err.message });
+    }
 });
 
 // POST /api/sessions/:sessionId/administer/:orderId - Administer an ordered treatment
@@ -2271,26 +2364,27 @@ router.get('/sessions/:sessionId/treatment-debrief', authenticateToken, async (r
                 // verbatim into treatment_orders.treatment_item (matched on
                 // type + name), but compare trimmed/case-insensitively so a
                 // cosmetic rename of the catalogue row can't fake a miss.
-                dbAdapter.all(
-                    `SELECT treatment_type, treatment_name, feedback_if_missed
-                     FROM case_treatments
-                     WHERE case_id = ? AND is_expected = 1 AND is_available = 1`,
-                    [session.case_id],
-                    (err, expected) => {
-                        if (err) return res.status(500).json({ error: err.message });
-
-                        const orderKey = (type, name) => `${type}:${String(name || '').trim().toLowerCase()}`;
-                        const orderedKeys = new Set(orders.map(o => orderKey(o.treatment_type, o.treatment_item)));
+                // The rubric is the session-pinned snapshot (live rows only
+                // for pre-snapshot sessions), so an educator editing the
+                // case AFTER this session ran does not rewrite its debrief.
+                loadCaseTreatments({ sessionId, caseId: session.case_id, tenant: tenantId(req), log: req.log }).then(
+                    ({ rows: rubric, source }) => {
+                        const expected = rubric.filter(ct => !!ct.is_expected && !!ct.is_available);
+                        const orderedKeys = new Set(orders.map(o => treatmentKey(o.treatment_type, o.treatment_item)));
                         const missed = expected
-                            .filter(ct => !orderedKeys.has(orderKey(ct.treatment_type, ct.treatment_name)))
+                            .filter(ct => !orderedKeys.has(treatmentKey(ct.treatment_type, ct.treatment_name)))
                             .map(ct => ({
                                 treatment_name: ct.treatment_name,
                                 feedback_if_missed: ct.feedback_if_missed || null,
                             }));
 
+                        (req.log || routesOrdersLog).debug('treatment debrief served', { session_id: sessionId, rubric_source: source, missed: missed.length });
                         res.json({ pending: false, total_points, ordered, missed });
                     }
-                );
+                ).catch((err) => {
+                    (req.log || routesOrdersLog).error('treatment debrief failed', { session_id: sessionId, error: err.message });
+                    if (!res.headersSent) res.status(500).json({ error: err.message });
+                });
             }
         );
     });

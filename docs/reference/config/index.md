@@ -110,9 +110,9 @@ The following variables carry credentials or signing material. Never commit them
 | Variable | Required | Default | Purpose | Source |
 | --- | --- | --- | --- | --- |
 | `ROHY_BASE_URL` | No | `http://localhost:3000` | _see source_ | `scripts/llm-language-smoke.mjs:26`<br>`scripts/translate-locales.mjs:34` |
-| `ROHY_I18N_GLOSSARY` | No | — | _see source_ | `scripts/i18n/lib.mjs:250` |
+| `ROHY_I18N_GLOSSARY` | No | — | _see source_ | `scripts/i18n/lib.mjs:310` |
 | `ROHY_LANGS` | No | `'' (empty string)` | _see source_ | `scripts/llm-language-smoke.mjs:108` |
-| `ROHY_LOCALES_ROOT` | No | — | _see source_ | `scripts/i18n/lib.mjs:60` |
+| `ROHY_LOCALES_ROOT` | No | — | _see source_ | `scripts/i18n/lib.mjs:61` |
 | `ROHY_PASSWORD` | No | — | _see source_ **⚠ secret — see security note above.** | `scripts/llm-language-smoke.mjs:49` |
 | `ROHY_USERNAME` | No | — | _see source_ | `scripts/llm-language-smoke.mjs:48` |
 

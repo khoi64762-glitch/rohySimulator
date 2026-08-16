@@ -1831,6 +1831,14 @@ export default function PatientMonitor({ _caseParams, caseData, sessionId, isAdm
                      {isAdmin && (
                         <div className="space-y-2">
                            <label className="text-xs font-bold text-neutral-500 uppercase">{t('primary_rhythm')}</label>
+                           {/* Unknown rhythm strings are kept verbatim by the server (non-breaking
+                               policy: canonicalise-or-keep + warning). The engine renders them as
+                               sinus at the given HR — make that visible instead of silent. */}
+                           {rhythm && !RHYTHM_IDS.includes(rhythm) && (
+                              <div className="text-xs text-amber-300 bg-amber-900/20 border border-amber-700/40 rounded px-2 py-1" role="status">
+                                 {t('rhythm_unrecognised', { value: rhythm })}
+                              </div>
+                           )}
                            <div className="grid grid-cols-2 gap-2">
                               {RHYTHM_IDS.map(r => (
                                  <button

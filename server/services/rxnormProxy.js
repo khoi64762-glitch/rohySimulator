@@ -25,12 +25,22 @@
 // tolerated, 24h cached per rxcui via proxyCache). Added response fields
 // are strictly additive: `tty` and `name_source`.
 //
+// Amplification budget: one search is at most 1 + ENRICH_CAP upstream
+// requests, and only hits that still LACK a name or a term type are looked
+// up — a hit whose /properties row is already cached is filled for free and
+// does not consume the cap. Every upstream fetch carries an AbortSignal:
+// the caller's (the HTTP route aborts it when the client goes away) joined
+// with a DEFAULT_TIMEOUT_MS budget, so a stalled RxNav can neither pin the
+// request nor keep enrichment fetches alive after the response is done.
+//
 // The proxy does NOT mutate the DB. A search hit is a transient suggestion;
 // only when the user clicks "Add to my catalogue" does the route layer
 // INSERT a medications row. That's intentional — we don't want every
 // keystroke to inflate medications with throwaway rows.
 
-import { cacheGet, cacheSet, getFetch } from './proxyCache.js';
+import { cacheGet, cacheSet, getFetch, upstreamSignal, DEFAULT_TIMEOUT_MS } from './proxyCache.js';
+
+export { DEFAULT_TIMEOUT_MS, upstreamSignal };
 
 const NAMESPACE = 'rxnorm';
 const RXNAV_BASE = 'https://rxnav.nlm.nih.gov/REST';
@@ -38,7 +48,11 @@ const RXNAV_BASE = 'https://rxnav.nlm.nih.gov/REST';
 // How many hits per search get a /properties round-trip. Beyond the cap a
 // hit keeps whatever approximateTerm gave it (tty null). Lookups are cached
 // 24h per rxcui, so repeated typeahead prefixes converge on zero extra calls.
-export const ENRICH_CAP = 10;
+export const ENRICH_CAP = 6;
+
+// A hit needs a /properties round-trip only when approximateTerm left its
+// name empty or its term type unknown.
+const needsEnrichment = (h) => Boolean(h.rxcui) && (!h.display_name || !h.tty);
 
 // Term-type ordering for the search list: ingredients first (that is what a
 // treatment_effects row names), then clinical/branded dose forms, then the
@@ -67,11 +81,16 @@ function normHit(candidate) {
     };
 }
 
-// Fill display_name / tty from /properties for the top hits. Never throws:
-// a hit whose lookup fails keeps its approximateTerm fields.
+// Fill display_name / tty from /properties for the top hits that still need
+// it. Cached rxcui rows are applied without counting against ENRICH_CAP; at
+// most ENRICH_CAP uncached lookups go upstream. Never throws: a hit whose
+// lookup fails (or is aborted) keeps its approximateTerm fields.
 async function enrichHits(hits, { signal } = {}) {
-    const targets = hits.filter((h) => h.rxcui && (!h.display_name || !h.tty)).slice(0, ENRICH_CAP);
-    if (targets.length === 0) return hits;
+    const wanted = hits.filter(needsEnrichment);
+    if (wanted.length === 0) return hits;
+    const cached = wanted.filter((h) => cacheGet(NAMESPACE, `rxcui:${h.rxcui}`));
+    const uncached = wanted.filter((h) => !cached.includes(h)).slice(0, ENRICH_CAP);
+    const targets = [...cached, ...uncached];
     const props = await Promise.all(
         targets.map((h) => lookupRxCui(h.rxcui, { signal }).catch(() => null))
     );
@@ -103,7 +122,7 @@ function sortHits(hits) {
         .map(({ h }) => h);
 }
 
-export async function searchRxNorm(query, { limit = 20, signal } = {}) {
+export async function searchRxNorm(query, { limit = 20, signal: callerSignal, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
     const q = (query || '').trim();
     if (!q) return [];
     const cacheKey = `q:${q.toLowerCase()}:${limit}`;
@@ -113,6 +132,7 @@ export async function searchRxNorm(query, { limit = 20, signal } = {}) {
     const fetchFn = getFetch();
     if (!fetchFn) throw new Error('rxnormProxy: global fetch unavailable');
 
+    const signal = upstreamSignal(callerSignal, timeoutMs);
     const url = `${RXNAV_BASE}/approximateTerm.json?term=${encodeURIComponent(q)}&maxEntries=${limit}`;
     const res = await fetchFn(url, { signal });
     if (!res.ok) {
@@ -138,7 +158,7 @@ export async function searchRxNorm(query, { limit = 20, signal } = {}) {
     return hits;
 }
 
-export async function lookupRxCui(rxcui, { signal } = {}) {
+export async function lookupRxCui(rxcui, { signal, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
     if (!rxcui) return null;
     const cacheKey = `rxcui:${rxcui}`;
     const cached = cacheGet(NAMESPACE, cacheKey);
@@ -146,7 +166,9 @@ export async function lookupRxCui(rxcui, { signal } = {}) {
     const fetchFn = getFetch();
     if (!fetchFn) throw new Error('rxnormProxy: global fetch unavailable');
     const url = `${RXNAV_BASE}/rxcui/${encodeURIComponent(rxcui)}/properties.json`;
-    const res = await fetchFn(url, { signal });
+    // Callers inside searchRxNorm already pass a budgeted signal; a bare
+    // lookup gets its own.
+    const res = await fetchFn(url, { signal: signal || upstreamSignal(undefined, timeoutMs) });
     if (!res.ok) return null;
     const body = await res.json();
     const props = body?.properties || null;

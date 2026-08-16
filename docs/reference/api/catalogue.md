@@ -9,15 +9,15 @@ model.
 
 | Method | Path | Auth | Source |
 |--------|------|------|--------|
-| `GET` | `/api/catalogue/lab-tests` | `authenticateToken` | `server/routes/catalogue.js:352` |
-| `POST` | `/api/catalogue/lab-tests` | `authenticateToken` | `server/routes/catalogue.js:380` |
-| `DELETE` | `/api/catalogue/lab-tests/:id` | `authenticateToken` | `server/routes/catalogue.js:454` |
-| `PUT` | `/api/catalogue/lab-tests/:id` | `authenticateToken` | `server/routes/catalogue.js:422` |
-| `POST` | `/api/catalogue/lab-tests/:id/promote` | `authenticateToken, requireAdmin` | `server/routes/catalogue.js:474` |
-| `GET` | `/api/catalogue/lab-tests/search` | `authenticateToken` | `server/routes/catalogue.js:494` |
-| `GET` | `/api/catalogue/medications` | `authenticateToken` | `server/routes/catalogue.js:170` |
-| `POST` | `/api/catalogue/medications` | `authenticateToken` | `server/routes/catalogue.js:200` |
-| `DELETE` | `/api/catalogue/medications/:id` | `authenticateToken` | `server/routes/catalogue.js:282` |
-| `PUT` | `/api/catalogue/medications/:id` | `authenticateToken` | `server/routes/catalogue.js:246` |
-| `POST` | `/api/catalogue/medications/:id/promote` | `authenticateToken, requireAdmin` | `server/routes/catalogue.js:303` |
-| `GET` | `/api/catalogue/medications/search` | `authenticateToken` | `server/routes/catalogue.js:326` |
+| `GET` | `/api/catalogue/lab-tests` | `authenticateToken` | `server/routes/catalogue.js:376` |
+| `POST` | `/api/catalogue/lab-tests` | `authenticateToken` | `server/routes/catalogue.js:404` |
+| `DELETE` | `/api/catalogue/lab-tests/:id` | `authenticateToken` | `server/routes/catalogue.js:478` |
+| `PUT` | `/api/catalogue/lab-tests/:id` | `authenticateToken` | `server/routes/catalogue.js:446` |
+| `POST` | `/api/catalogue/lab-tests/:id/promote` | `authenticateToken, requireAdmin` | `server/routes/catalogue.js:498` |
+| `GET` | `/api/catalogue/lab-tests/search` | `authenticateToken` | `server/routes/catalogue.js:518` |
+| `GET` | `/api/catalogue/medications` | `authenticateToken` | `server/routes/catalogue.js:193` |
+| `POST` | `/api/catalogue/medications` | `authenticateToken` | `server/routes/catalogue.js:223` |
+| `DELETE` | `/api/catalogue/medications/:id` | `authenticateToken` | `server/routes/catalogue.js:305` |
+| `PUT` | `/api/catalogue/medications/:id` | `authenticateToken` | `server/routes/catalogue.js:269` |
+| `POST` | `/api/catalogue/medications/:id/promote` | `authenticateToken, requireAdmin` | `server/routes/catalogue.js:326` |
+| `GET` | `/api/catalogue/medications/search` | `authenticateToken` | `server/routes/catalogue.js:349` |

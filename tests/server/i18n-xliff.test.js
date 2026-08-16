@@ -360,6 +360,108 @@ describe('i18n:xliff:import', () => {
         expect(computeStatus(root, 'it').totals.removed).toBe(0);
     });
 
+    // Regression lock: adversarial review #4 — target-language was trusted as a
+    // path component; `x/../en` passed the literal-"en" check and
+    // path.join(root, lang, ns.json) landed in the English source.
+    describe('path traversal guards', () => {
+        const snapshot = () => Object.fromEntries(
+            ['en', 'it'].flatMap(l => readdirSync(join(root, l)).map(f => [`${l}/${f}`, readFileSync(join(root, l, f), 'utf8')]))
+        );
+
+        it('target-language="x/../en" → exit 2, nothing written anywhere in the tree', () => {
+            const file = reviewedXliff(x => x.replaceAll('target-language="it"', 'target-language="x/../en"').replace("Di' ciao</target>", 'PWNED</target>'));
+            const before = snapshot();
+            const statusBefore = readFileSync(join(root, '.status', 'it.json'), 'utf8'); // written by the export step
+            const res = run('xliff-import.mjs', [file], root);
+            expect(res.code).toBe(2);
+            expect(res.stderr).toMatch(/target-language "x\/\.\.\/en" is not a language code/);
+            expect(snapshot()).toEqual(before);
+            expect(readFileSync(join(root, '.status', 'it.json'), 'utf8')).toBe(statusBefore);
+            expect(existsSync(join(root, 'x'))).toBe(false);
+            expect(readdirSync(join(root, '.status'))).toEqual(['it.json']);
+        });
+
+        it('rejects a well-shaped language that is not in the registry, and the English source itself', () => {
+            const unknown = reviewedXliff(x => x.replaceAll('target-language="it"', 'target-language="xx"'));
+            const r1 = run('xliff-import.mjs', [unknown], root);
+            expect(r1.code).toBe(2);
+            expect(r1.stderr).toContain('not in the language registry');
+            expect(existsSync(join(root, 'xx'))).toBe(false);
+
+            const en = reviewedXliff(x => x.replaceAll('target-language="it"', 'target-language="en"'));
+            const r2 = run('xliff-import.mjs', [en], root);
+            expect(r2.code).toBe(2);
+            expect(r2.stderr).toContain('is the English source');
+        });
+
+        it('rejects a namespace name that is not <ns>.json or does not exist under en/', () => {
+            const before = snapshot();
+            const traversal = reviewedXliff(x => x.replace('original="chat.json"', 'original="../en/chat.json"'));
+            const r1 = run('xliff-import.mjs', [traversal], root);
+            expect(r1.code).toBe(2);
+            expect(r1.stderr).toContain('is not a namespace file name');
+
+            const ghost = reviewedXliff(x => x.replace('original="chat.json"', 'original="ghost.json"'));
+            const r2 = run('xliff-import.mjs', [ghost], root);
+            expect(r2.code).toBe(2);
+            expect(r2.stderr).toContain('no such namespace');
+            expect(snapshot()).toEqual(before);
+            expect(existsSync(join(root, 'it', 'ghost.json'))).toBe(false);
+        });
+
+        it('--root must be a locale tree (has en/); a bogus root exits 2', () => {
+            const file = reviewedXliff(x => x);
+            const res = run('xliff-import.mjs', [file], join(root, 'nope'));
+            expect(res.code).toBe(2);
+            expect(res.stderr).toContain('is not a locale tree');
+        });
+    });
+
+    // Regression lock: adversarial review #5 — a unit without <note from="rohy">
+    // skipped the en-hash check entirely, so a stripped note could smuggle a
+    // stale or forged approved="yes" unit past stale detection.
+    describe('missing provenance note', () => {
+        const stripNotes = (x) => x
+            .replace(/<note from="rohy">[^<]*<\/note>/g, '')
+            .replace('<trans-unit id="bp_label" resname="bp_label" approved="no">', '<trans-unit id="bp_label" resname="bp_label" approved="yes">')
+            .replace('needs-review-translation" xml:space="preserve">Pressione arteriosa', 'signed-off" xml:space="preserve">Pressione arteriosa')
+            .replace("Di' ciao</target>", 'Saluta</target>');
+
+        it('is SKIPPED by default even when approved="yes"; nothing changes', () => {
+            const file = reviewedXliff(stripNotes);
+            expect(readFileSync(file, 'utf8')).not.toContain('from="rohy"');
+            const before = readFileSync(join(root, 'it', 'chat.json'), 'utf8');
+            const res = run('xliff-import.mjs', [file, '--reviewer=M. Rossi'], root);
+            expect(res.code).toBe(0);
+            expect(res.stdout).toContain('SKIP chat.bp_label: no provenance note');
+            expect(res.stdout).toContain('SKIP chat.plain: no provenance note');
+            expect(res.stdout).toContain('re-export');
+            expect(readFileSync(join(root, 'it', 'chat.json'), 'utf8')).toBe(before);
+            expect(readStatus(root, 'it')['chat.bp_label']).toMatchObject({ state: 'machine' });
+        });
+
+        it('--allow-missing-note imports it capped at reviewed (never approved) with the current en hash stamped', () => {
+            const file = reviewedXliff(stripNotes);
+            const res = run('xliff-import.mjs', [file, '--reviewer=M. Rossi', '--allow-missing-note'], root);
+            expect(res.code).toBe(0);
+            expect(res.stdout).toContain('WARN chat.bp_label: no provenance note — imported as reviewed, not approved');
+            expect(readJson(join(root, 'it', 'chat.json')).plain).toBe('Saluta');
+            const status = readStatus(root, 'it');
+            expect(status['chat.bp_label']).toMatchObject({ state: 'reviewed', reviewer: 'M. Rossi', src: hash(EN.chat.bp_label) });
+            expect(status['chat.plain']).toMatchObject({ state: 'reviewed', src: hash(EN.chat.plain) });
+            expect(Object.values(status).some(e => e.state === 'approved')).toBe(false);
+        });
+
+        it('a note without src= counts as missing', () => {
+            const file = reviewedXliff(x => x.replace(/<note from="rohy">risk=([a-z]+); icu=(yes|no); src=[0-9a-f]{12}<\/note>/g, '<note from="rohy">risk=$1; icu=$2</note>')
+                .replace("Di' ciao</target>", 'Saluta</target>'));
+            const res = run('xliff-import.mjs', [file], root);
+            expect(res.code).toBe(0);
+            expect(res.stdout).toContain('SKIP chat.plain: no provenance note');
+            expect(readJson(join(root, 'it', 'chat.json')).plain).toBe("Di' ciao");
+        });
+    });
+
     it('refuses a non-XLIFF root or a missing file argument', () => {
         const bad = join(root, 'bad.xlf');
         writeFileSync(bad, '<nope/>');

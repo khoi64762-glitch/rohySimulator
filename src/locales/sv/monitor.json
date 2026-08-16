@@ -73,6 +73,7 @@
   "rhythm_sinus_brady": "Sinusbradykardi",
   "rhythm_sinus_tach": "Sinustakykardi",
   "rhythm_svt": "Supraventrikulär takykardi (SVT)",
+  "rhythm_unrecognised": "Okänd rytm ”{value}” – visas som sinusrytm med inställd hjärtfrekvens. Välj en rytm nedan för att rätta till det.",
   "rhythm_vfib": "Kammarflimmer",
   "rhythm_vtach": "Kammartakykardi",
   "save_alarm_config": "Spara larmkonfiguration",

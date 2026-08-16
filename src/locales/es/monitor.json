@@ -73,6 +73,7 @@
   "rhythm_sinus_brady": "Bradicardia sinusal",
   "rhythm_sinus_tach": "Taquicardia sinusal",
   "rhythm_svt": "Taquicardia supraventricular (TSV)",
+  "rhythm_unrecognised": "Ritmo no reconocido «{value}»: se muestra como ritmo sinusal a la frecuencia cardíaca configurada. Elija un ritmo abajo para corregirlo.",
   "rhythm_vfib": "Fibrilación ventricular",
   "rhythm_vtach": "Taquicardia ventricular",
   "save_alarm_config": "Guardar Configuración de Alarma",

@@ -123,13 +123,29 @@ unit that drops or renames one.
 
 ```bash
 npm run i18n:xliff:import -- i18n/xliff/it/rohy-it-20260816.xlf --reviewer="M. Rossi"
-npm run i18n:xliff:import -- file.xlf --dry-run   # validate + report, write nothing
+npm run i18n:xliff:import -- file.xlf --dry-run              # validate + report, write nothing
+npm run i18n:xliff:import -- file.xlf --allow-missing-note   # see "Provenance notes" below
 ```
+
+The file is treated as **untrusted input** — it usually comes back over
+e-mail or a shared drive. Before anything is read from the locale tree the
+importer checks:
+
+- `target-language` is a language from the registry
+  (`server/shared/languages.js`, minus the English source) in canonical shape
+  (`xx` or `xx-XX`). `x/../en`, `xx`, `en`, absolute paths — anything else —
+  is rejected with exit 2 and the reason on stderr.
+- Every `<file original="…">` is `<ns>.json` (`[a-z_]+`) and that namespace
+  exists under `<root>/en/`.
+- The resolved catalogue path sits under `<root>/<lang>/` (re-checked on
+  every write), and `--root` itself points at a tree that has an `en/`
+  folder.
 
 For every unit the importer:
 
-1. Locates `<ns>.<key>`; skips (with a message) keys that left English or
-   whose `src=` hash no longer matches — the English moved on, re-export.
+1. Locates `<ns>.<key>`; skips (with a message) keys that left English,
+   units with no provenance note (below), or whose `src=` hash no longer
+   matches — the English moved on, re-export.
 2. Validates: target non-empty (unless still `new`), `{braces}` balanced,
    ICU compiles, ICU argument set equals the English one, and every glossary
    term present in the English is rendered as pinned — a **failure** on
@@ -144,8 +160,30 @@ For every unit the importer:
 
 It prints a per-namespace table (imported / updated / skipped / violations /
 warnings) and **exits 1 on any hard violation without writing anything** —
-fix the XLIFF and re-run. Then run `npm test` (the locale-integrity suite
+fix the XLIFF and re-run (exit 2 = the file itself is malformed or unsafe;
+also nothing written). Then run `npm test` (the locale-integrity suite
 re-checks ICU/key parity) and commit the JSON + `.status` diff together.
+
+#### Provenance notes and `--allow-missing-note`
+
+The `<note from="rohy">… src=…</note>` line the export writes on every unit
+is the only proof of *which* English the reviewer was looking at: its `src=`
+hash is what stale detection compares against, and it is what makes an
+`approved="yes"` trustworthy. Some CAT tools drop notes on save. A unit that
+comes back **without** the rohy note (or with a note that lost `src=`) is
+therefore:
+
+- **Skipped by default** — `SKIP <ns>.<key>: no provenance note … re-export`.
+  Re-export, let the reviewer re-apply their edits in a tool that keeps
+  notes, and import that.
+- **Imported only with `--allow-missing-note`**, and then conservatively:
+  the value is validated like any other, the current English hash is
+  stamped as `src`, and the state is **capped at `reviewed`** — a
+  `signed-off` / `approved="yes"` unit lands as `reviewed`, never `approved`
+  (`WARN <ns>.<key>: no provenance note — imported as reviewed, not
+  approved`). Approval has to be re-asserted on a fresh export that carries
+  the note. Use the flag deliberately, for a file you know was produced from
+  the current English.
 
 ## Phase 2 (not built)
 

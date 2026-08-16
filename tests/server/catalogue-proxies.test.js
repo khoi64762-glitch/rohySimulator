@@ -8,8 +8,10 @@
 // without touching the network. The route test can then assume the
 // proxies work and only verify wiring (auth, query-param plumbing).
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { setFetch, cacheClear } from '../../server/services/proxyCache.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import express from 'express';
+import { setFetch, cacheClear, cacheGet, cacheSet, cacheStats, CACHE_MAX_ENTRIES } from '../../server/services/proxyCache.js';
+import { perUserRateLimit, RATE_LIMITED_CODE } from '../../server/middleware/perUserRateLimit.js';
 import { searchRxNorm, lookupRxCui } from '../../server/services/rxnormProxy.js';
 import { searchOpenFda } from '../../server/services/openfdaProxy.js';
 import { searchLoinc } from '../../server/services/loincProxy.js';
@@ -186,3 +188,79 @@ describe('proxyCache + search proxies', () => {
         });
     });
 });
+
+// Regression lock: adversarial review #10 — proxyCache was an unbounded Map
+// (every distinct typeahead prefix stayed resident for 24h) and the search
+// routes had no per-user limit above the global 600/min per-IP one.
+describe('proxyCache bound + eviction', () => {
+    beforeEach(() => cacheClear());
+    afterEach(() => vi.useRealTimers());
+
+    it('never holds more than CACHE_MAX_ENTRIES; the oldest-inserted entries go first', () => {
+        expect(CACHE_MAX_ENTRIES).toBe(2000);
+        for (let i = 0; i < CACHE_MAX_ENTRIES + 25; i += 1) cacheSet('t', `k${i}`, i);
+        expect(cacheStats().size).toBe(CACHE_MAX_ENTRIES);
+        expect(cacheGet('t', 'k0')).toBeUndefined();
+        expect(cacheGet('t', 'k24')).toBeUndefined();
+        expect(cacheGet('t', 'k25')).toBe(25);
+        expect(cacheGet('t', `k${CACHE_MAX_ENTRIES + 24}`)).toBe(CACHE_MAX_ENTRIES + 24);
+    });
+
+    it('re-setting a key moves it to the back of the eviction order', () => {
+        for (let i = 0; i < CACHE_MAX_ENTRIES; i += 1) cacheSet('t', `k${i}`, i);
+        cacheSet('t', 'k0', 'refreshed');           // now newest
+        cacheSet('t', 'overflow', 1);              // evicts k1, not k0
+        expect(cacheGet('t', 'k0')).toBe('refreshed');
+        expect(cacheGet('t', 'k1')).toBeUndefined();
+        expect(cacheStats().size).toBe(CACHE_MAX_ENTRIES);
+    });
+
+    it('sweeps expired entries on insert before evicting live ones', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-08-16T10:00:00Z'));
+        for (let i = 0; i < CACHE_MAX_ENTRIES - 1; i += 1) cacheSet('short', `k${i}`, i, 1000);
+        cacheSet('long', 'keep', 'x');            // 24h TTL — must survive
+        expect(cacheStats().size).toBe(CACHE_MAX_ENTRIES);
+        vi.advanceTimersByTime(5000);              // the short ones are now expired
+        cacheSet('long', 'new', 'y');
+        const stats = cacheStats();
+        expect(stats.keys.short).toBeUndefined();  // all swept
+        expect(stats.size).toBe(2);
+        expect(cacheGet('long', 'keep')).toBe('x');
+        expect(cacheGet('long', 'new')).toBe('y');
+    });
+});
+
+describe('per-user search rate limit', () => {
+    function appWithLimiter(max) {
+        const app = express();
+        app.use((req, _res, next) => { req.user = { id: Number(req.headers['x-user'] || 1) }; next(); });
+        app.get('/search', perUserRateLimit({ max, windowMs: 60_000, message: 'Too many catalogue searches. Please slow down.' }), (req, res) => res.json({ ok: true }));
+        return new Promise((resolve) => {
+            const server = app.listen(0, () => resolve({ server, base: `http://127.0.0.1:${server.address().port}` }));
+        });
+    }
+
+    it('31st request in a minute from the same user is 429 { error, code: RATE_LIMITED }; other users are unaffected', async () => {
+        const { server, base } = await appWithLimiter(30);
+        try {
+            const statuses = [];
+            for (let i = 0; i < 31; i += 1) {
+                const r = await fetch(`${base}/search`, { headers: { 'x-user': '7' } });
+                statuses.push(r.status);
+                if (i === 30) {
+                    expect(await r.json()).toEqual({ error: 'Too many catalogue searches. Please slow down.', code: RATE_LIMITED_CODE });
+                    expect(r.headers.get('ratelimit-limit')).toBe('30');
+                }
+            }
+            expect(statuses.slice(0, 30).every((s) => s === 200)).toBe(true);
+            expect(statuses[30]).toBe(429);
+            // Keyed by user, not IP: user 8 on the same loopback IP still gets through.
+            const other = await fetch(`${base}/search`, { headers: { 'x-user': '8' } });
+            expect(other.status).toBe(200);
+        } finally {
+            await new Promise((r) => server.close(r));
+        }
+    });
+});
+

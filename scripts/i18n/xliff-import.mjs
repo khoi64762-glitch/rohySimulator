@@ -5,19 +5,32 @@
 //   npm run i18n:xliff:import -- i18n/xliff/it/rohy-it-20260816.xlf --reviewer="M. Rossi"
 //   npm run i18n:xliff:import -- file.xlf --dry-run        # validate + report, write nothing
 //   --root=<dir> / ROHY_LOCALES_ROOT                        # other locale tree (tests)
+//   --allow-missing-note                                    # import units that lost their
+//                                                           #   <note from="rohy"> (capped at reviewed)
 //
-// Per trans-unit: locate <ns>.<key>; skip if the source hash in the rohy note
-// no longer matches en (the English moved on — re-export); validate target
-// non-empty, braces balanced, ICU compiles with the same argument set as en,
-// glossary renderings present (fail on clinical keys, warn on low). Then
-// write src/locales/<lang>/<ns>.json (sorted keys, 2-space, trailing newline)
-// and the status entry (state from the XLIFF, reviewed_at, reviewer, src).
-// Exit 1 on any hard violation — nothing is written when the file has one.
+// The file is untrusted input. Its target-language must be a registry
+// language (server/shared/languages.js) in canonical shape and every
+// <file original> a namespace that exists in <root>/en/ — anything else is
+// rejected before a byte is read from the tree, and every path is re-checked
+// to sit under <root>/<lang>/ (no `x/../en`, no absolute paths).
+//
+// Per trans-unit: locate <ns>.<key>; require the rohy provenance note with the
+// English hash it was exported against — a unit without one is SKIPPED (the
+// hash is what makes stale detection and approval trustworthy; re-export), or
+// with --allow-missing-note imported at most as `reviewed`, never `approved`,
+// stamped with the current en hash. Skip if the hash no longer matches en (the
+// English moved on — re-export); validate target non-empty, braces balanced,
+// ICU compiles with the same argument set as en, glossary renderings present
+// (fail on clinical keys, warn on low). Then write src/locales/<lang>/<ns>.json
+// (sorted keys, 2-space, trailing newline) and the status entry (state from the
+// XLIFF, reviewed_at, reviewer, src). Exit 1 on any hard violation — nothing is
+// written when the file has one; exit 2 on a malformed file.
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
-    parseArgs, resolveLocalesRoot, listNamespaces, readCatalogue, writeCatalogue, readStatus, writeStatus,
+    parseArgs, resolveLocalesRoot, assertLocalesRoot, assertTargetLanguage, assertNamespaceFile, safeCataloguePath,
+    listNamespaces, readCatalogue, writeCatalogue, readStatus, writeStatus,
     hash, riskForNamespace, loadGlossary, glossaryTermsIn, targetHasRendering, icuArgs, icuCompile,
     bracesBalanced, SOURCE_LANGUAGE
 } from './lib.mjs';
@@ -25,11 +38,12 @@ import { parseXml, childElements, firstChild, textOf } from './xml.mjs';
 
 const { positional, flags } = parseArgs(process.argv.slice(2));
 if (positional.length !== 1) {
-    console.error('Usage: i18n:xliff:import <file.xlf> [--reviewer=name] [--dry-run]');
+    console.error('Usage: i18n:xliff:import <file.xlf> [--reviewer=name] [--dry-run] [--allow-missing-note]');
     process.exit(2);
 }
-const root = resolveLocalesRoot(flags);
+const root = guard(() => assertLocalesRoot(resolveLocalesRoot(flags)));
 const dryRun = Boolean(flags['dry-run']);
+const allowMissingNote = Boolean(flags['allow-missing-note']);
 const reviewer = typeof flags.reviewer === 'string' ? flags.reviewer : null;
 const now = new Date().toISOString();
 const glossary = loadGlossary();
@@ -48,12 +62,12 @@ let hardViolations = 0;
 let importLang = null;
 
 for (const file of childElements(doc, 'file')) {
-    const lang = file.attrs['target-language'];
-    const ns = String(file.attrs.original || '').replace(/\.json$/, '');
-    if (!lang || lang === SOURCE_LANGUAGE) { console.error(`<file original="${file.attrs.original}"> has no usable target-language`); process.exit(2); }
+    const lang = guard(() => assertTargetLanguage(file.attrs['target-language']));
     if (importLang && importLang !== lang) { console.error('One XLIFF file must address a single target language'); process.exit(2); }
     importLang = lang;
-    if (!namespaces.has(ns)) { messages.push(`SKIP ${ns}: not a namespace in ${root}/en`); bump(ns, 'skipped'); continue; }
+    const ns = guard(() => assertNamespaceFile(root, file.attrs.original));
+    if (!namespaces.has(ns)) { console.error(`<file original="${file.attrs.original}">: not a namespace in ${root}/en`); process.exit(2); }
+    guard(() => safeCataloguePath(root, lang, ns));
     const en = readCatalogue(root, SOURCE_LANGUAGE, ns);
     const target = readCatalogue(root, lang, ns);
     const status = readStatus(root, lang);
@@ -65,7 +79,17 @@ for (const file of childElements(doc, 'file')) {
         if (enValue === undefined) { messages.push(`SKIP ${id}: key no longer exists in en`); bump(ns, 'skipped'); continue; }
         const noteMeta = parseRohyNotes(childElements(unit, 'note'));
         const currentSrc = hash(enValue);
-        if (noteMeta.src && noteMeta.src !== currentSrc) {
+        // The rohy note's src= is the only proof of WHICH English the reviewer
+        // saw. Without it stale detection is blind and approved="yes" would be
+        // taken on faith — so a unit that lost its note is not imported unless
+        // the operator opts in, and then never above `reviewed`.
+        const missingNote = !noteMeta.src;
+        if (missingNote && !allowMissingNote) {
+            messages.push(`SKIP ${id}: no provenance note (<note from="rohy"> src=…) — re-export, or pass --allow-missing-note to import as reviewed`);
+            bump(ns, 'skipped');
+            continue;
+        }
+        if (!missingNote && noteMeta.src !== currentSrc) {
             messages.push(`SKIP ${id}: English changed since export (src ${noteMeta.src} → ${currentSrc}) — re-export`);
             bump(ns, 'skipped');
             continue;
@@ -90,7 +114,12 @@ for (const file of childElements(doc, 'file')) {
         if (hard.length) { bump(ns, 'violations'); hardViolations += hard.length; continue; }
 
         const changed = target[key] !== value;
-        const nextState = statusFromXliff(xState, approvedAttr, changed, status[id]?.state);
+        let nextState = statusFromXliff(xState, approvedAttr, changed, status[id]?.state);
+        if (missingNote && nextState === 'approved') {
+            messages.push(`WARN ${id}: no provenance note — imported as reviewed, not approved (current en hash stamped)`);
+            bump(ns, 'warnings');
+            nextState = 'reviewed';
+        }
         const stateChanged = status[id]?.state !== nextState || status[id]?.src !== currentSrc;
         if (!changed && !stateChanged) { bump(ns, 'skipped'); continue; }
         writes.push({ lang, ns, key, id, value, changed, state: nextState, risk, src: currentSrc, existed: target[key] !== undefined });
@@ -146,6 +175,11 @@ console.log(`\nWrote ${writes.length} value(s) into ${root}/${importLang}/` +
     (pruned ? ` (pruned ${pruned} removed entr${pruned === 1 ? 'y' : 'ies'})` : ''));
 
 // ---- helpers ---------------------------------------------------------------
+
+/** Run a validator; on failure print its message and exit 2 (malformed input, nothing written). */
+function guard(fn) {
+    try { return fn(); } catch (err) { console.error(err.message); process.exit(2); }
+}
 
 function parseRohyNotes(notes) {
     const meta = {};

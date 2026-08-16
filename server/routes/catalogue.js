@@ -32,12 +32,35 @@ import {
 import { searchRxNorm } from '../services/rxnormProxy.js';
 import { searchOpenFda } from '../services/openfdaProxy.js';
 import { searchLoinc } from '../services/loincProxy.js';
+import { upstreamSignal } from '../services/proxyCache.js';
+import { perUserRateLimit } from '../middleware/perUserRateLimit.js';
 import { logger } from '../logger.js';
 import { appendAuditEntry } from '../audit-chain.js';
 import { DEFAULT_TURNAROUND_MINUTES } from '../lib/turnaround.js';
 
 const router = express.Router();
 const catalogueLog = logger('catalogue');
+
+// The two search proxies fan out to third-party APIs (one RxNorm search is
+// up to 1 + ENRICH_CAP upstream calls), so on top of the global per-IP
+// limiter each USER gets SEARCH_RATE_LIMIT requests per minute across both
+// endpoints — plenty for a human typing, not enough to burn the upstream
+// quota from one account. 429 `{ error, code: 'RATE_LIMITED' }`.
+export const SEARCH_RATE_LIMIT = 30;
+export const searchLimiter = perUserRateLimit({
+    max: SEARCH_RATE_LIMIT,
+    windowMs: 60 * 1000,
+    message: 'Too many catalogue searches. Please slow down.',
+});
+
+// Abort upstream fetches when the client goes away before we answer: the
+// signal is aborted on the response's `close` (which, after a normal
+// finish, is a harmless no-op on already-settled fetches).
+function clientAbortSignal(res) {
+    const controller = new AbortController();
+    res.once('close', () => controller.abort());
+    return controller.signal;
+}
 
 // ------------------------------ helpers --------------------------------
 
@@ -323,7 +346,7 @@ router.post('/medications/:id/promote', authenticateToken, requireAdmin, asyncHa
 
 // GET /api/catalogue/medications/search?q= — RxNorm + openFDA proxy.
 //   Auth required. Returns transient hits; does NOT persist.
-router.get('/medications/search', authenticateToken, asyncHandler(async (req, res) => {
+router.get('/medications/search', authenticateToken, searchLimiter, asyncHandler(async (req, res) => {
     const q = (req.query.q || '').toString().trim();
     const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50);
     if (!q) return res.json({ hits: [], q });
@@ -331,9 +354,10 @@ router.get('/medications/search', authenticateToken, asyncHandler(async (req, re
     const sources = String(req.query.sources || 'rxnorm,openfda')
         .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
 
+    const signal = clientAbortSignal(res);
     const tasks = [];
-    if (sources.includes('rxnorm')) tasks.push(searchRxNorm(q, { limit }).catch((err) => ({ _error: err.message, _source: 'rxnorm' })));
-    if (sources.includes('openfda')) tasks.push(searchOpenFda(q, { limit }).catch((err) => ({ _error: err.message, _source: 'openfda' })));
+    if (sources.includes('rxnorm')) tasks.push(searchRxNorm(q, { limit, signal }).catch((err) => ({ _error: err.message, _source: 'rxnorm' })));
+    if (sources.includes('openfda')) tasks.push(searchOpenFda(q, { limit, signal: upstreamSignal(signal) }).catch((err) => ({ _error: err.message, _source: 'openfda' })));
     const results = await Promise.all(tasks);
 
     const hits = [];
@@ -491,12 +515,12 @@ router.post('/lab-tests/:id/promote', authenticateToken, requireAdmin, asyncHand
     res.json({ id, scope: target, message: `Lab test promoted to ${target}` });
 }));
 
-router.get('/lab-tests/search', authenticateToken, asyncHandler(async (req, res) => {
+router.get('/lab-tests/search', authenticateToken, searchLimiter, asyncHandler(async (req, res) => {
     const q = (req.query.q || '').toString().trim();
     const limit = Math.min(parseInt(req.query.limit, 10) || 20, 50);
     if (!q) return res.json({ hits: [], q });
     try {
-        const hits = await searchLoinc(q, { limit });
+        const hits = await searchLoinc(q, { limit, signal: upstreamSignal(clientAbortSignal(res)) });
         res.json({ q, hits, source: 'loinc' });
     } catch (err) {
         res.json({ q, hits: [], errors: [{ source: 'loinc', message: err.message }] });

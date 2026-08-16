@@ -9,6 +9,56 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.49] — 2026-08-16
+
+### Fixed
+
+Adversarial review (Codex, range v2.9.12 → v2.9.48; 12 findings, 9 fixed,
+1 rejected, 2 by decision — full report in `reports/`):
+
+- **Case versions were not tenant-scoped.** `GET /cases/:id/versions` and
+  `POST /cases/:id/restore/:versionId` resolved the case and version by
+  global id; an admin of tenant A could read tenant B's snapshots and
+  restore over its live case. Both now resolve the case with
+  `tenant_id` first (404 otherwise).
+- **Version snapshots held pre-validation data and restore skipped
+  validation.** Snapshots now equal what was stored (clamped vitals,
+  canonical rhythms, gender write-back); restore runs the same
+  normalisation as PUT and re-derives every denormalised column
+  (chief_complaint, difficulty_level, patient_*), respecting the
+  immutable case language.
+- **`POST /scenarios/seed` wrote into tenant 1 and duplicated on repeat.**
+  Seeds into the caller's tenant, per-tenant idempotent (`skipped`).
+- **Treatment ordering ignored hidden treatments and re-awarded points on
+  every repeat.** `case_treatments.is_available = 0` → 409
+  `TREATMENT_UNAVAILABLE`; a name unknown to both the case rubric and the
+  visible catalogue → 404 `TREATMENT_UNKNOWN`; points are awarded once per
+  (session, treatment) — repeats return `repeat: true` with 0 points, so
+  the debrief total can no longer be farmed.
+- **Debrief used the live rubric.** The case's treatment rubric is pinned
+  at session start into `session_settings.settings_snapshot` (server-only
+  — not into `case_snapshot`, which the learner can read) and used by
+  listing, ordering and debrief alike; older sessions fall back to live.
+- **XLIFF import path traversal.** `target-language` is validated against
+  the language registry + strict shape, namespaces against `en/`, and the
+  resolved path must stay under `<root>/<lang>/`; a stripped provenance
+  note no longer bypasses stale-source detection (unit skipped unless
+  `--allow-missing-note`, and then capped at *reviewed*).
+- **RxNorm enrichment amplification.** Bounded proxy cache (2000 entries,
+  expiry sweep), enrichment cap 10 → 6 and only for hits missing name or
+  term type, 4 s upstream timeouts + abort on client disconnect, and a
+  per-user 30/min limit on the search endpoints (429 `RATE_LIMITED`).
+- **Default course renamed before the 2.9.41 upgrade** was not flagged and
+  the seeder would recreate "Basic course". Migration 0047 flags the
+  lowest-id `auto_enroll` cohort in tenants without a default.
+- **Unrecognised rhythm is now visible** on the monitor (admin rhythm
+  panel) instead of silently rendering sinus.
+
+Rejected: "migration 0042 erased agent delays" — deliberate 2.9.19
+decision, already applied. By decision: unknown rhythms are kept verbatim
++ warned (non-breaking policy); tenant treatment rows keep the global
+`UNIQUE(name, route)` (table rebuild deferred, documented in MANIFEST).
+
 ## [2.9.48] — 2026-08-16
 
 ### Added

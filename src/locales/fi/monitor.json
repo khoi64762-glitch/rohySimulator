@@ -73,6 +73,7 @@
   "rhythm_sinus_brady": "Sinusbradykardia",
   "rhythm_sinus_tach": "Sinustakykardia",
   "rhythm_svt": "Supraventrikulaarinen takykardia (SVT)",
+  "rhythm_unrecognised": "Tunnistamaton rytmi ”{value}” – näytetään sinusrytminä asetetulla sykkeellä. Valitse rytmi alta korjataksesi.",
   "rhythm_vfib": "Kammiovärinä",
   "rhythm_vtach": "Kammiotakykardia",
   "save_alarm_config": "Tallenna hälytysasetukset",
