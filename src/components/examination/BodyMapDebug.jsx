@@ -1,18 +1,37 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import DEFAULT_REGIONS from '../../utils/defaultRegions';
 import { apiFetch, apiPost } from '../../services/apiClient';
 import { useBodyImage } from '../../hooks/useBodyImage';
 import { useToast } from '../../contexts/ToastContext';
- 
-// Storage key for localStorage
-const STORAGE_KEY = 'rohy_bodymap_regions';
+import { mapRegionLabel } from './examinationLabels';
+import { readCachedRegions, writeCachedRegions, clearCachedRegions } from '../../utils/bodymapRegionsCache';
+
+// Editor canvas height in CSS px; the width follows the silhouette's real
+// aspect ratio (see below), never a fixed 500x900 box.
+const CANVAS_HEIGHT_PX = 900;
+
+// width / height seeds per view so the first paint is already close before
+// onLoad measures the exact PNG — same seeds as BodyMap.jsx.
+const DEFAULT_RATIO = { anterior: 429 / 791, posterior: 438 / 1022 };
 
 /**
  * Body Map Debug Tool with Draggable Vertices
  * Click and drag polygon vertices to adjust regions
  * Changes are saved to localStorage and server
+ *
+ * Regression lock: posterior body-map coordinates were traced in a
+ * letterboxed editor. The old editor drew the PNG with object-contain
+ * inside a hardcoded 500x900 box while the SVG overlay filled the whole
+ * box, so on the narrow posterior silhouettes (~0.43 w/h) the image was
+ * letterboxed ~12% on each side and every vertex traced there was stored
+ * in letterbox space, not image space. The viewer (BodyMap.jsx) sizes its
+ * box to the image's intrinsic ratio, so those polygons landed on the
+ * torso instead of the arms. The editor now uses the same
+ * intrinsic-ratio container as the viewer: SVG-% == image-% in both.
  */
 export default function BodyMapDebug({ gender = 'male', view = 'anterior' }) {
+    const { t } = useTranslation('examination');
     const toast = useToast();
     const [clickCoords, setClickCoords] = useState(null);
     const [showGrid, setShowGrid] = useState(true);
@@ -21,34 +40,26 @@ export default function BodyMapDebug({ gender = 'male', view = 'anterior' }) {
     const [draggingVertex, setDraggingVertex] = useState(null);
     const [saveStatus, setSaveStatus] = useState(null);
     const [hasChanges, setHasChanges] = useState(false);
+    const [imgRatio, setImgRatio] = useState(null);
     const svgRef = useRef(null);
 
-    // Load saved regions from localStorage or use defaults
+    // Load saved regions from the (version-stamped) localStorage cache or use defaults
     const [regions, setRegions] = useState(() => {
-        try {
-            const saved = localStorage.getItem(STORAGE_KEY);
-            if (saved) {
-                return JSON.parse(saved);
-            }
-        } catch (e) {
-            console.warn('Failed to load saved regions:', e);
-        }
-        return JSON.parse(JSON.stringify(DEFAULT_REGIONS));
+        const cached = readCachedRegions();
+        return cached || JSON.parse(JSON.stringify(DEFAULT_REGIONS));
     });
 
-    // Try loading from server on mount if no localStorage data
+    // Try loading from server on mount if no (current-version) localStorage data
     useEffect(() => {
-        const hasLocalData = localStorage.getItem(STORAGE_KEY);
-        if (!hasLocalData) {
-            apiFetch('/bodymap-regions', { auth: false })
-                .then(data => {
-                    if (data?.regions) {
-                        setRegions(data.regions);
-                        localStorage.setItem(STORAGE_KEY, JSON.stringify(data.regions));
-                    }
-                })
-                .catch(err => console.warn('Failed to load from server:', err));
-        }
+        if (readCachedRegions()) return;
+        apiFetch('/bodymap-regions', { auth: false })
+            .then(data => {
+                if (data?.regions) {
+                    setRegions(data.regions);
+                    writeCachedRegions(data.regions);
+                }
+            })
+            .catch(err => console.warn('Failed to load from server:', err));
     }, []);
 
     const currentRegions = regions[view]?.[gender] || regions.anterior.male;
@@ -56,6 +67,18 @@ export default function BodyMapDebug({ gender = 'male', view = 'anterior' }) {
     // Admin-uploaded silhouette first, bundled default as fallback (bug report 2.9.15 #13).
     const bodyImageType = `${gender === 'female' ? 'woman' : 'man'}-${view === 'posterior' ? 'back' : 'front'}`;
     const { src: bodyImageSrc, onError: onBodyImageError } = useBodyImage(bodyImageType);
+
+    // Drop the measured ratio whenever the image changes so the previous
+    // view's ratio can't briefly distort the new one before it loads —
+    // render-time derived-state reset (not an effect) per React guidance.
+    const [ratioSrc, setRatioSrc] = useState(bodyImageSrc);
+    if (ratioSrc !== bodyImageSrc) {
+        setRatioSrc(bodyImageSrc);
+        setImgRatio(null);
+    }
+
+    const effectiveRatio = Number((imgRatio || DEFAULT_RATIO[view] || DEFAULT_RATIO.anterior).toFixed(4));
+    const canvasWidthPx = Math.round(CANVAS_HEIGHT_PX * effectiveRatio);
 
     const getSvgCoords = (e) => {
         const svg = svgRef.current;
@@ -110,8 +133,8 @@ export default function BodyMapDebug({ gender = 'male', view = 'anterior' }) {
     const saveChanges = async () => {
         setSaveStatus('saving');
         try {
-            // Save to localStorage immediately
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(regions));
+            // Save to localStorage immediately (version-stamped, see bodymapRegionsCache.js)
+            writeCachedRegions(regions);
 
             // Also save to server for persistence. Pre-fix this gated on
             // AuthService.getToken() — but cookie-mode users have no
@@ -134,38 +157,43 @@ export default function BodyMapDebug({ gender = 'male', view = 'anterior' }) {
     };
 
     // Reset to defaults
-    const resetToDefaults = () => {
-        if (confirm('Reset all regions to defaults? This will discard all your changes.')) {
-            setRegions(JSON.parse(JSON.stringify(DEFAULT_REGIONS)));
-            localStorage.removeItem(STORAGE_KEY);
-            setHasChanges(false);
-            setSaveStatus(null);
-        }
+    const resetToDefaults = async () => {
+        const ok = await toast.confirm(t('bodymap_editor_reset_confirm'), { type: 'danger' });
+        if (!ok) return;
+        setRegions(JSON.parse(JSON.stringify(DEFAULT_REGIONS)));
+        clearCachedRegions();
+        setHasChanges(false);
+        setSaveStatus(null);
     };
 
     const copyToClipboard = () => {
         const data = JSON.stringify(regions[view][gender], null, 2);
         navigator.clipboard.writeText(data);
-        toast.success('Copied current regions to clipboard');
+        toast.success(t('bodymap_editor_copied_view'));
     };
 
     const exportAll = () => {
         const data = JSON.stringify(regions, null, 2);
         navigator.clipboard.writeText(data);
-        toast.success('Copied ALL regions to clipboard');
+        toast.success(t('bodymap_editor_copied_all'));
     };
+
+    const saveLabel = saveStatus === 'saving' ? t('bodymap_editor_saving')
+        : saveStatus === 'saved' ? t('bodymap_editor_saved')
+        : saveStatus === 'saved-local' ? t('bodymap_editor_saved_local')
+        : t('bodymap_editor_save');
 
     return (
         <div className="p-4 bg-slate-900 min-h-screen">
             {/* Save Bar - Fixed at top */}
             <div className="mb-4 p-3 bg-slate-800 rounded-lg border border-slate-700 flex items-center justify-between">
                 <div className="flex items-center gap-4">
-                    <h1 className="text-xl font-bold text-white">Body Map Editor</h1>
+                    <h1 className="text-xl font-bold text-white">{t('bodymap_editor_title')}</h1>
                     <span className="text-slate-400">|</span>
-                    <span className="text-slate-300">{gender} - {view}</span>
+                    <span className="text-slate-300">{t('bodymap_editor_subtitle', { gender, view })}</span>
                     {hasChanges && (
                         <span className="px-2 py-1 bg-yellow-600/20 text-yellow-400 text-sm rounded">
-                            Unsaved changes
+                            {t('bodymap_editor_unsaved')}
                         </span>
                     )}
                 </div>
@@ -174,7 +202,7 @@ export default function BodyMapDebug({ gender = 'male', view = 'anterior' }) {
                         onClick={resetToDefaults}
                         className="px-4 py-2 bg-slate-700 text-white rounded hover:bg-slate-600 transition-colors"
                     >
-                        Reset to Defaults
+                        {t('bodymap_editor_reset')}
                     </button>
                     <button
                         onClick={saveChanges}
@@ -185,10 +213,7 @@ export default function BodyMapDebug({ gender = 'male', view = 'anterior' }) {
                                 : 'bg-slate-600 text-slate-300'
                         } ${saveStatus === 'saving' ? 'opacity-50 cursor-wait' : ''}`}
                     >
-                        {saveStatus === 'saving' ? 'Saving...' :
-                         saveStatus === 'saved' ? 'Saved!' :
-                         saveStatus === 'saved-local' ? 'Saved (local only)' :
-                         'Save Changes'}
+                        {saveLabel}
                     </button>
                 </div>
             </div>
@@ -196,48 +221,65 @@ export default function BodyMapDebug({ gender = 'male', view = 'anterior' }) {
             <div className="mb-4 flex gap-4 flex-wrap items-center">
                 <label className="flex items-center gap-2 text-white">
                     <input type="checkbox" checked={showGrid} onChange={(e) => setShowGrid(e.target.checked)} />
-                    Show Grid
+                    {t('bodymap_editor_show_grid')}
                 </label>
                 <label className="flex items-center gap-2 text-white">
                     <input type="checkbox" checked={showRegions} onChange={(e) => setShowRegions(e.target.checked)} />
-                    Show Regions
+                    {t('bodymap_editor_show_regions')}
                 </label>
                 <button
                     onClick={copyToClipboard}
                     className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-500"
                 >
-                    Copy Current View
+                    {t('bodymap_editor_copy_view')}
                 </button>
                 <button
                     onClick={exportAll}
                     className="px-3 py-1 bg-purple-600 text-white rounded hover:bg-purple-500"
                 >
-                    Export All Regions
+                    {t('bodymap_editor_export_all')}
                 </button>
                 {clickCoords && (
                     <span className="text-yellow-400 font-mono">
-                        Click: [{clickCoords.x}, {clickCoords.y}]
+                        {t('bodymap_editor_click_coords', { x: clickCoords.x, y: clickCoords.y })}
                     </span>
                 )}
                 {selectedRegion && (
                     <span className="text-cyan-400 font-mono">
-                        Selected: {selectedRegion}
+                        {t('bodymap_editor_selected', {
+                            region: mapRegionLabel(t, selectedRegion, currentRegions[selectedRegion]?.label)
+                        })}
                     </span>
                 )}
             </div>
 
             <p className="text-gray-400 text-sm mb-4">
-                Drag the circles to move vertices. Click a region to select it. Use Export to copy coordinates.
+                {t('bodymap_editor_drag_hint')}
             </p>
 
             <div className="flex gap-8">
-                {/* Image with overlay */}
-                <div className="relative" style={{ width: '500px', height: '900px' }}>
+                {/*
+                    Image with overlay. The box takes the PNG's intrinsic
+                    aspect ratio (measured on load) so the img fills it
+                    edge-to-edge without object-contain letterboxing and the
+                    SVG's 0-100 viewBox maps 1:1 onto image percent — exactly
+                    what BodyMap.jsx renders in the exam room.
+                */}
+                <div
+                    className="relative"
+                    data-testid="bodymap-editor-canvas"
+                    style={{ width: `${canvasWidthPx}px`, height: `${CANVAS_HEIGHT_PX}px` }}
+                >
                     <img
                         src={bodyImageSrc}
                         onError={onBodyImageError}
-                        alt={`${gender} body ${view}`}
-                        className="absolute inset-0 w-full h-full object-contain"
+                        alt={t('body_alt', { gender, view })}
+                        className="absolute inset-0 w-full h-full select-none"
+                        draggable={false}
+                        onLoad={(e) => {
+                            const { naturalWidth: w, naturalHeight: h } = e.target;
+                            if (w > 0 && h > 0) setImgRatio(w / h);
+                        }}
                     />
                     <svg
                         ref={svgRef}
@@ -280,7 +322,7 @@ export default function BodyMapDebug({ gender = 'male', view = 'anterior' }) {
                                     dominantBaseline="middle"
                                     style={{ pointerEvents: 'none' }}
                                 >
-                                    {region.label}
+                                    {mapRegionLabel(t, region.id || key, region.label)}
                                 </text>
                                 {/* Draggable vertices */}
                                 {selectedRegion === key && region.points.map(([x, y], idx) => (
@@ -303,15 +345,15 @@ export default function BodyMapDebug({ gender = 'male', view = 'anterior' }) {
 
                 {/* Region list */}
                 <div className="text-white text-sm font-mono max-h-[900px] overflow-auto w-96">
-                    <h3 className="font-bold mb-2">Regions ({view} - {gender}):</h3>
-                    <p className="text-gray-400 text-xs mb-4">Click region name to select, drag vertices to adjust</p>
+                    <h3 className="font-bold mb-2">{t('bodymap_editor_regions_heading', { gender, view })}</h3>
+                    <p className="text-gray-400 text-xs mb-4">{t('bodymap_editor_regions_hint')}</p>
                     {Object.entries(currentRegions).map(([key, region]) => (
                         <div
                             key={key}
                             className={`mb-2 p-2 rounded cursor-pointer ${selectedRegion === key ? 'bg-slate-600 ring-2 ring-white' : 'bg-slate-800 hover:bg-slate-700'}`}
                             onClick={() => setSelectedRegion(key)}
                         >
-                            <div style={{ color: region.color }} className="font-bold">{region.label}</div>
+                            <div style={{ color: region.color }} className="font-bold">{mapRegionLabel(t, region.id || key, region.label)}</div>
                             <div className="text-xs text-slate-400 break-all">
                                 {JSON.stringify(region.points)}
                             </div>

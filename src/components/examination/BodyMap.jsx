@@ -4,8 +4,7 @@ import defaultRegions from '../../utils/defaultRegions';
 import { mapRegionLabel } from './examinationLabels';
 import { apiFetch } from '../../services/apiClient';
 import { useBodyImage } from '../../hooks/useBodyImage';
-// Storage key - must match BodyMapDebug
-const STORAGE_KEY = 'rohy_bodymap_regions';
+import { readCachedRegions, writeCachedRegions } from '../../utils/bodymapRegionsCache';
 
 /**
  * Body Map Component with Invisible Polygon Regions
@@ -35,16 +34,13 @@ export default function BodyMap({
 
     // Load saved regions on mount
     useEffect(() => {
-        // Try localStorage first (fastest)
-        try {
-            const saved = localStorage.getItem(STORAGE_KEY);
-            if (saved) {
-                const parsed = JSON.parse(saved);
-                setSavedRegions(parsed);
-                return;
-            }
-        } catch (e) {
-            console.warn('Failed to load regions from localStorage:', e);
+        // localStorage first (fastest). The cache is version-stamped — a
+        // stale copy is discarded and we fall through to the server file
+        // (see bodymapRegionsCache.js).
+        const cached = readCachedRegions();
+        if (cached) {
+            setSavedRegions(cached);
+            return;
         }
 
         // /bodymap-regions is a public endpoint by design.
@@ -52,7 +48,7 @@ export default function BodyMap({
             .then(data => {
                 if (data?.regions) {
                     setSavedRegions(data.regions);
-                    localStorage.setItem(STORAGE_KEY, JSON.stringify(data.regions));
+                    writeCachedRegions(data.regions);
                 }
             })
             .catch(err => console.warn('Failed to load regions from server:', err));

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { User, RotateCcw, CheckCircle, AlertCircle, Upload, Volume2, Trash2 } from 'lucide-react';
 import BodyMap from '../examination/BodyMap';
 import { BODY_REGIONS, EXAM_TECHNIQUES } from '../../data/examRegions';
+import { regionLabel, techniqueLabel } from '../examination/examinationLabels';
 import { useToast } from '../../contexts/ToastContext';
 import { apiFetch } from '../../services/apiClient';
 import { bodyMapGender } from '../../services/patientDemographics';
@@ -13,7 +14,14 @@ import { bodyMapGender } from '../../services/patientDemographics';
  * Special support for auscultation with audio upload
  */
 export default function PhysicalExamEditor({ caseData, setCaseData, patientGender = 'male' }) {
-    const { t } = useTranslation('authoring_exam');
+    // 'examination' rides along so the region / technique names coming from
+    // the static examRegions.js data map resolve through the same key maps
+    // the exam room uses (regionLabel / techniqueLabel) instead of rendering
+    // raw English. One hook, not two: the i18n parser binds `t` to the LAST
+    // useTranslation() in a file, so a second hook would re-home every
+    // authoring_exam key into examination.json.
+    const { t } = useTranslation(['authoring_exam', 'examination']);
+    const tExam = (key, opts) => t(key, { ...opts, ns: 'examination' });
     const toast = useToast();
     const [view, setView] = useState('anterior');
     const [selectedRegion, setSelectedRegion] = useState(null);
@@ -266,7 +274,7 @@ export default function PhysicalExamEditor({ caseData, setCaseData, patientGende
                     {selectedRegion && currentRegion ? (
                         <div className="space-y-4">
                             <div className="flex items-center justify-between border-b border-neutral-700 pb-3">
-                                <h5 className="text-lg font-bold text-white">{currentRegion.name}</h5>
+                                <h5 className="text-lg font-bold text-white">{regionLabel(tExam, selectedRegion, currentRegion.name)}</h5>
                                 <button
                                     onClick={() => {
                                         // Fill this region with defaults
@@ -297,7 +305,7 @@ export default function PhysicalExamEditor({ caseData, setCaseData, patientGende
                                         <div className="flex flex-wrap gap-x-3 gap-y-1 items-center justify-between">
                                             <label className="text-sm font-medium text-neutral-300 flex items-center gap-2">
                                                 {isAuscultation && <Volume2 className="w-4 h-4 text-cyan-400" />}
-                                                {technique?.name || examType}
+                                                {techniqueLabel(tExam, examType, technique?.name)}
                                             </label>
                                             <label className="flex items-center gap-2 text-xs">
                                                 <input

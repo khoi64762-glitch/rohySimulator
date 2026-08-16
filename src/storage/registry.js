@@ -92,7 +92,7 @@ export const STORAGE_REGISTRY = Object.freeze({
     // ── Bodymap editor (admin) ──────────────────────────────────────────────
     rohy_bodymap_regions: {
         owner: 'src/components/examination/BodyMap.jsx + BodyMapDebug.jsx',
-        purpose: 'Cached bodymap polygon regions (server-backed, localStorage is fast-path).',
+        purpose: 'Cached bodymap polygon regions as {version, regions} (server-backed, localStorage is fast-path; a stale version stamp is discarded — see utils/bodymapRegionsCache.js).',
         lifetime: 'forever',
     },
     // ── Diagnostic bar ──────────────────────────────────────────────────────

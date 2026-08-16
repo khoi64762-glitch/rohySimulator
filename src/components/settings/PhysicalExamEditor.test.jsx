@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import renderWithProviders from '../../../tests/utils/renderWithProviders.jsx';
 import PhysicalExamEditor from './PhysicalExamEditor.jsx';
 
@@ -108,5 +108,32 @@ describe('PhysicalExamEditor apiFetch migration', () => {
         });
 
         await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Failed to upload audio file'));
+    });
+});
+
+// Regression lock (task #12): the right panel rendered `currentRegion.name`
+// and `technique.name` raw from src/data/examRegions.js. They must resolve
+// through the examination key maps (regionLabel / techniqueLabel) so an
+// Italian author sees Italian, and the authoring_exam keys must keep
+// resolving even though the hook now carries two namespaces.
+describe('PhysicalExamEditor — region and technique names are localised', () => {
+    it('shows Italian region + technique names, and no raw English data-map names', async () => {
+        const { setAppLanguage } = await import('../../i18n/index.js');
+        await act(async () => { await setAppLanguage('it'); });
+        try {
+            mount();
+            fireEvent.click(screen.getByRole('button', { name: /select chest/i }));
+            // Region heading from regionLabel(): BODY_REGIONS.chest.name is "Chest"
+            expect(await screen.findByRole('heading', { level: 5, name: 'Torace' })).toBeTruthy();
+            expect(screen.queryByRole('heading', { level: 5, name: 'Chest' })).toBeNull();
+            // Technique labels from techniqueLabel(): EXAM_TECHNIQUES.palpation.name is "Palpation"
+            expect(screen.getByText('Palpazione')).toBeTruthy();
+            expect(screen.queryByText('Palpation')).toBeNull();
+            expect(screen.getByText('Auscultazione')).toBeTruthy();
+            // authoring_exam keys still resolve through the same t()
+            expect(screen.queryByText('Fill Defaults')).toBeNull();
+        } finally {
+            await act(async () => { await setAppLanguage('en'); });
+        }
     });
 });

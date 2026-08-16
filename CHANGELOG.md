@@ -9,6 +9,26 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.39] — 2026-08-16
+
+### Fixed
+
+- **Posterior body-map hit-areas land on the limbs again.** The
+  coordinate editor drew the silhouette letterboxed inside a fixed
+  500×900 box while the SVG overlay filled the whole box, so every
+  polygon traced there was in letterbox space; the viewer (correctly)
+  uses the image's own aspect ratio, so on the narrow posterior PNGs the
+  arms, forearms and hands were pulled ~6–11 points toward the spine
+  (female most visibly, male latently). Editor now uses the same
+  intrinsic-ratio canvas as the viewer; posterior x-coordinates were
+  re-derived and verified against the PNG pixels; the browser cache of
+  regions is versioned so stale local copies are discarded.
+- **Body-map editor and Exam tab fully translated.** The editor had no
+  i18n at all (title, buttons, hints, toasts, region names, a raw
+  `confirm()`); the Exam tab showed region and technique names
+  ("Left Forearm", "Inspection", "Palpation") in English. Both now use
+  the existing region/technique key maps.
+
 ## [2.9.38] — 2026-08-16
 
 ### Fixed
