@@ -10,10 +10,12 @@
 // Two halves:
 //   1. resolveRhythm() — the pure resolver: ids, aliases, every locale's
 //      catalogue label, and the honest `ok:false` for junk.
-//   2. POST/PUT /cases and /scenarios canonicalise on write (alias → id) and
-//      answer 400 {code:'invalid_rhythm'} for an unknown value, mirroring the
-//      patient-gender guard (case-gender-i18n.test.js). Spawns the real
-//      server against an empty database.
+//   2. POST/PUT /cases and /scenarios canonicalise on write (alias → id).
+//      Since v2.9.41 an UNRECOGNISED value is NOT rejected: legacy rows and
+//      the Italian pilot's scenarios carry free text that must keep saving,
+//      and the monitor already renders sinus for anything it does not know.
+//      It is stored verbatim and reported in a non-fatal `warnings` array.
+//      Spawns the real server against an empty database.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -78,8 +80,18 @@ describe('resolveRhythm', () => {
         expect(resolveRhythm('   ')).toEqual({ ok: true, value: null });
     });
 
-    it.each(['ASYSTOLE_TYPO', 'PVC', 'JunctionalEscape', 'banana'])(
-        'reports %s as unrecognised, naming the received value', (junk) => {
+    it.each([
+        // Qualified prose: exactly one id/alias appears as a whole word run.
+        ['Bradicardia Sinusale Marcata', 'Sinus Bradycardia'],
+        ['Sinus tachycardia with PVCs', 'Sinus Tachycardia'],
+        ['Ritmo sinusale con extrasistoli', 'NSR'],
+        ['AF with RVR', 'AFib'],
+    ])('repairs the qualified prose %s → %s (contains exactly one known spelling)', (value, id) => {
+        expect(resolveRhythm(value)).toEqual({ ok: true, value: id });
+    });
+
+    it.each(['PVC', 'JunctionalEscape', 'banana', 'AFib to VFib'])(
+        'reports %s as unrecognised (unknown or ambiguous), naming the received value', (junk) => {
             expect(resolveRhythm(junk)).toEqual({ ok: false, received: junk });
         });
 
@@ -96,7 +108,7 @@ describe('resolveRhythm', () => {
     });
 });
 
-describe('rhythms are canonicalised on write', () => {
+describe('rhythms are canonicalised on write, never rejected', () => {
     let server;
     let admin;
 
@@ -161,19 +173,38 @@ describe('rhythms are canonicalised on write', () => {
         }
     });
 
-    it('rejects an unknown initialVitals rhythm with 400 invalid_rhythm naming the value', async () => {
-        const res = await createCase('lock-unknown', 'Fibrillazione ventricolare misspelt');
-        expect(res.status).toBe(400);
+    // Regression lock (v2.9.41, non-breaking release): an unknown rhythm is
+    // kept as written and warned about — rejecting it broke every legacy case.
+    it('keeps an unknown initialVitals rhythm VERBATIM and warns, naming the value', async () => {
+        const res = await createCase('lock-unknown', 'Ritmo idioventricolare accelerato');
+        expect(res.status).toBe(200);
         const payload = await res.json();
-        expect(payload.code).toBe('invalid_rhythm');
-        expect(payload.error).toContain('Fibrillazione ventricolare misspelt');
-        expect(payload.error).toContain(RHYTHM_IDS.join(', '));
+        expect(payload.warnings).toEqual([
+            expect.objectContaining({
+                field: 'config.initialVitals.rhythm',
+                received: 'Ritmo idioventricolare accelerato',
+            }),
+        ]);
+        expect(payload.warnings[0].hint).toContain(RHYTHM_IDS.join(', '));
+        const { id } = payload;
+        const stored = await (await admin(`/api/cases/${id}`)).json();
+        expect(stored.config.initialVitals.rhythm).toBe('Ritmo idioventricolare accelerato');
     });
 
-    it('rejects an unknown rhythm inside the embedded scenario timeline', async () => {
-        const res = await createCase('lock-unknown-frame', 'NSR', 'ASYSTOLE_TYPO');
-        expect(res.status).toBe(400);
-        expect((await res.json()).code).toBe('invalid_rhythm');
+    it('keeps an unknown rhythm inside the embedded scenario timeline, naming its frame', async () => {
+        const res = await createCase('lock-unknown-frame', 'NSR', 'JunctionalEscape');
+        expect(res.status).toBe(200);
+        const payload = await res.json();
+        expect(payload.warnings).toEqual([
+            expect.objectContaining({ field: 'timeline[0].rhythm', received: 'JunctionalEscape' }),
+        ]);
+        const stored = await (await admin(`/api/cases/${payload.id}`)).json();
+        expect(stored.scenario.timeline[0].rhythm).toBe('JunctionalEscape');
+    });
+
+    it('answers without a warnings key when every rhythm resolves', async () => {
+        const payload = await (await createCase('lock-clean-rhythms', 'NSR', 'AFib')).json();
+        expect(payload.warnings).toBeUndefined();
     });
 
     it('treats an absent rhythm as absent, not as an error', async () => {
@@ -181,15 +212,17 @@ describe('rhythms are canonicalised on write', () => {
         expect(res.status).toBe(200);
     });
 
-    it('guards PUT /cases as well as POST', async () => {
+    it('canonicalises PUT /cases as well as POST, warning without rejecting', async () => {
         const created = await (await createCase('lock-put', 'NSR')).json();
 
-        const bad = await admin(`/api/cases/${created.id}`, {
+        const unknown = await admin(`/api/cases/${created.id}`, {
             method: 'PUT',
             body: caseBody('lock-put', 'not a rhythm'),
         });
-        expect(bad.status).toBe(400);
-        expect((await bad.json()).code).toBe('invalid_rhythm');
+        expect(unknown.status).toBe(200);
+        expect((await unknown.json()).warnings).toEqual([
+            expect.objectContaining({ field: 'config.initialVitals.rhythm', received: 'not a rhythm' }),
+        ]);
 
         const good = await admin(`/api/cases/${created.id}`, {
             method: 'PUT',
@@ -223,26 +256,44 @@ describe('rhythms are canonicalised on write', () => {
             .toEqual(['Sinus Tachycardia', 'Atrial Flutter', 'VFib']);
     });
 
-    it('POST and PUT /scenarios reject an unknown rhythm with 400 invalid_rhythm', async () => {
-        const bad = await admin('/api/scenarios', {
+    it('POST /scenarios repairs qualified prose the alias list cannot enumerate', async () => {
+        const res = await admin('/api/scenarios', {
             method: 'POST',
-            body: scenarioBody('lock-scenario-bad', ['NSR', 'JunctionalEscape']),
+            body: scenarioBody('lock-scenario-prose', ['Bradicardia Sinusale Marcata', 'AF with RVR']),
         });
-        expect(bad.status).toBe(400);
-        const payload = await bad.json();
-        expect(payload.code).toBe('invalid_rhythm');
-        expect(payload.error).toContain('JunctionalEscape');
+        expect(res.status).toBe(200);
+        const { id, warnings } = await res.json();
+        expect(warnings).toBeUndefined();
+        const stored = await (await admin(`/api/scenarios/${id}`)).json();
+        expect(stored.timeline.map((frame) => frame.rhythm)).toEqual(['Sinus Bradycardia', 'AFib']);
+    });
+
+    // Regression lock (v2.9.41, non-breaking release): 400 invalid_rhythm is gone.
+    it('POST and PUT /scenarios keep an unknown rhythm verbatim and warn', async () => {
+        const res = await admin('/api/scenarios', {
+            method: 'POST',
+            body: scenarioBody('lock-scenario-unknown', ['NSR', 'JunctionalEscape']),
+        });
+        expect(res.status).toBe(200);
+        const payload = await res.json();
+        expect(payload.warnings).toEqual([
+            expect.objectContaining({ field: 'timeline[1].rhythm', received: 'JunctionalEscape' }),
+        ]);
+        const storedPost = await (await admin(`/api/scenarios/${payload.id}`)).json();
+        expect(storedPost.timeline.map((frame) => frame.rhythm)).toEqual(['NSR', 'JunctionalEscape']);
 
         const created = await (await admin('/api/scenarios', {
             method: 'POST',
             body: scenarioBody('lock-scenario-put', ['NSR']),
         })).json();
-        const badPut = await admin(`/api/scenarios/${created.id}`, {
+        const unknownPut = await admin(`/api/scenarios/${created.id}`, {
             method: 'PUT',
             body: scenarioBody('lock-scenario-put', ['PVC']),
         });
-        expect(badPut.status).toBe(400);
-        expect((await badPut.json()).code).toBe('invalid_rhythm');
+        expect(unknownPut.status).toBe(200);
+        expect((await unknownPut.json()).warnings).toEqual([
+            expect.objectContaining({ field: 'timeline[0].rhythm', received: 'PVC' }),
+        ]);
 
         const goodPut = await admin(`/api/scenarios/${created.id}`, {
             method: 'PUT',

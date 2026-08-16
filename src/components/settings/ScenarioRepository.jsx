@@ -5,20 +5,39 @@ import { useToast } from '../../contexts/ToastContext';
 import { ApiError, apiDelete, apiFetch, apiPost, apiPut } from '../../services/apiClient';
 import { SCENARIO_TEMPLATES } from '../../data/scenarioTemplates';
 import { RHYTHMS, RHYTHM_IDS, DEFAULT_RHYTHM, resolveRhythm } from '../../services/rhythms';
+import {
+    SCENARIO_CATEGORIES,
+    SCENARIO_CATEGORY_IDS,
+    SCENARIO_CATEGORY_LABEL_KEYS,
+    DEFAULT_SCENARIO_CATEGORY,
+    resolveScenarioCategory,
+} from '../../services/scenarioCategories';
+import { LANGUAGES, DEFAULT_LANGUAGE, isKnownLanguage } from '../../i18n/languages';
 
-const CATEGORIES = [
-    { id: 'all', label: 'All Scenarios' },
-    { id: 'Cardiac', label: 'Cardiac' },
-    { id: 'Respiratory', label: 'Respiratory' },
-    { id: 'Sepsis', label: 'Sepsis' },
-    { id: 'Metabolic', label: 'Metabolic' },
-    { id: 'Neurological', label: 'Neurological' },
-    { id: 'Trauma', label: 'Trauma' },
-    { id: 'Toxicology', label: 'Toxicology' },
-    { id: 'General', label: 'General' },
-    { id: 'Recovery', label: 'Recovery' },
-    { id: 'Pediatric', label: 'Pediatric' }
-];
+// Category vocabulary is shared (server/shared/scenarioCategories.js): the
+// <select> stores the canonical id and shows the translated label through
+// the literal SCENARIO_CATEGORY_LABEL_KEYS map — never a computed
+// t(`category_${id}`) key, which the i18n parser cannot see. A stored value
+// outside the vocabulary (free text from before the enum) is shown raw and
+// kept selectable by <LegacyValueOption>, so the author sees it and the next
+// save converges it onto a canonical id.
+
+/**
+ * Keeps a stored value selectable when it is not one of the canonical options
+ * (same pattern as ConfigPanel's LegacyValueOption). Without it the select
+ * would match no option and render BLANK, hiding the stale value.
+ */
+function LegacyValueOption({ value, canonical }) {
+    if (!value || canonical.includes(value)) return null;
+    return <option value={value}>{value}</option>;
+}
+
+/** Registry language options in registry order, as `<option>`s. */
+function LanguageOptions() {
+    return Object.entries(LANGUAGES).map(([code, lang]) => (
+        <option key={code} value={code}>{lang.flag} {lang.native} ({code})</option>
+    ));
+}
 
 // Rhythm vocabulary is shared (server/shared/rhythms.js): the <select> stores
 // the canonical id and shows the monitor's translated label — cross-namespace
@@ -57,15 +76,19 @@ const getTemplateCategory = (key) => {
 };
 
 export default function ScenarioRepository({ onSelectScenario }) {
-    const { t } = useTranslation('authoring_scenarios');
+    const { t, i18n } = useTranslation('authoring_scenarios');
     const toast = useToast();
-    const categoryLabel = (id) => t(`category_${String(id).toLowerCase()}`, id);
+    // Translated label for a canonical id; a legacy free-text value is shown as stored.
+    const categoryLabel = (id) => (SCENARIO_CATEGORY_LABEL_KEYS[id] ? t(SCENARIO_CATEGORY_LABEL_KEYS[id]) : String(id));
+    // A new scenario is written in the language the author is working in.
+    const authoringLanguage = () => (isKnownLanguage(i18n.language) ? i18n.language : DEFAULT_LANGUAGE);
     const [dbScenarios, setDbScenarios] = useState([]);
     const [loading, setLoading] = useState(true);
     const [editingScenario, setEditingScenario] = useState(null);
     const [expandedStep, setExpandedStep] = useState(null);
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedCategory, setSelectedCategory] = useState('all');
+    const [selectedLanguage, setSelectedLanguage] = useState('all');
     const [showBuiltIn, setShowBuiltIn] = useState(true);
     const [showCustom, setShowCustom] = useState(true);
     const fileInputRef = useRef(null);
@@ -100,6 +123,7 @@ export default function ScenarioRepository({ onSelectScenario }) {
             name: template.name,
             description: template.description,
             category: getTemplateCategory(key),
+            language: DEFAULT_LANGUAGE,
             duration_minutes: template.duration,
             timeline: template.timeline,
             is_builtin: true,
@@ -123,6 +147,11 @@ export default function ScenarioRepository({ onSelectScenario }) {
             scenarios = scenarios.filter(s => s.category === selectedCategory);
         }
 
+        // Filter by language (rows from before 0045 read 'en' via the column default)
+        if (selectedLanguage !== 'all') {
+            scenarios = scenarios.filter(s => (s.language || DEFAULT_LANGUAGE) === selectedLanguage);
+        }
+
         // Filter by search
         if (searchQuery.trim()) {
             const query = searchQuery.toLowerCase();
@@ -140,12 +169,14 @@ export default function ScenarioRepository({ onSelectScenario }) {
             }
             return a.name.localeCompare(b.name);
         });
-    }, [builtInScenarios, dbScenarios, showBuiltIn, showCustom, selectedCategory, searchQuery]);
+    }, [builtInScenarios, dbScenarios, showBuiltIn, showCustom, selectedCategory, selectedLanguage, searchQuery]);
 
-    // Category counts
-    const categoryCounts = useMemo(() => {
-        const counts = { all: 0 };
-        CATEGORIES.forEach(cat => counts[cat.id] = 0);
+    // Category and language counts for the filter dropdowns
+    const { categoryCounts, languageCounts } = useMemo(() => {
+        const byCategory = { all: 0 };
+        SCENARIO_CATEGORY_IDS.forEach(id => byCategory[id] = 0);
+        const byLanguage = { all: 0 };
+        Object.keys(LANGUAGES).forEach(code => byLanguage[code] = 0);
 
         const scenariosToCount = [
             ...(showBuiltIn ? builtInScenarios : []),
@@ -153,13 +184,18 @@ export default function ScenarioRepository({ onSelectScenario }) {
         ];
 
         scenariosToCount.forEach(s => {
-            counts.all++;
-            if (s.category && counts[s.category] !== undefined) {
-                counts[s.category]++;
+            byCategory.all++;
+            byLanguage.all++;
+            if (s.category && byCategory[s.category] !== undefined) {
+                byCategory[s.category]++;
+            }
+            const language = s.language || DEFAULT_LANGUAGE;
+            if (byLanguage[language] !== undefined) {
+                byLanguage[language]++;
             }
         });
 
-        return counts;
+        return { categoryCounts: byCategory, languageCounts: byLanguage };
     }, [builtInScenarios, dbScenarios, showBuiltIn, showCustom]);
 
     const deleteScenario = async (id) => {
@@ -192,6 +228,7 @@ export default function ScenarioRepository({ onSelectScenario }) {
                 name: editingScenario.name,
                 description: editingScenario.description,
                 category: editingScenario.category,
+                language: editingScenario.language || DEFAULT_LANGUAGE,
                 duration_minutes: editingScenario.duration_minutes,
                 timeline: editingScenario.timeline,
                 is_public: editingScenario.is_public
@@ -229,6 +266,7 @@ export default function ScenarioRepository({ onSelectScenario }) {
             setEditingScenario({
                 ...scenario,
                 description: scenario.description || '',
+                language: scenario.language || DEFAULT_LANGUAGE,
                 is_public: !!scenario.is_public,
                 timeline: (Array.isArray(scenario.timeline) ? scenario.timeline : []).map(step => ({
                     ...step,
@@ -245,6 +283,7 @@ export default function ScenarioRepository({ onSelectScenario }) {
             id: null,
             name: `${scenario.name}${t('copy_suffix')}`,
             description: scenario.description || '',
+            language: scenario.language || DEFAULT_LANGUAGE,
             is_public: !!scenario.is_public,
             timeline: (Array.isArray(scenario.timeline) ? scenario.timeline : []).map(step => ({
                 ...step,
@@ -260,6 +299,7 @@ export default function ScenarioRepository({ onSelectScenario }) {
             name: scenario.name,
             description: scenario.description,
             category: scenario.category,
+            language: scenario.language || DEFAULT_LANGUAGE,
             duration_minutes: scenario.duration_minutes,
             timeline: scenario.timeline,
             exported_at: new Date().toISOString()
@@ -284,21 +324,40 @@ export default function ScenarioRepository({ onSelectScenario }) {
                 const imported = JSON.parse(e.target.result);
                 // Canonicalise every frame's rhythm on the way in: an export from
                 // a localized UI or a hand-written file may carry a label
-                // ('Fibrillazione atriale') or a legacy long name; the monitor
-                // engine only branches on ids. Unknown → reject with the value
-                // named, same contract as the server (400 invalid_rhythm).
+                // ('Fibrillazione atriale'), a legacy long name, or qualified prose
+                // ('Bradicardia Sinusale Marcata'); the monitor engine only branches
+                // on ids. Unknown → keep as written and WARN naming the value — same
+                // contract as the server (200 + `warnings`), never a rejection: the
+                // monitor renders sinus for anything it does not know.
                 const timeline = Array.isArray(imported.timeline) ? imported.timeline : [];
                 const unknownRhythm = timeline
                     .map((frame) => resolveRhythm(frame?.rhythm))
                     .find((resolved) => !resolved.ok);
                 if (unknownRhythm) {
-                    toast.error(t('toast_unknown_rhythm', { value: unknownRhythm.received, valid: RHYTHM_IDS.join(', ') }));
-                    return;
+                    toast.warning(t('toast_unknown_rhythm', { value: unknownRhythm.received, valid: RHYTHM_IDS.join(', ') }));
+                }
+                // Category: any locale's label, alias or containing prose resolves;
+                // anything else is kept verbatim (LegacyValueOption keeps it
+                // selectable) and warned about. Absent → the default category.
+                const category = resolveScenarioCategory(imported.category);
+                if (!category.ok) {
+                    toast.warning(t('toast_unknown_category', { value: category.received, valid: SCENARIO_CATEGORY_IDS.join(', ') }));
+                }
+                // Language: absent → default (files exported before 0045 carry
+                // none); an unknown code falls back to the default and is named,
+                // because the server would refuse it (400 invalid_language).
+                const rawLanguage = imported.language === undefined || imported.language === null
+                    ? ''
+                    : String(imported.language).trim();
+                const language = isKnownLanguage(rawLanguage) ? rawLanguage : DEFAULT_LANGUAGE;
+                if (rawLanguage && !isKnownLanguage(rawLanguage)) {
+                    toast.warning(t('toast_unknown_language', { value: rawLanguage, valid: Object.keys(LANGUAGES).join(', ') }));
                 }
                 setEditingScenario({
                     name: imported.name || t('imported_scenario_name'),
                     description: imported.description || '',
-                    category: imported.category || 'General',
+                    category: category.ok ? (category.value || DEFAULT_SCENARIO_CATEGORY) : category.received,
+                    language,
                     duration_minutes: imported.duration_minutes || 30,
                     timeline: timeline.map((frame) => {
                         const resolved = resolveRhythm(frame?.rhythm).value;
@@ -435,7 +494,8 @@ export default function ScenarioRepository({ onSelectScenario }) {
                             name: '',
                             description: '',
                             duration_minutes: 30,
-                            category: 'General',
+                            category: DEFAULT_SCENARIO_CATEGORY,
+                            language: authoringLanguage(),
                             timeline: [{ ...DEFAULT_STEP, label: t('initial_state') }],
                             is_public: true,
                             is_builtin: false
@@ -466,11 +526,28 @@ export default function ScenarioRepository({ onSelectScenario }) {
                 <select
                     value={selectedCategory}
                     onChange={(e) => setSelectedCategory(e.target.value)}
+                    aria-label={t('category_filter_label')}
                     className="px-3 py-2 bg-neutral-900 border border-neutral-700 rounded text-sm"
                 >
-                    {CATEGORIES.map(cat => (
+                    <option value="all">{t('category_all')} ({categoryCounts.all || 0})</option>
+                    {SCENARIO_CATEGORIES.map(cat => (
                         <option key={cat.id} value={cat.id}>
-                            {categoryLabel(cat.id)} ({categoryCounts[cat.id] || 0})
+                            {t(cat.labelKey)} ({categoryCounts[cat.id] || 0})
+                        </option>
+                    ))}
+                </select>
+
+                {/* Language Filter */}
+                <select
+                    value={selectedLanguage}
+                    onChange={(e) => setSelectedLanguage(e.target.value)}
+                    aria-label={t('language_filter_label')}
+                    className="px-3 py-2 bg-neutral-900 border border-neutral-700 rounded text-sm"
+                >
+                    <option value="all">{t('language_all')} ({languageCounts.all || 0})</option>
+                    {Object.entries(LANGUAGES).map(([code, lang]) => (
+                        <option key={code} value={code}>
+                            {lang.flag} {lang.native} ({languageCounts[code] || 0})
                         </option>
                     ))}
                 </select>
@@ -541,6 +618,18 @@ export default function ScenarioRepository({ onSelectScenario }) {
                                         {scenario.category && (
                                             <span className="px-2 py-0.5 bg-blue-900/50 text-blue-200 text-xs rounded">
                                                 {categoryLabel(scenario.category)}
+                                            </span>
+                                        )}
+
+                                        {/* Language flag (registry code → flag + native name) */}
+                                        {LANGUAGES[scenario.language || DEFAULT_LANGUAGE] && (
+                                            <span
+                                                className="px-1.5 py-0.5 bg-neutral-700/60 text-neutral-200 text-xs rounded flex items-center gap-1"
+                                                title={LANGUAGES[scenario.language || DEFAULT_LANGUAGE].name}
+                                                data-testid="scenario-language-badge"
+                                            >
+                                                <span aria-hidden="true">{LANGUAGES[scenario.language || DEFAULT_LANGUAGE].flag}</span>
+                                                <span>{LANGUAGES[scenario.language || DEFAULT_LANGUAGE].native}</span>
                                             </span>
                                         )}
 
@@ -653,16 +742,32 @@ export default function ScenarioRepository({ onSelectScenario }) {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-bold text-neutral-400 mb-1">{t('category_label')}</label>
-                                    <select
-                                        value={editingScenario.category}
-                                        onChange={(e) => setEditingScenario(prev => ({ ...prev, category: e.target.value }))}
-                                        className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded text-white"
-                                    >
-                                        {CATEGORIES.filter(c => c.id !== 'all').map(cat => (
-                                            <option key={cat.id} value={cat.id}>{categoryLabel(cat.id)}</option>
-                                        ))}
-                                    </select>
+                                    <label className="block text-xs font-bold text-neutral-400 mb-1">
+                                        <span>{t('category_label')}</span>
+                                        <select
+                                            value={editingScenario.category || ''}
+                                            onChange={(e) => setEditingScenario(prev => ({ ...prev, category: e.target.value }))}
+                                            className="mt-1 w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded text-white font-normal"
+                                        >
+                                            <LegacyValueOption value={editingScenario.category} canonical={SCENARIO_CATEGORY_IDS} />
+                                            {SCENARIO_CATEGORIES.map(cat => (
+                                                <option key={cat.id} value={cat.id}>{t(cat.labelKey)}</option>
+                                            ))}
+                                        </select>
+                                    </label>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-neutral-400 mb-1">
+                                        <span>{t('language_label')}</span>
+                                        <select
+                                            value={editingScenario.language || DEFAULT_LANGUAGE}
+                                            onChange={(e) => setEditingScenario(prev => ({ ...prev, language: e.target.value }))}
+                                            className="mt-1 w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded text-white font-normal"
+                                        >
+                                            <LanguageOptions />
+                                        </select>
+                                    </label>
+                                    <p className="text-[11px] text-neutral-500 mt-1">{t('language_help')}</p>
                                 </div>
                             </div>
 
@@ -800,7 +905,8 @@ export default function ScenarioRepository({ onSelectScenario }) {
                                                             </div>
                                                             <div>
                                                                 <label className="block text-xs text-neutral-500">{t('rhythm_label')}</label>
-                                                                <select value={resolveRhythm(step.rhythm).value || DEFAULT_RHYTHM} onChange={(e) => updateTimelineStep(index, 'rhythm', e.target.value)} className="w-full px-2 py-1 bg-neutral-900 border border-neutral-600 rounded text-sm">
+                                                                <select value={resolveRhythm(step.rhythm).value || step.rhythm || DEFAULT_RHYTHM} onChange={(e) => updateTimelineStep(index, 'rhythm', e.target.value)} className="w-full px-2 py-1 bg-neutral-900 border border-neutral-600 rounded text-sm">
+                                                                    <LegacyValueOption value={resolveRhythm(step.rhythm).ok ? null : step.rhythm} canonical={RHYTHM_IDS} />
                                                                     {RHYTHMS.map(({ id, labelKey }) => <option key={id} value={id}>{t(labelKey, { ns: 'monitor' })}</option>)}
                                                                 </select>
                                                             </div>

@@ -35,6 +35,8 @@
  * cases keep working and a translated import self-heals.
  */
 
+import { buildLookup, foldSpelling, matchVocabulary } from './vocabularyMatch.js';
+
 /**
  * Canonical rhythm ids in authoring order (the first entry is the default).
  * `labelKey` is a key in the `monitor` i18n namespace — the monitor owns the
@@ -134,23 +136,11 @@ export const RHYTHM_ALIASES = {
  * 'Tachicardia sopraventricolare (TSV)' → 'tachicardia sopraventricolare'.
  */
 function foldRhythm(value) {
-    return String(value)
-        .toLowerCase()
-        .replace(/\s*\([^)]*\)\s*$/, '')
-        .replace(/[^\p{L}\p{N}]+/gu, ' ')
-        .trim();
+    return foldSpelling(String(value).replace(/\s*\([^)]*\)\s*$/, ''));
 }
 
-// Built once: folded id or alias → canonical id. Ids are entered first so a
-// (hypothetical) alias colliding with an id can never shadow it.
-const LOOKUP = new Map();
-RHYTHM_IDS.forEach((id) => LOOKUP.set(foldRhythm(id), id));
-Object.entries(RHYTHM_ALIASES).forEach(([id, aliases]) => {
-    aliases.forEach((alias) => {
-        const folded = foldRhythm(alias);
-        if (!LOOKUP.has(folded)) LOOKUP.set(folded, id);
-    });
-});
+// Built once: folded id or alias → canonical id.
+const LOOKUP = buildLookup(RHYTHM_IDS, RHYTHM_ALIASES, foldRhythm);
 
 /**
  * Resolve a submitted rhythm to its canonical id.
@@ -159,15 +149,21 @@ Object.entries(RHYTHM_ALIASES).forEach(([id, aliases]) => {
  *
  *   absent / blank      → { ok: true,  value: null }    nothing to store
  *   recognised          → { ok: true,  value: 'AFib' }  canonical id
- *   present but unknown → { ok: false, received }       caller should reject
+ *   present but unknown → { ok: false, received }       caller keeps it verbatim
  *
  * "Recognised" covers the ids themselves, case/whitespace/punctuation
- * variants, and every alias above.
+ * variants, every alias above, and — for qualified prose such as
+ * 'Bradicardia Sinusale Marcata' or 'Sinus tachycardia with PVCs' — a value
+ * that CONTAINS exactly one id/alias as a whole word run (longest wins; two
+ * different ids at the same length is ambiguous and stays unknown). Unknown
+ * is advisory since v2.9.41: the routes store the string as written and
+ * report it in a `warnings` array instead of answering 400, because legacy
+ * rows carry free text and the monitor already renders sinus for unknowns.
  */
 export function resolveRhythm(value) {
     if (value === null || value === undefined) return { ok: true, value: null };
     const trimmed = String(value).trim();
     if (trimmed === '') return { ok: true, value: null };
-    const match = LOOKUP.get(foldRhythm(trimmed));
+    const match = matchVocabulary(foldRhythm(trimmed), LOOKUP);
     return match ? { ok: true, value: match } : { ok: false, received: trimmed };
 }

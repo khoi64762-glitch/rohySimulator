@@ -9,20 +9,20 @@ model.
 
 | Method | Path | Auth | Source |
 |--------|------|------|--------|
-| `GET` | `/api/cases` | `authenticateToken` | `server/routes/cases-routes.js:137` |
-| `POST` | `/api/cases` | `authenticateToken, requireEducator` | `server/routes/cases-routes.js:322` |
-| `POST` | `/api/cases/:caseId/restore/:versionId` | `authenticateToken, requireAdmin` | `server/routes/cases-routes.js:1055` |
-| `GET` | `/api/cases/:caseId/versions` | `authenticateToken, requireAdmin` | `server/routes/cases-routes.js:1037` |
-| `DELETE` | `/api/cases/:id` | `authenticateToken, requireEducator` | `server/routes/cases-routes.js:535` |
-| `GET` | `/api/cases/:id` | `authenticateToken` | `server/routes/cases-routes.js:213` |
-| `PUT` | `/api/cases/:id` | `authenticateToken, requireEducator` | `server/routes/cases-routes.js:427` |
-| `PUT` | `/api/cases/:id/availability` | `authenticateToken, requireEducator` | `server/routes/cases-routes.js:245` |
-| `PUT` | `/api/cases/:id/default` | `authenticateToken, requireEducator` | `server/routes/cases-routes.js:271` |
-| `GET` | `/api/scenarios` | `authenticateToken` | `server/routes/cases-routes.js:576` |
-| `POST` | `/api/scenarios` | `authenticateToken` | `server/routes/cases-routes.js:701` |
-| `DELETE` | `/api/scenarios/:id` | `authenticateToken` | `server/routes/cases-routes.js:796` |
-| `GET` | `/api/scenarios/:id` | `authenticateToken` | `server/routes/cases-routes.js:603` |
-| `PUT` | `/api/scenarios/:id` | `authenticateToken` | `server/routes/cases-routes.js:743` |
-| `POST` | `/api/scenarios/seed` | `authenticateToken, requireAdmin` | `server/routes/cases-routes.js:828` |
-| `GET` | `/api/sessions/:sessionId/exam-findings` | `authenticateToken` | `server/routes/cases-routes.js:1019` |
-| `POST` | `/api/sessions/:sessionId/exam-findings` | `authenticateToken` | `server/routes/cases-routes.js:956` |
+| `GET` | `/api/cases` | `authenticateToken` | `server/routes/cases-routes.js:139` |
+| `POST` | `/api/cases` | `authenticateToken, requireEducator` | `server/routes/cases-routes.js:324` |
+| `POST` | `/api/cases/:caseId/restore/:versionId` | `authenticateToken, requireAdmin` | `server/routes/cases-routes.js:1147` |
+| `GET` | `/api/cases/:caseId/versions` | `authenticateToken, requireAdmin` | `server/routes/cases-routes.js:1129` |
+| `DELETE` | `/api/cases/:id` | `authenticateToken, requireEducator` | `server/routes/cases-routes.js:541` |
+| `GET` | `/api/cases/:id` | `authenticateToken` | `server/routes/cases-routes.js:215` |
+| `PUT` | `/api/cases/:id` | `authenticateToken, requireEducator` | `server/routes/cases-routes.js:431` |
+| `PUT` | `/api/cases/:id/availability` | `authenticateToken, requireEducator` | `server/routes/cases-routes.js:247` |
+| `PUT` | `/api/cases/:id/default` | `authenticateToken, requireEducator` | `server/routes/cases-routes.js:273` |
+| `GET` | `/api/scenarios` | `authenticateToken` | `server/routes/cases-routes.js:582` |
+| `POST` | `/api/scenarios` | `authenticateToken` | `server/routes/cases-routes.js:777` |
+| `DELETE` | `/api/scenarios/:id` | `authenticateToken` | `server/routes/cases-routes.js:885` |
+| `GET` | `/api/scenarios/:id` | `authenticateToken` | `server/routes/cases-routes.js:618` |
+| `PUT` | `/api/scenarios/:id` | `authenticateToken` | `server/routes/cases-routes.js:825` |
+| `POST` | `/api/scenarios/seed` | `authenticateToken, requireAdmin` | `server/routes/cases-routes.js:917` |
+| `GET` | `/api/sessions/:sessionId/exam-findings` | `authenticateToken` | `server/routes/cases-routes.js:1111` |
+| `POST` | `/api/sessions/:sessionId/exam-findings` | `authenticateToken` | `server/routes/cases-routes.js:1048` |

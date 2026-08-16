@@ -18,6 +18,8 @@ import { logger } from '../logger.js';
 import { caseCodeFor, normalizeCaseLanguage } from '../shared/caseCode.js';
 import { PATIENT_GENDERS, resolvePatientGender } from '../shared/patientDemographics.js';
 import { RHYTHM_IDS, resolveRhythm } from '../shared/rhythms.js';
+import { DEFAULT_LANGUAGE, LANGUAGES, isKnownLanguage } from '../shared/languages.js';
+import { SCENARIO_CATEGORY_IDS, resolveScenarioCategory } from '../shared/scenarioCategories.js';
 import {
     auditSuccess,
     canManageOwnedResource,
@@ -345,7 +347,9 @@ router.post('/cases', authenticateToken, requireEducator, (req, res) => {
     const scenarioWithSource = mergeScenarioSource(scenario, { scenario_template, scenario_from_repository, scenario_duration });
     const safeConfig = clampInitialVitals(config || {});
     writeBackPatientGender(safeConfig, patientGender);
-    if (!canonicaliseCaseRhythmsOr400(res, safeConfig, scenarioWithSource)) return;
+    const warnings = [];
+    canonicaliseCaseRhythms(safeConfig, scenarioWithSource, warnings);
+    logVocabularyWarnings(req, 'case', warnings);
     // Case language is pinned at creation and immutable afterwards: normalize
     // the author's pick to a concrete registry code (absent/junk → default).
     // The visible case_code prefix derives from it and therefore never changes.
@@ -416,9 +420,9 @@ router.post('/cases', authenticateToken, requireEducator, (req, res) => {
         stampCaseCode(caseCode, caseId, tenantId(req), (codeErr) => {
             if (codeErr) {
                 (req.log || routesCasesLog).warn('case code stamp failed', { caseId, error: codeErr.message });
-                return res.json({ id: caseId, ...req.body, config: safeConfig });
+                return res.json({ id: caseId, ...req.body, config: safeConfig, ...withWarnings(warnings) });
             }
-            res.json({ id: caseId, ...req.body, config: safeConfig, case_code: caseCode });
+            res.json({ id: caseId, ...req.body, config: safeConfig, case_code: caseCode, ...withWarnings(warnings) });
         });
     });
 });
@@ -445,7 +449,9 @@ router.put('/cases/:id', authenticateToken, requireEducator, (req, res) => {
     const scenarioWithSource = mergeScenarioSource(scenario, { scenario_template, scenario_from_repository, scenario_duration });
     const safeConfig = clampInitialVitals(config || {});
     writeBackPatientGender(safeConfig, patientGender);
-    if (!canonicaliseCaseRhythmsOr400(res, safeConfig, scenarioWithSource)) return;
+    const warnings = [];
+    canonicaliseCaseRhythms(safeConfig, scenarioWithSource, warnings);
+    logVocabularyWarnings(req, 'case', warnings);
 
     // First, get the old case data for audit trail
     dbAdapter.get(`SELECT * FROM cases WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`, [caseId, tenantId(req)], (err, oldCase) => {
@@ -526,7 +532,7 @@ router.put('/cases/:id', authenticateToken, requireEducator, (req, res) => {
             });
 
             // Echo the config actually stored (immutable case_language pinned).
-            res.json({ id: caseId, ...req.body, config: safeConfig });
+            res.json({ id: caseId, ...req.body, config: safeConfig, ...withWarnings(warnings) });
         });
     });
 });
@@ -575,16 +581,25 @@ router.delete('/cases/:id', authenticateToken, requireEducator, (req, res) => {
 
 router.get('/scenarios', authenticateToken, (req, res) => {
     const userId = req.user?.id;
-    
+
+    // Optional `?language=xx` filter (registry code, see 0045). Unknown codes
+    // are a client bug, not "no results" — answer 400 so it is visible.
+    const language = req.query.language;
+    if (language !== undefined && language !== '' && !isKnownLanguage(language)) {
+        return rejectLanguage(res, language);
+    }
+    const languageClause = isKnownLanguage(language) ? ' AND s.language = ?' : '';
+    const params = [tenantId(req), userId, ...(isKnownLanguage(language) ? [language] : [])];
+
     const query = `
         SELECT s.*, u.username as created_by_username 
         FROM scenarios s
         LEFT JOIN users u ON s.created_by = u.id
-        WHERE s.tenant_id = ? AND s.deleted_at IS NULL AND (s.is_public = 1 OR s.created_by = ?)
+        WHERE s.tenant_id = ? AND s.deleted_at IS NULL AND (s.is_public = 1 OR s.created_by = ?)${languageClause}
         ORDER BY s.created_at DESC
     `;
     
-    dbAdapter.all(query, [tenantId(req), userId], (err, rows) => {
+    dbAdapter.all(query, params, (err, rows) => {
         if (err) {
             return res.status(500).json({ error: err.message });
         }
@@ -624,41 +639,102 @@ router.get('/scenarios/:id', authenticateToken, (req, res) => {
 // disagreed (case editor long names, repository short ids, imported JSON in
 // any language), while the monitor engine only branches on the canonical
 // ids. Canonicalise on WRITE — `config.initialVitals.rhythm` and every
-// `timeline[].rhythm` — so the stored value is always an id; an unrecognised
-// value is a client bug (stale bundle, hand-edited import) and gets an honest
-// 400 naming the value and the accepted ids, mirroring the gender guard.
-// Frames are repaired in place (same in-place style as the config
-// normalisation above); absent/blank rhythms are left alone.
+// `timeline[].rhythm` — so a recognised value (id, alias, or prose that
+// contains exactly one, e.g. 'Bradicardia Sinusale Marcata') is stored as
+// its id. An unrecognised value is NOT rejected: legacy cases and the Italian
+// pilot's scenarios carry free text that must keep saving, and the monitor
+// already renders sinus for anything it does not know. It is stored as
+// written, logged, and reported back in a non-fatal `warnings` array so the
+// client can tell the author. Frames are repaired in place (same in-place
+// style as the config normalisation above); absent/blank rhythms are left
+// alone.
 
-function rejectRhythm(res, received) {
-    res.status(400).json({
-        error: `Unrecognised ECG rhythm "${received}". Expected one of: ${RHYTHM_IDS.join(', ')}.`,
-        code: 'invalid_rhythm',
-    });
-    return false;
+/** One entry of the response-level `warnings` array. */
+function vocabularyWarning(field, received, accepted) {
+    return {
+        field,
+        received,
+        hint: `Unrecognised value kept as written. Expected one of: ${accepted.join(', ')}.`,
+    };
 }
 
-/** Canonicalise every frame's rhythm in place. False once it has answered 400. */
-function canonicaliseTimelineRhythmsOr400(res, timeline) {
-    if (!Array.isArray(timeline)) return true;
-    for (const frame of timeline) {
-        if (!frame || typeof frame !== 'object') continue;
+/** Canonicalise every frame's rhythm in place; unknowns append a warning. */
+function canonicaliseTimelineRhythms(timeline, warnings) {
+    if (!Array.isArray(timeline)) return;
+    timeline.forEach((frame, index) => {
+        if (!frame || typeof frame !== 'object') return;
         const resolved = resolveRhythm(frame.rhythm);
-        if (!resolved.ok) return rejectRhythm(res, resolved.received);
-        if (resolved.value) frame.rhythm = resolved.value;
-    }
-    return true;
+        if (!resolved.ok) {
+            warnings.push(vocabularyWarning(`timeline[${index}].rhythm`, resolved.received, RHYTHM_IDS));
+        } else if (resolved.value) {
+            frame.rhythm = resolved.value;
+        }
+    });
 }
 
 /** Case variant: initial-vitals rhythm + the embedded scenario timeline. */
-function canonicaliseCaseRhythmsOr400(res, config, scenario) {
+function canonicaliseCaseRhythms(config, scenario, warnings) {
     const initialVitals = config?.initialVitals;
     if (initialVitals && typeof initialVitals === 'object') {
         const resolved = resolveRhythm(initialVitals.rhythm);
-        if (!resolved.ok) return rejectRhythm(res, resolved.received);
-        if (resolved.value) initialVitals.rhythm = resolved.value;
+        if (!resolved.ok) {
+            warnings.push(vocabularyWarning('config.initialVitals.rhythm', resolved.received, RHYTHM_IDS));
+        } else if (resolved.value) {
+            initialVitals.rhythm = resolved.value;
+        }
     }
-    return canonicaliseTimelineRhythmsOr400(res, scenario?.timeline);
+    canonicaliseTimelineRhythms(scenario?.timeline, warnings);
+}
+
+/** Log every collected warning once, on the request logger. */
+function logVocabularyWarnings(req, resource, warnings) {
+    warnings.forEach((warning) => (req.log || routesCasesLog).warn('unrecognised vocabulary value kept verbatim', {
+        resource, field: warning.field, received: warning.received,
+    }));
+}
+
+/** `{ warnings }` when there are any, `{}` otherwise — spread into responses. */
+function withWarnings(warnings) {
+    return warnings.length ? { warnings } : {};
+}
+
+// ---- Scenario language + category (server/shared/languages.js,
+// server/shared/scenarioCategories.js) ----
+//
+// `scenarios.language` (0045) is a registry code — a NEW field with a default,
+// so nothing existing sends it and an unknown code is an honest 400
+// `invalid_language`. `scenarios.category` is a keyed enum that was free text
+// until now: a recognised value (id, any locale's label, alias, or prose that
+// contains exactly one — 'Emergenza Neurologica / Terapia Intensiva' →
+// 'Neurological') is stored as its id; anything else is stored VERBATIM,
+// logged, and reported in the same non-fatal `warnings` array as rhythms, so
+// legacy rows keep saving and the editor keeps them selectable.
+
+function rejectLanguage(res, received) {
+    res.status(400).json({
+        error: `Unrecognised language "${received}". Expected one of: ${Object.keys(LANGUAGES).join(', ')}.`,
+        code: 'invalid_language',
+    });
+    return null;
+}
+
+/**
+ * Registry code for a submitted scenario language. Absent/blank → the
+ * fallback (the platform default on create, the stored value on update).
+ * Null once it has answered 400.
+ */
+function resolveScenarioLanguageOr400(res, language, fallback = DEFAULT_LANGUAGE) {
+    if (language === undefined || language === null || String(language).trim() === '') return fallback;
+    const trimmed = String(language).trim();
+    return isKnownLanguage(trimmed) ? trimmed : rejectLanguage(res, trimmed);
+}
+
+/** Canonical id when recognised, else the value as written (plus a warning). */
+function canonicaliseScenarioCategory(category, warnings) {
+    const resolved = resolveScenarioCategory(category);
+    if (resolved.ok) return resolved.value;
+    warnings.push(vocabularyWarning('category', resolved.received, SCENARIO_CATEGORY_IDS));
+    return category;
 }
 
 // Create scenario
@@ -667,8 +743,8 @@ function canonicaliseCaseRhythmsOr400(res, config, scenario) {
 // `params: {hr: "invalid"}` or `rhythm: "ASYSTOLE_TYPO"` were accepted
 // and JSON.stringify'd into the DB; PatientMonitor's interpolator then
 // produced NaN or hit an unknown rhythm in the ECG generator. Rhythm
-// VALUES are canonicalised (and unknowns rejected) by
-// canonicaliseTimelineRhythmsOr400 above; this checks shape only.
+// VALUES are canonicalised (unknowns kept verbatim + warned) by
+// canonicaliseTimelineRhythms above; this checks shape only.
 function validateScenarioTimeline(timeline) {
     if (!Array.isArray(timeline)) return 'timeline must be an array';
     for (let i = 0; i < timeline.length; i++) {
@@ -699,7 +775,7 @@ function validateScenarioTimeline(timeline) {
 }
 
 router.post('/scenarios', authenticateToken, (req, res) => {
-    const { name, description, duration_minutes, category, timeline, is_public } = req.body;
+    const { name, description, duration_minutes, timeline, is_public } = req.body;
     const created_by = req.user.id;
 
     if (!name || !timeline || !duration_minutes) {
@@ -709,16 +785,21 @@ router.post('/scenarios', authenticateToken, (req, res) => {
     if (tlError) {
         return res.status(400).json({ error: `Invalid scenario timeline: ${tlError}` });
     }
-    if (!canonicaliseTimelineRhythmsOr400(res, timeline)) return;
+    const language = resolveScenarioLanguageOr400(res, req.body.language);
+    if (!language) return;
+    const warnings = [];
+    canonicaliseTimelineRhythms(timeline, warnings);
+    const category = canonicaliseScenarioCategory(req.body.category, warnings);
+    logVocabularyWarnings(req, 'scenario', warnings);
 
     const query = `
-        INSERT INTO scenarios (name, description, duration_minutes, category, timeline, created_by, is_public, tenant_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO scenarios (name, description, duration_minutes, category, language, timeline, created_by, is_public, tenant_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     
     dbAdapter.run(
         query,
-        [name, description, duration_minutes, category, JSON.stringify(timeline), created_by, is_public ? 1 : 0, tenantId(req)],
+        [name, description, duration_minutes, category, language, JSON.stringify(timeline), created_by, is_public ? 1 : 0, tenantId(req)],
         function(err) {
             if (err) {
                 return res.status(500).json({ error: err.message });
@@ -728,12 +809,13 @@ router.post('/scenarios', authenticateToken, (req, res) => {
                 resourceType: 'scenario',
                 resourceId: String(this.lastID),
                 resourceName: name,
-                newValue: { name, description, duration_minutes, category, timeline, is_public: is_public ? 1 : 0 }
+                newValue: { name, description, duration_minutes, category, language, timeline, is_public: is_public ? 1 : 0 }
             });
             
             res.json({ 
                 id: this.lastID,
-                message: 'Scenario created successfully' 
+                message: 'Scenario created successfully',
+                ...withWarnings(warnings),
             });
         }
     );
@@ -742,7 +824,7 @@ router.post('/scenarios', authenticateToken, (req, res) => {
 // Update scenario
 router.put('/scenarios/:id', authenticateToken, (req, res) => {
     const { id } = req.params;
-    const { name, description, duration_minutes, category, timeline, is_public } = req.body;
+    const { name, description, duration_minutes, timeline, is_public } = req.body;
 
     // Stage-5 audit: validate timeline shape before persisting (mirrors POST).
     if (timeline !== undefined) {
@@ -750,8 +832,11 @@ router.put('/scenarios/:id', authenticateToken, (req, res) => {
         if (tlError) {
             return res.status(400).json({ error: `Invalid scenario timeline: ${tlError}` });
         }
-        if (!canonicaliseTimelineRhythmsOr400(res, timeline)) return;
     }
+    const warnings = [];
+    canonicaliseTimelineRhythms(timeline, warnings);
+    const category = canonicaliseScenarioCategory(req.body.category, warnings);
+    logVocabularyWarnings(req, 'scenario', warnings);
     
     // Check ownership or educator/admin
     dbAdapter.get('SELECT * FROM scenarios WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL', [id, tenantId(req)], (err, row) => {
@@ -764,16 +849,20 @@ router.put('/scenarios/:id', authenticateToken, (req, res) => {
         if (!canManageOwnedResource(row.created_by, req.user)) {
             return res.status(403).json({ error: 'Not authorized to edit this scenario' });
         }
+        // A client that does not send `language` (older bundle) keeps the
+        // stored value rather than silently resetting the row to the default.
+        const language = resolveScenarioLanguageOr400(res, req.body.language, row.language || DEFAULT_LANGUAGE);
+        if (!language) return;
         
         const query = `
             UPDATE scenarios 
-            SET name = ?, description = ?, duration_minutes = ?, category = ?, timeline = ?, is_public = ?
+            SET name = ?, description = ?, duration_minutes = ?, category = ?, language = ?, timeline = ?, is_public = ?
             WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL
         `;
         
         dbAdapter.run(
             query,
-            [name, description, duration_minutes, category, JSON.stringify(timeline), is_public ? 1 : 0, id, tenantId(req)],
+            [name, description, duration_minutes, category, language, JSON.stringify(timeline), is_public ? 1 : 0, id, tenantId(req)],
             (err) => {
                 if (err) {
                     return res.status(500).json({ error: err.message });
@@ -784,9 +873,9 @@ router.put('/scenarios/:id', authenticateToken, (req, res) => {
                     resourceId: id,
                     resourceName: name || row.name,
                     oldValue: { ...row, timeline: parseAuditJson(row.timeline) },
-                    newValue: { name, description, duration_minutes, category, timeline, is_public: is_public ? 1 : 0 }
+                    newValue: { name, description, duration_minutes, category, language, timeline, is_public: is_public ? 1 : 0 }
                 });
-                res.json({ message: 'Scenario updated successfully' });
+                res.json({ message: 'Scenario updated successfully', ...withWarnings(warnings) });
             }
         );
     });
@@ -867,7 +956,7 @@ router.post('/scenarios/seed', authenticateToken, requireAdmin, (req, res) => {
             name: "Hypertensive Crisis",
             description: "Rapid increase in blood pressure - late stage",
             duration_minutes: 45,
-            category: "Cardiovascular",
+            category: "Cardiac",
             timeline: [
                 { time: 0, label: "Baseline", params: { hr: 75, spo2: 99, rr: 14, bpSys: 130, bpDia: 85, temp: 37.0, etco2: 38 }, rhythm: "NSR" },
                 { time: 900, label: "BP rising", params: { hr: 90, spo2: 98, rr: 18, bpSys: 180, bpDia: 110, temp: 37.0, etco2: 40 } },
@@ -879,7 +968,7 @@ router.post('/scenarios/seed', authenticateToken, requireAdmin, (req, res) => {
             name: "Anaphylactic Shock",
             description: "Rapid onset of severe allergic reaction - late stage",
             duration_minutes: 10,
-            category: "Allergic",
+            category: "General",
             timeline: [
                 { time: 0, label: "Initial exposure", params: { hr: 85, spo2: 98, rr: 16, bpSys: 120, bpDia: 80, temp: 37.0, etco2: 38 }, rhythm: "NSR" },
                 { time: 120, label: "Rapid onset", params: { hr: 115, spo2: 92, rr: 28, bpSys: 100, bpDia: 65, temp: 37.0, etco2: 42 }, conditions: { noise: 2 } },
@@ -903,15 +992,18 @@ router.post('/scenarios/seed', authenticateToken, requireAdmin, (req, res) => {
     let inserted = 0;
     let errors = 0;
     
+    // The built-ins are English prose (names, step labels), so they are
+    // stamped with the default language explicitly rather than relying on the
+    // column default; categories are canonical ids from scenarioCategories.js.
     defaultScenarios.forEach(scenario => {
         const query = `
-            INSERT INTO scenarios (name, description, duration_minutes, category, timeline, created_by, is_public)
-            VALUES (?, ?, ?, ?, ?, NULL, 1)
+            INSERT INTO scenarios (name, description, duration_minutes, category, language, timeline, created_by, is_public)
+            VALUES (?, ?, ?, ?, ?, ?, NULL, 1)
         `;
         
         dbAdapter.run(
             query,
-            [scenario.name, scenario.description, scenario.duration_minutes, scenario.category, JSON.stringify(scenario.timeline)],
+            [scenario.name, scenario.description, scenario.duration_minutes, scenario.category, DEFAULT_LANGUAGE, JSON.stringify(scenario.timeline)],
             (err) => {
                 if (err) {
                     routesAdminLog.error('scenario seed failed', { scenario_name: scenario.name, error: err.message });

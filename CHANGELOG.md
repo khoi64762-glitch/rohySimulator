@@ -9,6 +9,30 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.44] — 2026-08-16
+
+### Added
+
+- **Scenario language.** Repository scenarios carry a language
+  (migration 0045, default `en`): language select on create/edit,
+  language filter and flag badge in the list, `?language=` on
+  `GET /scenarios`, round-tripped by export/import.
+
+### Changed
+
+- **Scenario categories are a shared vocabulary** with translated labels
+  (`server/shared/scenarioCategories.js`) instead of free text with a
+  computed translation key. **Non-breaking by design:** on save and
+  import, recognised values and every locale's labels — including prose
+  that contains one unambiguous label ("Emergenza Neurologica / Terapia
+  Intensiva" → Neurological) — are canonicalised; anything else is
+  stored verbatim and reported in an additive `warnings` array, never
+  rejected. The same leniency now applies to ECG rhythms on
+  `POST/PUT /cases` and `/scenarios` (the 400 introduced in 2.9.40 is
+  gone; "Bradicardia Sinusale Marcata" → Sinus Bradycardia, unknown kept
+  + warned). Unknown stored values stay visible and selectable in the
+  editor.
+
 ## [2.9.43] — 2026-08-16
 
 ### Changed
