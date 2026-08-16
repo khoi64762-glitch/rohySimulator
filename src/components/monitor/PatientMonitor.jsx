@@ -27,6 +27,7 @@ import {
    writeScenarioAnchor,
    anchorSeconds,
 } from '../../utils/sessionAnchors';
+import { RHYTHM_IDS, RHYTHM_LABEL_KEYS, resolveRhythm } from '../../services/rhythms';
 
 /**
  * ECG GENERATION
@@ -271,7 +272,7 @@ const importSettingsFromJSON = (file, setRhythm, setConditions, setParams) => {
             }
             
             // Apply settings
-            setRhythm(settings.rhythm);
+            setRhythm(canonicalRhythm(settings.rhythm));
             setConditions(settings.conditions);
             setParams(settings.params);
             
@@ -295,12 +296,23 @@ const TAB_KEYS = {
    alarms: 'tab_alarms',
    labs: 'tab_labs'
 };
-const RHYTHM_KEYS = {
-   NSR: 'rhythm_nsr',
-   AFib: 'rhythm_afib',
-   VTach: 'rhythm_vtach',
-   VFib: 'rhythm_vfib',
-   Asystole: 'rhythm_asystole'
+// The rhythm vocabulary + its label keys are shared with the authoring
+// screens and the server (server/shared/rhythms.js) so the case editor, the
+// scenario repository and this engine can never disagree again.
+const RHYTHM_KEYS = RHYTHM_LABEL_KEYS;
+
+// Every rhythm that ENTERS the monitor from outside — case config, scenario
+// frame, persisted vitals row — goes through the shared resolver so aliases
+// ('Atrial Fibrillation' from a legacy case, 'Fibrillazione atriale' from an
+// imported scenario) reach the AFib/VTach/VFib/Asystole waveform branches
+// instead of silently rendering as sinus. An unrecognised string is kept
+// verbatim (it renders sinus at the given HR, as it always did) so nothing
+// crashes on legacy data. Rhythms without a dedicated morphology (Sinus
+// Tach/Brady, Atrial Flutter, SVT, PEA) render the sinus trace at the
+// configured HR — the HR, not the waveform, is what distinguishes them here.
+const canonicalRhythm = (value) => {
+   const resolved = resolveRhythm(value);
+   return resolved.ok && resolved.value ? resolved.value : value;
 };
 
 export default function PatientMonitor({ _caseParams, caseData, sessionId, isAdmin: isAdminProp = false }) {
@@ -325,7 +337,7 @@ export default function PatientMonitor({ _caseParams, caseData, sessionId, isAdm
 
    // Load saved settings on mount
    const savedSettings = loadSavedSettings();
-   const initialRhythm = savedSettings?.rhythm || FACTORY_DEFAULTS.rhythm;
+   const initialRhythm = canonicalRhythm(savedSettings?.rhythm || FACTORY_DEFAULTS.rhythm);
    const initialConditions = savedSettings?.conditions || FACTORY_DEFAULTS.conditions;
    const initialParams = savedSettings?.params || FACTORY_DEFAULTS.params;
 
@@ -587,7 +599,7 @@ export default function PatientMonitor({ _caseParams, caseData, sessionId, isAdm
             if (Number.isFinite(last.etco2)) restored.etco2 = last.etco2;
             if (Object.keys(restored).length > 0) {
                setParams(prev => ({ ...prev, ...restored }));
-               if (last.rhythm) setRhythm(last.rhythm);
+               if (last.rhythm) setRhythm(canonicalRhythm(last.rhythm));
             }
          } catch (e) {
             console.warn('[Monitor] vitals restore failed:', e.message);
@@ -664,7 +676,7 @@ export default function PatientMonitor({ _caseParams, caseData, sessionId, isAdm
 
             // Set rhythm from case (priority: initialVitals > scenario > legacy)
             const scenarioRhythm = scenarioFirstFrame?.rhythm;
-            const caseRhythm = initialVitals?.rhythm || scenarioRhythm || legacyConfig?.rhythm;
+            const caseRhythm = canonicalRhythm(initialVitals?.rhythm || scenarioRhythm || legacyConfig?.rhythm);
             if (caseRhythm) {
                setCaseBaselineRhythm(caseRhythm);
                setRhythm(caseRhythm);
@@ -921,7 +933,7 @@ export default function PatientMonitor({ _caseParams, caseData, sessionId, isAdm
                });
 
                if (fromFrame.rhythm && !overridden.has('rhythm')) {
-                  setRhythm(fromFrame.rhythm);
+                  setRhythm(canonicalRhythm(fromFrame.rhythm));
                }
 
                if (Object.keys(interpolatedConds).length > 0) {
@@ -938,7 +950,7 @@ export default function PatientMonitor({ _caseParams, caseData, sessionId, isAdm
                   const filtered = filterOverrides(toFrame.params);
                   if (Object.keys(filtered).length > 0) setParams(prev => ({ ...prev, ...filtered }));
                }
-               if (toFrame.rhythm && !overridden.has('rhythm')) setRhythm(toFrame.rhythm);
+               if (toFrame.rhythm && !overridden.has('rhythm')) setRhythm(canonicalRhythm(toFrame.rhythm));
                if (toFrame.conditions) {
                   const filtered = filterOverrides(toFrame.conditions);
                   if (Object.keys(filtered).length > 0) setConditions(prev => ({ ...prev, ...filtered }));
@@ -1214,6 +1226,20 @@ export default function PatientMonitor({ _caseParams, caseData, sessionId, isAdm
          case 'AFib':
             updates.hr = 110; // Rapid ventricular response
             updates.spo2 = 95;
+            break;
+         // Sinus-morphology rhythms: only the rate distinguishes them on this
+         // monitor, so seed a rate that matches the label.
+         case 'Sinus Tachycardia':
+            updates.hr = 120;
+            break;
+         case 'Sinus Bradycardia':
+            updates.hr = 45;
+            break;
+         case 'Atrial Flutter':
+            updates.hr = 150; // 2:1 conduction
+            break;
+         case 'SVT':
+            updates.hr = 170;
             break;
          case 'VTach':
             updates.hr = 160;
@@ -1648,7 +1674,7 @@ export default function PatientMonitor({ _caseParams, caseData, sessionId, isAdm
                                                 onClick={() => {
                                                    setScenarioTime(step.time);
                                                    // Apply step immediately
-                                                   if (step.rhythm) setRhythm(step.rhythm);
+                                                   if (step.rhythm) setRhythm(canonicalRhythm(step.rhythm));
                                                    if (step.params) {
                                                       setParams(p => ({ ...p, ...step.params }));
                                                    }
@@ -1805,8 +1831,8 @@ export default function PatientMonitor({ _caseParams, caseData, sessionId, isAdm
                      {isAdmin && (
                         <div className="space-y-2">
                            <label className="text-xs font-bold text-neutral-500 uppercase">{t('primary_rhythm')}</label>
-                           <div className="grid grid-cols-1 gap-2">
-                              {['NSR', 'AFib', 'VTach', 'VFib', 'Asystole'].map(r => (
+                           <div className="grid grid-cols-2 gap-2">
+                              {RHYTHM_IDS.map(r => (
                                  <button
                                     key={r}
                                     onClick={() => handleRhythmChange(r)}

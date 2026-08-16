@@ -9,6 +9,22 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.40] — 2026-08-16
+
+### Fixed
+
+- **One ECG rhythm vocabulary.** The case editor, the scenario
+  repository and the monitor engine each had their own rhythm strings —
+  "Atrial Fibrillation" chosen in the case editor never reached the
+  monitor's AFib waveform, and an imported scenario with
+  "Tachicardia sinusale" silently rendered as sinus. New
+  `server/shared/rhythms.js`: ten canonical ids, `resolveRhythm()` with
+  aliases (long English names, common abbreviations, every locale's
+  labels), translated labels in all six languages. Case and scenario
+  save/import canonicalise on the way in and reject unknown values with
+  `400 invalid_rhythm`; the monitor canonicalises every external entry
+  point (case load, scenario frames, persisted vitals, settings import).
+
 ## [2.9.39] — 2026-08-16
 
 ### Fixed

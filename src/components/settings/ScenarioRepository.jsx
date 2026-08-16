@@ -4,6 +4,7 @@ import { Plus, Trash2, Edit, Download, Upload, Globe, Lock, Play, X, Copy, Clock
 import { useToast } from '../../contexts/ToastContext';
 import { ApiError, apiDelete, apiFetch, apiPost, apiPut } from '../../services/apiClient';
 import { SCENARIO_TEMPLATES } from '../../data/scenarioTemplates';
+import { RHYTHMS, RHYTHM_IDS, DEFAULT_RHYTHM, resolveRhythm } from '../../services/rhythms';
 
 const CATEGORIES = [
     { id: 'all', label: 'All Scenarios' },
@@ -19,14 +20,17 @@ const CATEGORIES = [
     { id: 'Pediatric', label: 'Pediatric' }
 ];
 
-const RHYTHMS = ['NSR', 'Sinus Tachycardia', 'Sinus Bradycardia', 'AFib', 'Atrial Flutter', 'SVT', 'VTach', 'VFib', 'Asystole', 'PEA'];
+// Rhythm vocabulary is shared (server/shared/rhythms.js): the <select> stores
+// the canonical id and shows the monitor's translated label — cross-namespace
+// t() is safe here because locales load per LANGUAGE (every namespace at
+// once), so `monitor` is present whenever `authoring_scenarios` is.
 
 const DEFAULT_STEP = {
     time: 0,
     label: '',
     params: { hr: 80, spo2: 98, rr: 16, bpSys: 120, bpDia: 80, temp: 37.0, etco2: 38 },
     conditions: { stElev: 0, pvc: false, wideQRS: false, tInv: false, noise: 0 },
-    rhythm: 'NSR'
+    rhythm: DEFAULT_RHYTHM
 };
 
 // Map built-in template keys to categories
@@ -278,12 +282,28 @@ export default function ScenarioRepository({ onSelectScenario }) {
         reader.onload = (e) => {
             try {
                 const imported = JSON.parse(e.target.result);
+                // Canonicalise every frame's rhythm on the way in: an export from
+                // a localized UI or a hand-written file may carry a label
+                // ('Fibrillazione atriale') or a legacy long name; the monitor
+                // engine only branches on ids. Unknown → reject with the value
+                // named, same contract as the server (400 invalid_rhythm).
+                const timeline = Array.isArray(imported.timeline) ? imported.timeline : [];
+                const unknownRhythm = timeline
+                    .map((frame) => resolveRhythm(frame?.rhythm))
+                    .find((resolved) => !resolved.ok);
+                if (unknownRhythm) {
+                    toast.error(t('toast_unknown_rhythm', { value: unknownRhythm.received, valid: RHYTHM_IDS.join(', ') }));
+                    return;
+                }
                 setEditingScenario({
                     name: imported.name || t('imported_scenario_name'),
                     description: imported.description || '',
                     category: imported.category || 'General',
                     duration_minutes: imported.duration_minutes || 30,
-                    timeline: imported.timeline || [],
+                    timeline: timeline.map((frame) => {
+                        const resolved = resolveRhythm(frame?.rhythm).value;
+                        return resolved ? { ...frame, rhythm: resolved } : frame;
+                    }),
                     is_public: true,
                     is_builtin: false
                 });
@@ -780,8 +800,8 @@ export default function ScenarioRepository({ onSelectScenario }) {
                                                             </div>
                                                             <div>
                                                                 <label className="block text-xs text-neutral-500">{t('rhythm_label')}</label>
-                                                                <select value={step.rhythm || 'NSR'} onChange={(e) => updateTimelineStep(index, 'rhythm', e.target.value)} className="w-full px-2 py-1 bg-neutral-900 border border-neutral-600 rounded text-sm">
-                                                                    {RHYTHMS.map(r => <option key={r} value={r}>{r}</option>)}
+                                                                <select value={resolveRhythm(step.rhythm).value || DEFAULT_RHYTHM} onChange={(e) => updateTimelineStep(index, 'rhythm', e.target.value)} className="w-full px-2 py-1 bg-neutral-900 border border-neutral-600 rounded text-sm">
+                                                                    {RHYTHMS.map(({ id, labelKey }) => <option key={id} value={id}>{t(labelKey, { ns: 'monitor' })}</option>)}
                                                                 </select>
                                                             </div>
                                                         </div>

@@ -64,6 +64,7 @@
   "toast_imported": "Skenaario tuotu - tarkista ja tallenna",
   "toast_invalid_file": "Virheellinen skenaariotiedosto",
   "toast_save_failed": "Skenaarion tallentaminen epäonnistui",
+  "toast_unknown_rhythm": "Tuntematon EKG-rytmi \"{value}\" tuodussa aikajanassa. Käytä jotakin näistä: {valid}",
   "toast_updated": "Skenaario päivitetty",
   "use_in_case": "Käytä tapauksessa",
   "vital_signs": "Vitaalielintoiminnot",

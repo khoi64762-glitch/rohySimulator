@@ -613,3 +613,67 @@ describe('PatientMonitor — defensive renders', () => {
         });
     });
 });
+
+// Regression lock: case-editor rhythm labels never reached the monitor's
+// AFib/VTach/VFib branches. The case editor stored 'Atrial Fibrillation'
+// (and the scenario repository 'AFib') while the engine branched on
+// `rhythm === 'AFib'` only — so every non-canonical spelling, including
+// Italian free text from an imported scenario, silently rendered sinus.
+// Every rhythm entering from case config / scenario frame / persisted row
+// now passes through the shared resolver (server/shared/rhythms.js).
+describe('PatientMonitor — rhythm aliases resolve to canonical ids', () => {
+    // Poll on a REAL setTimeout. RTL's waitFor polls on setInterval, which
+    // this file fakes (see beforeEach), so between DOM mutations it never
+    // re-checks — and the vitals POST lands after the last mutation.
+    const untilPosted = async (sessionId, rhythm, timeoutMs = 4000) => {
+        const started = Date.now();
+        while (Date.now() - started < timeoutMs) {
+            if (state.posted.some(p => p.sessionId === sessionId && p.body.rhythm === rhythm)) return;
+            await new Promise(r => setTimeout(r, 25));
+        }
+        const seen = state.posted.filter(p => p.sessionId === sessionId).map(p => p.body.rhythm);
+        throw new Error(`no vitals POST for session ${sessionId} carried rhythm ${rhythm}; saw ${JSON.stringify(seen)}`);
+    };
+
+    it("a case whose initialVitals.rhythm is 'Atrial Fibrillation' runs as AFib", async () => {
+        // The persisted vitals body carries the live `rhythm` state — the same
+        // value the ECG generator branches on. HR 120 vs the factory 80 crosses
+        // the deadband, so a POST fires after the case baseline lands.
+        const legacyCase = {
+            ...baseCase,
+            config: {
+                initialVitals: { ...baseCase.config.initialVitals, hr: 120, rhythm: 'Atrial Fibrillation' },
+            },
+            scenario: null,
+        };
+        mount({ sessionId: 41, caseData: legacyCase });
+        await untilPosted('41', 'AFib');
+        // And the raw label must never be what the engine (or analytics) sees.
+        expect(state.posted.some(p => p.body.rhythm === 'Atrial Fibrillation')).toBe(false);
+    });
+
+    it('a persisted vitals row carrying a localized label restores as the canonical id', async () => {
+        state.vitalsStore = {
+            vitals: [
+                { hr: 150, spo2: 90, bp_sys: 95, bp_dia: 60, rr: 22, temp: 37.0, etco2: 38, rhythm: 'Fibrillazione ventricolare' },
+            ],
+        };
+        mount({ sessionId: 42 });
+        await untilPosted('42', 'VFib');
+    });
+
+    it('every external rhythm entry point goes through the shared resolver (source contract)', async () => {
+        const fs = await import('node:fs');
+        const path = await import('node:path');
+        const src = fs.readFileSync(path.resolve(__dirname, 'PatientMonitor.jsx'), 'utf8');
+        expect(src).toMatch(/import \{[^}]*resolveRhythm[^}]*\} from '\.\.\/\.\.\/services\/rhythms'/);
+        // Scenario frames, timeline-step clicks and the restore-on-mount row
+        // must not hand a raw string to setRhythm.
+        expect(src).not.toMatch(/setRhythm\((?:fromFrame|toFrame|step|last)\.rhythm\)/);
+        expect(src).toMatch(/setRhythm\(canonicalRhythm\(fromFrame\.rhythm\)\)/);
+        expect(src).toMatch(/setRhythm\(canonicalRhythm\(toFrame\.rhythm\)\)/);
+        expect(src).toMatch(/setRhythm\(canonicalRhythm\(last\.rhythm\)\)/);
+        // The label map is the shared one, so every id the buttons render is translated.
+        expect(src).toMatch(/const RHYTHM_KEYS = RHYTHM_LABEL_KEYS/);
+    });
+});

@@ -64,6 +64,7 @@
   "toast_imported": "Escenario importado - revisar y guardar",
   "toast_invalid_file": "Archivo de escenario inválido",
   "toast_save_failed": "Error al guardar el escenario",
+  "toast_unknown_rhythm": "Ritmo de ECG desconocido \"{value}\" en la línea de tiempo importada. Use uno de: {valid}",
   "toast_updated": "Escenario actualizado",
   "use_in_case": "Usar en caso",
   "vital_signs": "Constantes Vitales",

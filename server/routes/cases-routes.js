@@ -17,6 +17,7 @@ import {
 import { logger } from '../logger.js';
 import { caseCodeFor, normalizeCaseLanguage } from '../shared/caseCode.js';
 import { PATIENT_GENDERS, resolvePatientGender } from '../shared/patientDemographics.js';
+import { RHYTHM_IDS, resolveRhythm } from '../shared/rhythms.js';
 import {
     auditSuccess,
     canManageOwnedResource,
@@ -311,6 +312,7 @@ router.post('/cases', authenticateToken, requireEducator, (req, res) => {
     // these as top-level fields; without this merge they were silently dropped.
     const scenarioWithSource = mergeScenarioSource(scenario, { scenario_template, scenario_from_repository, scenario_duration });
     const safeConfig = clampInitialVitals(config || {});
+    if (!canonicaliseCaseRhythmsOr400(res, safeConfig, scenarioWithSource)) return;
     // Case language is pinned at creation and immutable afterwards: normalize
     // the author's pick to a concrete registry code (absent/junk → default).
     // The visible case_code prefix derives from it and therefore never changes.
@@ -409,6 +411,7 @@ router.put('/cases/:id', authenticateToken, requireEducator, (req, res) => {
 
     // Same scenario-source merge as the POST handler — see comment there.
     const scenarioWithSource = mergeScenarioSource(scenario, { scenario_template, scenario_from_repository, scenario_duration });
+    if (!canonicaliseCaseRhythmsOr400(res, safeConfig, scenarioWithSource)) return;
     const safeConfig = clampInitialVitals(config || {});
 
     // First, get the old case data for audit trail
@@ -587,8 +590,9 @@ router.get('/scenarios/:id', authenticateToken, (req, res) => {
 // engine doesn't have to defend against malformed scenarios. Pre-fix
 // `params: {hr: "invalid"}` or `rhythm: "ASYSTOLE_TYPO"` were accepted
 // and JSON.stringify'd into the DB; PatientMonitor's interpolator then
-// produced NaN or hit an unknown rhythm in the ECG generator.
-const KNOWN_RHYTHMS = new Set(['NSR', 'AFIB', 'AFib', 'VTach', 'VFib', 'Asystole', 'PVC', 'AFlutter', 'PEA', 'SVT', 'BradySinus', 'JunctionalEscape']);
+// produced NaN or hit an unknown rhythm in the ECG generator. Rhythm
+// VALUES are canonicalised (and unknowns rejected) by
+// canonicaliseTimelineRhythmsOr400 above; this checks shape only.
 function validateScenarioTimeline(timeline) {
     if (!Array.isArray(timeline)) return 'timeline must be an array';
     for (let i = 0; i < timeline.length; i++) {
@@ -617,6 +621,49 @@ function validateScenarioTimeline(timeline) {
     }
     return null;
 }
+// ---- ECG rhythm canonicalisation (server/shared/rhythms.js) ----
+//
+// Rhythm strings arrive from three authoring surfaces that historically
+// disagreed (case editor long names, repository short ids, imported JSON in
+// any language), while the monitor engine only branches on the canonical
+// ids. Canonicalise on WRITE — `config.initialVitals.rhythm` and every
+// `timeline[].rhythm` — so the stored value is always an id; an unrecognised
+// value is a client bug (stale bundle, hand-edited import) and gets an honest
+// 400 naming the value and the accepted ids, mirroring the gender guard.
+// Frames are repaired in place (same in-place style as the config
+// normalisation above); absent/blank rhythms are left alone.
+
+function rejectRhythm(res, received) {
+    res.status(400).json({
+        error: `Unrecognised ECG rhythm "${received}". Expected one of: ${RHYTHM_IDS.join(', ')}.`,
+        code: 'invalid_rhythm',
+    });
+    return false;
+}
+
+/** Canonicalise every frame's rhythm in place. False once it has answered 400. */
+function canonicaliseTimelineRhythmsOr400(res, timeline) {
+    if (!Array.isArray(timeline)) return true;
+    for (const frame of timeline) {
+        if (!frame || typeof frame !== 'object') continue;
+        const resolved = resolveRhythm(frame.rhythm);
+        if (!resolved.ok) return rejectRhythm(res, resolved.received);
+        if (resolved.value) frame.rhythm = resolved.value;
+    }
+    return true;
+}
+
+/** Case variant: initial-vitals rhythm + the embedded scenario timeline. */
+function canonicaliseCaseRhythmsOr400(res, config, scenario) {
+    const initialVitals = config?.initialVitals;
+    if (initialVitals && typeof initialVitals === 'object') {
+        const resolved = resolveRhythm(initialVitals.rhythm);
+        if (!resolved.ok) return rejectRhythm(res, resolved.received);
+        if (resolved.value) initialVitals.rhythm = resolved.value;
+    }
+    return canonicaliseTimelineRhythmsOr400(res, scenario?.timeline);
+}
+
 
 router.post('/scenarios', authenticateToken, (req, res) => {
     const { name, description, duration_minutes, category, timeline, is_public } = req.body;
@@ -664,6 +711,7 @@ router.put('/scenarios/:id', authenticateToken, (req, res) => {
     const { name, description, duration_minutes, category, timeline, is_public } = req.body;
 
     // Stage-5 audit: validate timeline shape before persisting (mirrors POST).
+    if (!canonicaliseTimelineRhythmsOr400(res, timeline)) return;
     if (timeline !== undefined) {
         const tlError = validateScenarioTimeline(timeline);
         if (tlError) {
@@ -704,6 +752,7 @@ router.put('/scenarios/:id', authenticateToken, (req, res) => {
                     oldValue: { ...row, timeline: parseAuditJson(row.timeline) },
                     newValue: { name, description, duration_minutes, category, timeline, is_public: is_public ? 1 : 0 }
                 });
+        if (!canonicaliseTimelineRhythmsOr400(res, timeline)) return;
                 res.json({ message: 'Scenario updated successfully' });
             }
         );

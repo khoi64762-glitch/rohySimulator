@@ -64,6 +64,7 @@
   "toast_imported": "Scenario importato - controlla e salva",
   "toast_invalid_file": "File dello scenario non valido",
   "toast_save_failed": "Impossibile salvare lo scenario",
+  "toast_unknown_rhythm": "Ritmo ECG sconosciuto \"{value}\" nella timeline importata. Usa uno tra: {valid}",
   "toast_updated": "Scenario aggiornato",
   "use_in_case": "Usa nel caso",
   "vital_signs": "Parametri vitali",

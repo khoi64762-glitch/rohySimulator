@@ -64,6 +64,7 @@
   "toast_imported": "Scenario importerat - granska och spara",
   "toast_invalid_file": "Ogiltig scenariofil",
   "toast_save_failed": "Kunde inte spara scenariot",
+  "toast_unknown_rhythm": "Okänd EKG-rytm \"{value}\" i den importerade tidslinjen. Använd något av: {valid}",
   "toast_updated": "Scenario uppdaterat",
   "use_in_case": "Använd i fall",
   "vital_signs": "Vitalparametrar",

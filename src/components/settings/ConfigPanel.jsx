@@ -45,6 +45,7 @@ import { LLM_PROVIDERS, defaultModelFor } from '../../services/llmCatalogue';
 import ModelSelect from './ModelSelect';
 import { friendlyLlmError } from '../../utils/llmErrorMessage';
 import { SCENARIO_TEMPLATES, scaleScenarioTimeline } from '../../data/scenarioTemplates';
+import { RHYTHMS, DEFAULT_RHYTHM, resolveRhythm } from '../../services/rhythms';
 import { MARITAL_STATUSES, PATIENT_GENDERS, PERSONA_TYPES } from '../../services/patientDemographics';
 import { useBodyImage } from '../../hooks/useBodyImage';
 
@@ -4528,16 +4529,21 @@ PERSONALITY: You are anxious but cooperative. You're worried this might be a hea
                         <div className="bg-neutral-800 border border-neutral-700 rounded-lg p-4">
                             <h5 className="text-sm font-bold text-white mb-3">{t('ecg_rhythm')}</h5>
                             <div className="grid grid-cols-3 gap-2">
-                                {['NSR', 'Sinus Tachycardia', 'Sinus Bradycardia', 'Atrial Fibrillation', 'Atrial Flutter', 'SVT', 'Ventricular Tachycardia', 'Ventricular Fibrillation', 'Asystole'].map(r => (
+                                {/* Stored value is the canonical id (server/shared/rhythms.js);
+                                    the label is the monitor's translation (cross-namespace is
+                                    safe: locales load per LANGUAGE, all namespaces at once).
+                                    Legacy cases stored the long English label — resolve it so
+                                    'Atrial Fibrillation' still highlights AFib. */}
+                                {RHYTHMS.map(({ id, labelKey }) => (
                                     <button
-                                        key={r}
-                                        onClick={() => updateConfig('initialVitals', { ...(caseData.config?.initialVitals || {}), rhythm: r })}
-                                        className={`px-3 py-2 rounded text-xs font-bold transition-all ${(caseData.config?.initialVitals?.rhythm || 'NSR') === r
+                                        key={id}
+                                        onClick={() => updateConfig('initialVitals', { ...(caseData.config?.initialVitals || {}), rhythm: id })}
+                                        className={`px-3 py-2 rounded text-xs font-bold transition-all ${(resolveRhythm(caseData.config?.initialVitals?.rhythm).value || DEFAULT_RHYTHM) === id
                                             ? 'bg-teal-600 text-white'
                                             : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
                                             }`}
                                     >
-                                        {r}
+                                        {t(labelKey, { ns: 'monitor' })}
                                     </button>
                                 ))}
                             </div>

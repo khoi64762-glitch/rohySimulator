@@ -64,6 +64,7 @@
   "toast_imported": "Szenario importiert - prüfen und speichern",
   "toast_invalid_file": "Ungültige Szenariodatei",
   "toast_save_failed": "Szenario konnte nicht gespeichert werden",
+  "toast_unknown_rhythm": "Unbekannter EKG-Rhythmus „{value}“ in der importierten Zeitleiste. Erlaubt sind: {valid}",
   "toast_updated": "Szenario aktualisiert",
   "use_in_case": "Im Fall verwenden",
   "vital_signs": "Vitalparameter",
