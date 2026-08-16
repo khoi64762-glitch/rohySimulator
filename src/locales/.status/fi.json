@@ -9610,6 +9610,34 @@
     "reviewer": null,
     "risk": "clinical"
   },
+  "authoring_radiology.default_radiology_off_empty_warning": {
+    "src": "980d503512c7",
+    "state": "machine",
+    "reviewed_at": null,
+    "reviewer": null,
+    "risk": "clinical"
+  },
+  "authoring_radiology.default_radiology_title": {
+    "src": "62bed3ff22e2",
+    "state": "machine",
+    "reviewed_at": null,
+    "reviewer": null,
+    "risk": "clinical"
+  },
+  "authoring_radiology.default_radiology_when_disabled": {
+    "src": "40be481e7bff",
+    "state": "machine",
+    "reviewed_at": null,
+    "reviewer": null,
+    "risk": "clinical"
+  },
+  "authoring_radiology.default_radiology_when_enabled": {
+    "src": "445aa932a573",
+    "state": "machine",
+    "reviewed_at": null,
+    "reviewer": null,
+    "risk": "clinical"
+  },
   "authoring_radiology.delete_fallback_label": {
     "src": "a9f1d0e19fca",
     "state": "machine",

@@ -265,3 +265,61 @@ describe('RadiologyEditor modality vocabulary (server/shared/diagnostics.js)', (
         expect(screen.queryByText('12-Lead ECG')).toBeNull();
     });
 });
+
+// Regression lock: educators can narrow the radiology catalogue
+// (bug report 2.9.15 #5). Mirrors the labs editor's defaultLabsEnabled
+// header: checked by default (absent flag = full catalogue), writes
+// `config.investigations.defaultRadiologyEnabled` without disturbing the
+// sibling labs flag, and warns when narrowing would leave students with an
+// empty catalogue.
+describe('RadiologyEditor catalogue narrowing (bug report 2.9.15 #5)', () => {
+    function mountWithConfig(config) {
+        const captured = { current: null };
+        function Harness() {
+            const [caseData, setCaseData] = useState({ id: 'case-1', config });
+            useEffect(() => { captured.current = caseData; }, [caseData]);
+            return (
+                <RadiologyEditor
+                    caseData={caseData}
+                    setCaseData={(updater) => setCaseData(prev => typeof updater === 'function' ? updater(prev) : updater)}
+                />
+            );
+        }
+        const utils = renderWithProviders(<Harness />, { withAuth: false, withNotifications: false, withToast: false });
+        return { ...utils, captured };
+    }
+
+    it('is checked when the flag is absent (pre-existing cases keep the full catalogue)', async () => {
+        mountWithConfig({ radiology: [] });
+        const box = await screen.findByRole('checkbox', { name: /All Radiology & Diagnostic Studies Available by Default/i });
+        expect(box.checked).toBe(true);
+        expect(screen.queryByRole('alert')).toBeNull();
+    });
+
+    it('unchecking writes investigations.defaultRadiologyEnabled=false and keeps the labs flag', async () => {
+        const { captured } = mountWithConfig({
+            radiology: [],
+            investigations: { defaultLabsEnabled: false, labs: [] },
+        });
+        const box = await screen.findByRole('checkbox', { name: /All Radiology & Diagnostic Studies Available by Default/i });
+        fireEvent.click(box);
+        await waitFor(() => {
+            expect(captured.current.config.investigations.defaultRadiologyEnabled).toBe(false);
+        });
+        // Sibling flag under the same object is untouched.
+        expect(captured.current.config.investigations.defaultLabsEnabled).toBe(false);
+        expect(captured.current.config.radiology).toEqual([]);
+        // Off + nothing configured → the empty-catalogue warning shows.
+        expect(screen.getByRole('alert').textContent).toMatch(/NO radiology or diagnostic studies/i);
+    });
+
+    it('does not warn when narrowed but studies are configured', async () => {
+        mountWithConfig({
+            investigations: { defaultRadiologyEnabled: false },
+            radiology: [{ studyId: 'xray_chest_pa', studyName: 'Chest X-Ray', modality: 'X-Ray' }],
+        });
+        const box = await screen.findByRole('checkbox', { name: /All Radiology & Diagnostic Studies Available by Default/i });
+        expect(box.checked).toBe(false);
+        expect(screen.queryByRole('alert')).toBeNull();
+    });
+});

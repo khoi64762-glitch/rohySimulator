@@ -1450,6 +1450,29 @@ router.get('/radiology-database', authenticateToken, (req, res) => {
     });
 });
 
+// A configured radiology entry (case config `radiology[]`) refers to a
+// catalogue study by `studyId`, or — for entries authored before ids were
+// stamped — by name (`studyName` / legacy `type`). One matcher, shared by
+// the catalogue narrowing below and the order endpoint, so "is this study
+// configured on the case" has exactly one meaning.
+function configuredRadiologyFor(configuredRadiology, study, studyId) {
+    return configuredRadiology.find(cr =>
+        cr.studyId === studyId ||
+        (study && cr.studyName?.toLowerCase() === study.name?.toLowerCase()) ||
+        (study && cr.type?.toLowerCase() === study.name?.toLowerCase())
+    );
+}
+
+// Radiology counterpart of `investigations.defaultLabsEnabled` (bug report
+// 2.9.15 #5): with the flag on (default, and every pre-existing case), the
+// student catalogue is the full master DB plus the case's custom studies;
+// with it off, only studies the educator configured on the case (plus
+// custom ones) are offered — and orderable. Stored beside the labs flag so
+// both catalogue-narrowing switches live in one place.
+function radiologyCatalogueOpen(caseConfig) {
+    return caseConfig?.investigations?.defaultRadiologyEnabled !== false;
+}
+
 // GET /api/sessions/:sessionId/available-radiology - Get available radiology studies
 router.get('/sessions/:sessionId/available-radiology', authenticateToken, async (req, res) => {
     const { sessionId } = req.params;
@@ -1469,10 +1492,16 @@ router.get('/sessions/:sessionId/available-radiology', authenticateToken, async 
                 });
             }
 
-            let allStudies = [...radiologyDatabase];
-
             const config = resolveSessionCaseConfig(row);
             const configuredRadiology = config.radiology || config.clinicalRecords?.radiology || [];
+            const defaultRadiologyEnabled = radiologyCatalogueOpen(config);
+
+            // Narrowed catalogue: only master studies the case configures.
+            // Custom studies are appended below regardless — they exist
+            // only because the educator authored them.
+            let allStudies = defaultRadiologyEnabled
+                ? [...radiologyDatabase]
+                : radiologyDatabase.filter(study => !!configuredRadiologyFor(configuredRadiology, study, study.id));
 
             configuredRadiology.forEach(cr => {
                 if (cr.isCustom && cr.studyId) {
@@ -1494,7 +1523,8 @@ router.get('/sessions/:sessionId/available-radiology', authenticateToken, async 
             res.json({
                 studies: allStudies,
                 groups: groups,
-                total: allStudies.length
+                total: allStudies.length,
+                defaultRadiologyEnabled
             });
         }
     );
@@ -1570,6 +1600,27 @@ router.post('/sessions/:sessionId/order-radiology', authenticateToken, (req, res
         // Check both new location (config.radiology) and old location (clinicalRecords.radiology)
         const configuredRadiology = caseConfig.radiology || caseConfig.clinicalRecords?.radiology || [];
 
+        // Narrowed catalogue is enforced here too, not only in what the
+        // client is shown: a master study the educator did not configure is
+        // refused outright (same shape as TREATMENT_UNAVAILABLE). Custom
+        // studies are always configured by construction; unknown ids keep
+        // their existing skip-with-warning path below.
+        if (!radiologyCatalogueOpen(caseConfig)) {
+            const unavailable = radiology_ids.filter(radId => {
+                const isCustomStudy = typeof radId === 'string' && radId.startsWith('custom_');
+                if (isCustomStudy) return false;
+                const study = radiologyDatabase.find(s => s.id === radId);
+                return !!study && !configuredRadiologyFor(configuredRadiology, study, radId);
+            });
+            if (unavailable.length > 0) {
+                return res.status(409).json({
+                    error: 'This study is not available in this case',
+                    code: 'RADIOLOGY_UNAVAILABLE',
+                    unavailable_ids: unavailable
+                });
+            }
+        }
+
         let inserted = 0;
         let skipped = 0;
         let pending = radiology_ids.length;
@@ -1640,11 +1691,7 @@ router.post('/sessions/:sessionId/order-radiology', authenticateToken, (req, res
             const study = isCustomStudy ? null : radiologyDatabase.find(s => s.id === radId);
 
             // Check if this study has configured results in the case config
-            const configuredResult = configuredRadiology.find(cr =>
-                cr.studyId === radId ||
-                (study && cr.studyName?.toLowerCase() === study.name?.toLowerCase()) ||
-                (study && cr.type?.toLowerCase() === study.name?.toLowerCase())
-            );
+            const configuredResult = configuredRadiologyFor(configuredRadiology, study, radId);
 
             // For custom studies, we MUST have a configured result
             if (!study && !configuredResult) {

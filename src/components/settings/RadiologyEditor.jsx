@@ -50,6 +50,25 @@ export default function RadiologyEditor({ caseData, setCaseData }) {
     // Get radiology config with safety check
     const radiology = Array.isArray(caseData?.config?.radiology) ? caseData.config.radiology : [];
 
+    // Catalogue narrowing (bug report 2.9.15 #5) — radiology counterpart of
+    // the labs editor's defaultLabsEnabled. Absent = true, so pre-existing
+    // cases keep offering the full master DB. Stored beside the labs flag
+    // under `investigations`; the server reads the same key.
+    const defaultRadiologyEnabled = caseData?.config?.investigations?.defaultRadiologyEnabled !== false;
+    const setDefaultRadiologyEnabled = (enabled) => {
+        if (!setCaseData) return;
+        setCaseData(prev => ({
+            ...prev,
+            config: {
+                ...(prev?.config || {}),
+                investigations: {
+                    ...(prev?.config?.investigations || {}),
+                    defaultRadiologyEnabled: enabled
+                }
+            }
+        }));
+    };
+
     // Update radiology config
     const updateRadiology = (newRadiology) => {
         if (!setCaseData) return;
@@ -253,6 +272,31 @@ export default function RadiologyEditor({ caseData, setCaseData }) {
                 <p className="text-xs text-neutral-500 mt-1">
                     {t('help')}
                 </p>
+            </div>
+
+            {/* Catalogue toggle — same shape as the labs editor's header. */}
+            <div className="bg-blue-900/20 border border-blue-700/50 rounded-lg p-4">
+                <label className="flex items-start gap-3 cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={defaultRadiologyEnabled}
+                        onChange={(e) => setDefaultRadiologyEnabled(e.target.checked)}
+                        className="w-5 h-5 mt-0.5"
+                    />
+                    <div>
+                        <div className="font-bold text-white">{t('default_radiology_title')}</div>
+                        <div className="text-xs text-neutral-400 mt-1">
+                            {t('default_radiology_when_enabled')}
+                            <br />{t('default_radiology_when_disabled')}
+                        </div>
+                    </div>
+                </label>
+                {!defaultRadiologyEnabled && radiology.length === 0 && (
+                    <div className="mt-3 flex items-start gap-2 bg-red-900/30 border border-red-700/60 rounded-md p-3 text-sm text-red-200" role="alert">
+                        <span aria-hidden="true">⚠️</span>
+                        <span>{t('default_radiology_off_empty_warning')}</span>
+                    </div>
+                )}
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

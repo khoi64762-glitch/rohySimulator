@@ -9,6 +9,28 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.52] — 2026-08-16
+
+### Added
+
+- **Educators can narrow the radiology catalogue** (bug report 2.9.15 #5,
+  the last open item of that triage). `GET /sessions/:id/available-radiology`
+  used to return the full 74-study master DB unconditionally — labs had
+  `investigations.defaultLabsEnabled`, radiology had no counterpart, so a
+  first-year case could not stop offering a PET-CT. New
+  `investigations.defaultRadiologyEnabled` (absent = true, so every existing
+  case is unchanged): when off, the student catalogue is only the studies
+  configured on the case (matched by `studyId`, or by name for entries
+  authored before ids were stamped) plus custom studies, and the response
+  carries the flag. Unlike labs, the narrowing is also **enforced at order
+  time**: `POST /order-radiology` refuses a hidden master study with 409
+  `RADIOLOGY_UNAVAILABLE` (`unavailable_ids` listed, nothing inserted) —
+  same shape as `TREATMENT_UNAVAILABLE`. The Radiology & Diagnostics editor
+  gains the same header toggle as the labs editor, with the empty-catalogue
+  warning when it is off and nothing is configured. Strings in all six
+  languages + pseudo-locale (registered as `machine` in the review
+  sidecars). Server round-trip test + editor tests.
+
 ## [2.9.51] — 2026-08-16
 
 ### Changed
