@@ -397,6 +397,7 @@
   "nav_simulation": "Simulering",
   "new_case_fallback": "Nytt fall",
   "option_course_none": "— ingen —",
+  "notifications_reset_confirm": "Återställ alla aviseringsinställningar till standard? Dina snooze- och kvitteringstillstånd behålls.",
   "overview_control_center": "Kontrollcenter",
   "overview_go_to_cases": "Gå till fall",
   "overview_settings_areas": "Inställningsområden",

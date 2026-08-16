@@ -397,6 +397,7 @@
   "nav_simulation": "Simulation",
   "new_case_fallback": "New Case",
   "option_course_none": "— none —",
+  "notifications_reset_confirm": "Reset all notification preferences to defaults? Your snoozed and ack states are kept.",
   "overview_control_center": "Control Center",
   "overview_go_to_cases": "Go to cases",
   "overview_settings_areas": "Settings areas",

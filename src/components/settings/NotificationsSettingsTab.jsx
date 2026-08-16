@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Bell, BellOff, VolumeX, Volume2, Eye, EyeOff, AlertTriangle, RotateCcw, Activity } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { useNotifications } from '../../notifications/useNotifications';
 import { useAuth } from '../../contexts/AuthContext';
+import { useToast } from '../../contexts/ToastContext';
 import { SOURCES, SEVERITIES } from '../../notifications/types';
 import { DEFAULT_PREFS } from '../../notifications/defaults';
 import HistorySurface from '../../notifications/surfaces/HistorySurface';
@@ -11,8 +13,10 @@ import { isDiagnosticBarEnabled, setDiagnosticBarEnabled } from '../debug/Diagno
 // localStorage immediately and to the backend (best-effort, debounced inside
 // the provider). No save button needed — changes are live.
 export default function NotificationsSettingsTab() {
+    const { t } = useTranslation('authoring_config');
     const { prefs, setPrefs, history, snoozed, acked, ackAll } = useNotifications();
     const { user } = useAuth();
+    const toast = useToast();
     const [diagOn, setDiagOn] = useState(() => isDiagnosticBarEnabled(user?.id));
     useEffect(() => { setDiagOn(isDiagnosticBarEnabled(user?.id)); }, [user?.id]);
     const toggleDiag = (next) => {
@@ -249,10 +253,9 @@ export default function NotificationsSettingsTab() {
             {/* Reset */}
             <Section title="Reset">
                 <button
-                    onClick={() => {
-                        if (confirm('Reset all notification preferences to defaults? Your snoozed and ack states are kept.')) {
-                            setPrefs({ ...DEFAULT_PREFS });
-                        }
+                    onClick={async () => {
+                        const ok = await toast.confirm(t('notifications_reset_confirm'), { type: 'danger' });
+                        if (ok) setPrefs({ ...DEFAULT_PREFS });
                     }}
                     className="px-3 py-1.5 bg-red-900/40 hover:bg-red-800/50 text-red-100 text-sm rounded inline-flex items-center gap-2"
                 >

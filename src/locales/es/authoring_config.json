@@ -397,6 +397,7 @@
   "nav_simulation": "Simulación",
   "new_case_fallback": "Nuevo Caso",
   "option_course_none": "— ninguno —",
+  "notifications_reset_confirm": "¿Restablecer todas las preferencias de notificaciones a los valores predeterminados? Se conservan los estados de silencio temporal y de confirmación.",
   "overview_control_center": "Centro de Control",
   "overview_go_to_cases": "Ir a casos",
   "overview_settings_areas": "Áreas de configuración",

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, XCircle, Info } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { useNotifications } from '../notifications/useNotifications';
 import { SOURCES, SEVERITY } from '../notifications/types';
 import { ToastContextObject } from './ToastContextObject';
@@ -46,11 +47,14 @@ export function ToastProvider({ children }) {
 
     const confirm = useCallback((message, options = {}) => {
         return new Promise((resolve) => {
+            // Button/title defaults are resolved at render time inside
+            // ConfirmModal (t('common:confirm') / t('common:cancel')) so they
+            // follow the active locale; explicit options always win.
             setConfirmDialog({
                 message,
-                title: options.title || 'Confirm',
-                confirmText: options.confirmText || 'Confirm',
-                cancelText: options.cancelText || 'Cancel',
+                title: options.title,
+                confirmText: options.confirmText,
+                cancelText: options.cancelText,
                 type: options.type || 'warning',
                 onConfirm: () => { setConfirmDialog(null); resolve(true); },
                 onCancel: () => { setConfirmDialog(null); resolve(false); },
@@ -70,6 +74,10 @@ export function ToastProvider({ children }) {
 }
 
 function ConfirmModal({ title, message, confirmText, cancelText, type, onConfirm, onCancel }) {
+    const { t } = useTranslation('common');
+    const resolvedTitle = title || t('confirm');
+    const resolvedConfirm = confirmText || t('confirm');
+    const resolvedCancel = cancelText || t('cancel');
     const styles = {
         warning: { icon: AlertTriangle, iconBg: 'bg-yellow-900/50', iconColor: 'text-yellow-400', confirmBtn: 'bg-yellow-600 hover:bg-yellow-500' },
         danger: { icon: XCircle, iconBg: 'bg-red-900/50', iconColor: 'text-red-400', confirmBtn: 'bg-red-600 hover:bg-red-500' },
@@ -95,17 +103,17 @@ function ConfirmModal({ title, message, confirmText, cancelText, type, onConfirm
                             <Icon className={`w-6 h-6 ${style.iconColor}`} />
                         </div>
                         <div className="flex-1 pt-1">
-                            <h3 className="text-lg font-bold text-white mb-2">{title}</h3>
+                            <h3 className="text-lg font-bold text-white mb-2">{resolvedTitle}</h3>
                             <p className="text-sm text-neutral-300 leading-relaxed">{message}</p>
                         </div>
                     </div>
                 </div>
                 <div className="flex gap-3 px-6 pb-6">
                     <button onClick={onCancel} className="flex-1 px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-lg font-medium transition-colors">
-                        {cancelText}
+                        {resolvedCancel}
                     </button>
                     <button onClick={onConfirm} className={`flex-1 px-4 py-2.5 text-white rounded-lg font-medium transition-colors ${style.confirmBtn}`}>
-                        {confirmText}
+                        {resolvedConfirm}
                     </button>
                 </div>
             </div>

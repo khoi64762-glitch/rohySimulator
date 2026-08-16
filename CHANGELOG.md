@@ -9,6 +9,17 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.38] — 2026-08-16
+
+### Fixed
+
+- **Confirm dialogs no longer show an English "Cancel"/"Confirm" in
+  other languages.** `ToastContext` hardcoded the fallback labels and
+  ~15 call sites only passed a confirm label; the defaults are now
+  `common:cancel` / `common:confirm`, resolved at render time. The
+  notification-preferences reset also moved from `window.confirm` to
+  the translated dialog.
+
 ## [2.9.37] — 2026-08-09
 
 ### Fixed

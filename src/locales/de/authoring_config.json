@@ -397,6 +397,7 @@
   "nav_simulation": "Simulation",
   "new_case_fallback": "Neuer Fall",
   "option_course_none": "— keiner —",
+  "notifications_reset_confirm": "Alle Benachrichtigungseinstellungen auf die Standardwerte zurücksetzen? Ihre Schlummer- und Bestätigungszustände bleiben erhalten.",
   "overview_control_center": "Kontrollzentrum",
   "overview_go_to_cases": "Zu den Fällen",
   "overview_settings_areas": "Einstellungsbereiche",
