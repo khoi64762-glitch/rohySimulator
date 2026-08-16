@@ -102,6 +102,48 @@ describe('CohortsManagementTab — list view', () => {
         expect(screen.getByText(/no registration code/)).toBeTruthy();
     });
 
+    // Regression lock: the default course's seeded English name ("Basic
+    // course") rendered raw in every UI language, and nothing marked it as
+    // the default. GET /cohorts now carries `is_default`; while the default
+    // still bears the seeded literal it renders the translated
+    // `default_course_name` entry plus a "Default" badge; a renamed default
+    // keeps its custom name (and the badge); a non-default course that merely
+    // happens to be called "Basic course" is left verbatim, no badge.
+    it('localises the seeded default course name and badges it (it → "Corso base")', async () => {
+        svc.listCohorts.mockResolvedValue({
+            cohorts: [
+                { id: 1, name: 'Basic course', is_default: 1, auto_enroll: 1, member_count: 3, join_code: null },
+                { id: 2, name: 'Basic course', is_default: 0, member_count: 0, join_code: null },
+                { id: 3, name: 'Cardio', is_default: 0, member_count: 1, join_code: 'ABC123' },
+            ],
+        });
+        const { setAppLanguage } = await import('../../i18n');
+        await setAppLanguage('it');
+        try {
+            renderWithProviders(<CohortsManagementTab />);
+            await waitFor(() => expect(screen.getByText('Corso base')).toBeTruthy());
+            // Only the DEFAULT gets translated; the look-alike keeps its stored name.
+            expect(screen.getAllByText('Basic course')).toHaveLength(1);
+            expect(screen.getByText('Cardio')).toBeTruthy();
+            // Exactly one default badge, on the default course.
+            expect(screen.getAllByText('Predefinito')).toHaveLength(1);
+        } finally {
+            await setAppLanguage('en');
+        }
+    });
+
+    it('shows a RENAMED default course verbatim, still badged as default', async () => {
+        svc.listCohorts.mockResolvedValue({
+            cohorts: [
+                { id: 1, name: 'Cardiology 101', is_default: 1, auto_enroll: 1, member_count: 3, join_code: null },
+            ],
+        });
+        renderWithProviders(<CohortsManagementTab />);
+        await waitFor(() => expect(screen.getByText('Cardiology 101')).toBeTruthy());
+        expect(screen.queryByText('Basic course')).toBeNull();
+        expect(screen.getByText('Default')).toBeTruthy();
+    });
+
     it('creates a course, clears the input, and reloads', async () => {
         svc.listCohorts.mockResolvedValue({ cohorts: [] });
         svc.createCohort.mockResolvedValue({});
@@ -193,6 +235,28 @@ describe('CohortsManagementTab — roster drill-down', () => {
         await waitFor(() =>
             expect(screen.getByText('Back to courses')).toBeTruthy());
     }
+
+    it('renders the seeded default course workspace header translated + badged', async () => {
+        const { setAppLanguage } = await import('../../i18n');
+        await setAppLanguage('it');
+        try {
+            svc.listCohorts.mockResolvedValue({
+                cohorts: [{ id: 1, name: 'Basic course', is_default: 1, member_count: 0 }],
+            });
+            svc.getCohort.mockResolvedValue({
+                cohort: { id: 1, name: 'Basic course', is_default: 1 }, members: [],
+            });
+            renderWithProviders(<CohortsManagementTab />);
+            await waitFor(() => expect(screen.getByText('Corso base')).toBeTruthy());
+            fireEvent.click(screen.getByText('Corso base'));
+            await waitFor(() =>
+                expect(screen.getByRole('heading', { level: 3, name: 'Corso base' })).toBeTruthy());
+            expect(screen.queryByText('Basic course')).toBeNull();
+            expect(screen.getAllByText('Predefinito').length).toBeGreaterThan(0);
+        } finally {
+            await setAppLanguage('en');
+        }
+    });
 
     it('opens the roster and shows the no-members state + generate-code CTA', async () => {
         await openRoster();

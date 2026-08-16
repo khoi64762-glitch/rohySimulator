@@ -271,7 +271,7 @@ router.get('/cohorts', authenticateToken, requireEducator, async (req, res, next
 router.get('/cohorts/mine', authenticateToken, requireStudent, async (req, res, next) => {
     try {
         const rows = await dbAdapter.all(
-            `SELECT c.id, c.name, c.description, m.joined_at, m.status, m.member_role
+            `SELECT c.id, c.name, c.description, c.is_default, m.joined_at, m.status, m.member_role
                FROM cohort_members m
                JOIN cohorts c ON c.id = m.cohort_id
               WHERE m.user_id = ? AND m.deleted_at IS NULL
@@ -337,6 +337,11 @@ router.patch('/cohorts/:id', authenticateToken, requireEducator, async (req, res
         // fields are optional patches; settings is REPLACE not merge —
         // simpler & predictable: PATCH sends the full settings object you
         // want, and it overwrites the stored JSON wholesale.
+        //
+        // Renaming the DEFAULT course is allowed (admins localise it — the
+        // client translates only the untouched seeded literal). Its identity
+        // is `is_default` (0044), which is server-owned: the field is not read
+        // from the body here, so no PATCH can set or clear it.
         const name = typeof body.name === 'string' ? body.name.trim() : '';
         if (!name) {
             return res.status(400).json({ error: 'name is required' });

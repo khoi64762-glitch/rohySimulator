@@ -111,8 +111,9 @@ router.get('/cases', authenticateToken, async (req, res) => {
     // via a class they belong to — the tenant default case is always visible so
     // "Basic course" members are never locked out. Flag OFF = legacy behaviour.
     //
-    // Every tier also carries the case's course (course_id/course_name) so the
-    // case browser can group by course. MIN(cohort_id) mirrors the
+    // Every tier also carries the case's course (course_id/course_name/
+    // course_is_default) so the case browser can group by course and translate
+    // the default course's seeded name. MIN(cohort_id) mirrors the
     // one-case⇄one-course tiebreaker used by GET /courses/case-assignments.
     const courseJoin = `
         LEFT JOIN (SELECT cc.case_id, MIN(cc.cohort_id) AS cohort_id
@@ -124,18 +125,18 @@ router.get('/cases', authenticateToken, async (req, res) => {
     let sql;
     let params;
     if (canReview) {
-        sql = `SELECT c.*, co.id AS course_id, co.name AS course_name FROM cases c ${courseJoin}
+        sql = `SELECT c.*, co.id AS course_id, co.name AS course_name, co.is_default AS course_is_default FROM cases c ${courseJoin}
                WHERE c.tenant_id = ? AND c.deleted_at IS NULL
                ORDER BY c.is_default DESC, c.created_at DESC`;
         params = [tenantId(req)];
     } else if (enforced) {
-        sql = `SELECT c.*, co.id AS course_id, co.name AS course_name FROM cases c ${courseJoin}
+        sql = `SELECT c.*, co.id AS course_id, co.name AS course_name, co.is_default AS course_is_default FROM cases c ${courseJoin}
                WHERE c.tenant_id = ? AND c.deleted_at IS NULL AND c.is_available = 1
                  AND ( c.is_default = 1 OR ${cohortCaseVisibleExists('c')} )
                ORDER BY c.is_default DESC, c.created_at DESC`;
         params = [tenantId(req), req.user.id];
     } else {
-        sql = `SELECT c.*, co.id AS course_id, co.name AS course_name FROM cases c ${courseJoin}
+        sql = `SELECT c.*, co.id AS course_id, co.name AS course_name, co.is_default AS course_is_default FROM cases c ${courseJoin}
                WHERE c.tenant_id = ? AND c.deleted_at IS NULL AND c.is_available = 1
                ORDER BY c.is_default DESC, c.created_at DESC`;
         params = [tenantId(req)];

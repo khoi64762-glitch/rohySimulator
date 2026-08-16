@@ -570,6 +570,62 @@ describe('ConfigPanel', () => {
         expect(onLoadCase).toHaveBeenCalledWith(expect.objectContaining({ id: 1 }));
     });
 
+    // Regression lock: the default course header rendered the raw seeded
+    // English literal "Basic course" in every UI language, because the name
+    // was a functional identifier (matched by the boot seeder) and could not
+    // be localised. GET /cases now carries `course_is_default`; while the
+    // default course still bears the seeded literal, the header renders the
+    // translated `default_course_name` catalogue entry. A renamed default
+    // (or a non-default course that happens to be called "Basic course")
+    // shows its stored name verbatim.
+    it('renders the seeded default course header through the UI language (it → "Corso base")', async () => {
+        server.use(
+            http.get('*/api/cases', () => HttpResponse.json({ cases: [
+                { id: 1, name: 'Chest pain', description: 'd', is_available: true, is_default: true,
+                  case_code: 'EN-0001', config: { case_language: 'en' },
+                  course_id: 10, course_name: 'Basic course', course_is_default: 1 },
+                { id: 2, name: 'Dolore toracico', description: 'd', is_available: true, is_default: false,
+                  case_code: 'IT-0002', config: { case_language: 'it' },
+                  course_id: 11, course_name: 'Corso di cardiologia', course_is_default: 0 },
+            ] })),
+        );
+        const { setAppLanguage } = await import('../../i18n');
+        await setAppLanguage('it');
+        try {
+            mount({ initialTab: 'cases' });
+            expect(await screen.findByText('Corso base')).toBeInTheDocument();
+            expect(screen.queryByText('Basic course')).not.toBeInTheDocument();
+            expect(screen.getByText('Corso di cardiologia')).toBeInTheDocument();
+        } finally {
+            await setAppLanguage('en');
+        }
+    });
+
+    it('shows a RENAMED default course verbatim, and a non-default "Basic course" verbatim', async () => {
+        server.use(
+            http.get('*/api/cases', () => HttpResponse.json({ cases: [
+                { id: 1, name: 'Chest pain', description: 'd', is_available: true, is_default: true,
+                  case_code: 'EN-0001', config: { case_language: 'en' },
+                  course_id: 10, course_name: 'Cardiology 101', course_is_default: 1 },
+                { id: 2, name: 'Dolore toracico', description: 'd', is_available: true, is_default: false,
+                  case_code: 'IT-0002', config: { case_language: 'it' },
+                  course_id: 11, course_name: 'Basic course', course_is_default: 0 },
+            ] })),
+        );
+        const { setAppLanguage } = await import('../../i18n');
+        await setAppLanguage('it');
+        try {
+            mount({ initialTab: 'cases' });
+            expect(await screen.findByText('Cardiology 101')).toBeInTheDocument();
+            // The teacher-made course merely NAMED "Basic course" is not the
+            // default and must not be translated.
+            expect(screen.getByText('Basic course')).toBeInTheDocument();
+            expect(screen.queryByText('Corso base')).not.toBeInTheDocument();
+        } finally {
+            await setAppLanguage('en');
+        }
+    });
+
     // CONTRACT: clicking "New Case" opens the wizard (smoke for the
     // wizard's mount path from the empty-list view).
     it('opens the case wizard when "New Case" is clicked', async () => {

@@ -477,6 +477,7 @@ Stores cohorts records.
 | `ends_at` | DATETIME | — | `0027_cohort_entity.sql` |
 | `settings` | JSON | — | `0027_cohort_entity.sql` |
 | `auto_enroll` | INTEGER | NOT NULL DEFAULT 0 | `0033_cohort_auto_enroll.sql` |
+| `is_default` | INTEGER | NOT NULL DEFAULT 0 | `0044_cohorts_is_default.sql` |
 
 ## `custom_drug_group_items`
 

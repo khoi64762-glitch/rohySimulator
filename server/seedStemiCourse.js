@@ -8,6 +8,7 @@
 // fresh installs get it right after the 0031 default-course backfill.
 import dbAdapter from './dbAdapter.js';
 import { logger } from './logger.js';
+import { DEFAULT_COURSE_NAME } from './shared/defaultCourse.js';
 
 const log = logger('seed-stemi');
 
@@ -233,7 +234,7 @@ async function seedCohort(cohort) {
     log.info('seeded STEMI course content', { cohort_id: cohort.id });
 }
 
-// Ensure every tenant with a staff user has a live "Basic course" (0031's
+// Ensure every tenant with a staff user has a live default course (0031's
 // backfill re-run at boot). On a FRESH install migrations run against an
 // empty DB — 0031 sees no users and creates nothing — and only afterwards do
 // the boot seeders insert the default users + cases. Without this step a
@@ -241,16 +242,23 @@ async function seedCohort(cohort) {
 // as 0031 (lowest-id admin, else educator); auto_enroll = 1 so the login
 // hook (ensureAutoEnrollMemberships) enrols everyone. Idempotent via the
 // NOT EXISTS guard; memberships come from the login hook, not from here.
-async function ensureBasicCourses() {
+//
+// The default course is identified by `cohorts.is_default = 1` (0044), NOT by
+// its name. The seeded name is the English literal 'Basic course' — display
+// only, so an admin may rename/localise it. The guard used to match the name,
+// which meant a renamed default was invisible here and every boot after the
+// rename minted a second "Basic course".
+export async function ensureBasicCourses() {
     const { changes } = await dbAdapter.run(
-        `INSERT INTO cohorts (name, owner_user_id, tenant_id, description, auto_enroll)
-         SELECT 'Basic course',
+        `INSERT INTO cohorts (name, owner_user_id, tenant_id, description, auto_enroll, is_default)
+         SELECT ?,
                 (SELECT u.id FROM users u
                   WHERE u.tenant_id = t.tenant_id AND u.deleted_at IS NULL
                     AND u.role IN ('admin', 'educator')
                   ORDER BY (u.role = 'admin') DESC, u.id ASC LIMIT 1),
                 t.tenant_id,
                 'Default class — every user is enrolled and receives the default case.',
+                1,
                 1
            FROM (SELECT DISTINCT tenant_id FROM users WHERE deleted_at IS NULL) t
           WHERE EXISTS (SELECT 1 FROM users u
@@ -258,10 +266,11 @@ async function ensureBasicCourses() {
                            AND u.role IN ('admin', 'educator'))
             AND NOT EXISTS (SELECT 1 FROM cohorts c
                              WHERE c.tenant_id = t.tenant_id
-                               AND c.name = 'Basic course'
-                               AND c.deleted_at IS NULL)`
+                               AND c.is_default = 1
+                               AND c.deleted_at IS NULL)`,
+        [DEFAULT_COURSE_NAME]
     );
-    if (changes) log.info('created Basic course cohorts', { created: changes });
+    if (changes) log.info('created default course cohorts', { created: changes });
 }
 
 // Course layout (idempotent, per tenant with a live Basic course):
@@ -278,7 +287,7 @@ async function ensureBasicCourses() {
 async function ensureBasicCourseCaseLink() {
     const basicCourses = await dbAdapter.all(
         `SELECT id, tenant_id, owner_user_id FROM cohorts
-          WHERE name = 'Basic course' AND deleted_at IS NULL
+          WHERE is_default = 1 AND deleted_at IS NULL
           ORDER BY id ASC`
     );
     for (const basic of basicCourses) {
@@ -302,7 +311,7 @@ export async function seedStemiCourse() {
         // "Basic course" per tenant), each idempotently.
         const cohorts = await dbAdapter.all(
             `SELECT id, tenant_id, owner_user_id FROM cohorts
-              WHERE name = 'Basic course' AND deleted_at IS NULL
+              WHERE is_default = 1 AND deleted_at IS NULL
               ORDER BY id ASC`
         );
         for (const cohort of cohorts) {

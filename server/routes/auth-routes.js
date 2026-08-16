@@ -378,8 +378,10 @@ router.post('/auth/register', registerLimiter, async (req, res) => {
                 });
             }
 
-            // Auto-enrol into the tenant's "Basic course" default class so the
-            // new user always has the default case (safety net for enforced
+            // Auto-enrol into the tenant's auto-enrol classes (the default
+            // course — cohorts.is_default = 1, seeded as "Basic course" but
+            // renameable — and any other cohorts.auto_enroll = 1) so the new
+            // user always has the default case (safety net for enforced
             // access). Idempotent + never throws.
             await ensureAutoEnrollMemberships(user.id, defaultTenantId);
 
@@ -564,8 +566,10 @@ router.post('/auth/login', authLimiter, (req, res) => {
                 });
             }
 
-            // Ensure the returning user is enrolled in "Basic course" (covers
-            // users created before the migration / outside the register flow).
+            // Ensure the returning user is enrolled in the default course and
+            // every other auto-enrol class (covers users created before the
+            // migration / outside the register flow). Matched by flag, never by
+            // the course name — the default course may be renamed.
             await ensureAutoEnrollMemberships(user.id, user.tenant_id || 1);
 
             // Set HttpOnly cookie alongside the JSON token. Cookie-aware

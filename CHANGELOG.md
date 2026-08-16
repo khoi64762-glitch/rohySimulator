@@ -9,6 +9,20 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.41] — 2026-08-16
+
+### Fixed
+
+- **The default course is now flagged, not named.** Migration 0044 adds
+  `cohorts.is_default` (backfilled from the seeded "Basic course",
+  unique per tenant among live rows). Seeders, language-case linking
+  and the cases list key on the flag, so renaming the default course
+  (e.g. to "Corso base") no longer makes the next boot create a second
+  "Basic course". While the seeded English name is untouched, the Cases
+  and Courses screens show it through the UI language ("Corso base",
+  "Grundkurs", …) with a "Default" badge; a renamed course shows its
+  own name.
+
 ## [2.9.40] — 2026-08-16
 
 ### Fixed

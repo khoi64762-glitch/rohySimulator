@@ -47,6 +47,7 @@ import { friendlyLlmError } from '../../utils/llmErrorMessage';
 import { SCENARIO_TEMPLATES, scaleScenarioTimeline } from '../../data/scenarioTemplates';
 import { RHYTHMS, DEFAULT_RHYTHM, resolveRhythm } from '../../services/rhythms';
 import { MARITAL_STATUSES, PATIENT_GENDERS, PERSONA_TYPES } from '../../services/patientDemographics';
+import { usesSeededDefaultCourseName } from '../../services/defaultCourse';
 import { useBodyImage } from '../../hooks/useBodyImage';
 
 // Wizard step order — the single source of truth for step numbers. CaseWizard's
@@ -362,25 +363,37 @@ export default function ConfigPanel({ onClose, onLoadCase, fullPage = false, ini
     const [cases, setCases] = useState([]);
     const [, setSelectedCaseId] = useState(null);
     // Course → cases browsing: GET /cases carries each case's course
-    // (course_name via the one-case⇄one-course join). Courses render
-    // alphabetically; cases without a course collect in a trailing
-    // "Unassigned" group (educator-only in enforced installs — students
-    // never see unassigned cases there).
+    // (course_name / course_is_default via the one-case⇄one-course join).
+    // Courses render alphabetically; cases without a course collect in a
+    // trailing "Unassigned" group (educator-only in enforced installs —
+    // students never see unassigned cases there). The DEFAULT course
+    // (cohorts.is_default) is seeded under the English literal "Basic course";
+    // while its name is still that literal it renders through the translated
+    // `default_course_name` entry so every UI language sees its own label.
+    // Once an admin renames it, the custom name is shown exactly as typed.
     const caseGroups = useMemo(() => {
         const byCourse = new Map();
         for (const c of cases) {
             const key = c.course_name || '';
-            if (!byCourse.has(key)) byCourse.set(key, []);
-            byCourse.get(key).push(c);
+            if (!byCourse.has(key)) byCourse.set(key, { isDefault: false, cases: [] });
+            const group = byCourse.get(key);
+            group.cases.push(c);
+            if (c.course_is_default) group.isDefault = true;
         }
         const named = [...byCourse.keys()]
             .filter(k => k !== '')
             .sort((a, b) => a.localeCompare(b))
-            .map(name => ({ key: name, name, cases: byCourse.get(name) }));
+            .map(name => {
+                const { isDefault, cases: groupCases } = byCourse.get(name);
+                const displayName = usesSeededDefaultCourseName({ name, is_default: isDefault })
+                    ? t('default_course_name')
+                    : name;
+                return { key: name, name: displayName, isDefault, cases: groupCases };
+            });
         return byCourse.has('')
-            ? [...named, { key: '__unassigned', name: null, cases: byCourse.get('') }]
+            ? [...named, { key: '__unassigned', name: null, cases: byCourse.get('').cases }]
             : named;
-    }, [cases]);
+    }, [cases, t]);
     // Stash shape: { _stashedAt: ISO string, _caseId: number|'new', ...rest of editingCase }.
     // The _stashedAt + _caseId let the wizard show a "Resumed draft from X"
     // banner so admins know this isn't a fresh open from the server.

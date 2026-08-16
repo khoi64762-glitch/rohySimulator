@@ -18,6 +18,32 @@ import {
 } from '../../services/cohortsService';
 import CohortReports from './CohortReports';
 import { CasePicker, PeoplePicker } from './CohortPickers';
+import { usesSeededDefaultCourseName } from '../../services/defaultCourse';
+
+// The tenant default course (cohorts.is_default) ships under the seeded English
+// literal "Basic course"; until an admin renames it we render the translated
+// label instead, so every UI language sees its own name. A custom name is
+// shown exactly as typed. A hook (not a plain helper) so the i18n parser sees
+// the namespace next to the key.
+function useCourseDisplayName() {
+    const { t } = useTranslation('teacher_cohorts');
+    return useCallback(
+        (course) => (usesSeededDefaultCourseName(course) ? t('default_course_name') : course?.name),
+        [t]
+    );
+}
+
+function DefaultCourseBadge() {
+    const { t } = useTranslation('teacher_cohorts');
+    return (
+        <span
+            className="inline-flex items-center rounded-full border border-sky-700 bg-sky-950/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-300"
+            title={t('badge_default_course_title')}
+        >
+            {t('badge_default_course')}
+        </span>
+    );
+}
 
 const errMsg = (e, fallback) =>
     e instanceof ApiError ? (e.message || fallback) : fallback;
@@ -59,6 +85,7 @@ async function runWithConcurrency(items, limit, worker) {
 // GET /cohorts returns for the caller).
 export default function CohortsManagementTab() {
     const { t } = useTranslation('teacher_cohorts');
+    const courseDisplayName = useCourseDisplayName();
     const toast = useToast();
     const [cohorts, setCohorts] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -162,7 +189,7 @@ export default function CohortsManagementTab() {
 
     const handleDelete = async (cohort) => {
         const ok = await toast.confirm(
-            t('confirm_delete_msg', { name: cohort.name }),
+            t('confirm_delete_msg', { name: courseDisplayName(cohort) }),
             { title: t('confirm_delete_title'), confirmText: t('btn_delete'), type: 'danger' },
         );
         if (!ok) return;
@@ -360,7 +387,10 @@ export default function CohortsManagementTab() {
                                 className="flex-1 min-w-0 text-left"
                                 title={t('title_manage_course')}
                             >
-                                <div className="font-bold text-white truncate">{c.name}</div>
+                                <div className="flex items-center gap-2 min-w-0">
+                                    <span className="font-bold text-white truncate">{courseDisplayName(c)}</span>
+                                    {c.is_default ? <DefaultCourseBadge /> : null}
+                                </div>
                                 <div className="text-xs text-neutral-400 mt-0.5">
                                     {t('card_enrolled_students', { count: c.student_count ?? c.students_count ?? c.member_count ?? 0 })}
                                     {' · '}
@@ -403,7 +433,7 @@ export default function CohortsManagementTab() {
                                             key={s.id}
                                             onClick={() => openCohort(c.id, 'reports', s.id)}
                                             title={label}
-                                            aria-label={t('aria_report', { label, name: c.name })}
+                                            aria-label={t('aria_report', { label, name: courseDisplayName(c) })}
                                             className="p-2 text-neutral-400 hover:text-purple-300 hover:bg-neutral-700 rounded-lg transition-colors"
                                         >
                                             <Icon className="w-4 h-4" />
@@ -418,7 +448,7 @@ export default function CohortsManagementTab() {
                                 <button
                                     onClick={() => openCohort(c.id, 'settings')}
                                     title={t('title_class_settings')}
-                                    aria-label={t('aria_class_settings', { name: c.name })}
+                                    aria-label={t('aria_class_settings', { name: courseDisplayName(c) })}
                                     className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-700 rounded-lg transition-colors"
                                 >
                                     <Pencil className="w-4 h-4" />
@@ -484,6 +514,7 @@ function Stat({ label, value }) {
 // Roster + join-code + Phase-8 Settings management for a single cohort.
 function CohortRoster({ cohortId, onBack, initialSection = 'manage', initialReportView = 'roster' }) {
     const { t } = useTranslation('teacher_cohorts');
+    const courseDisplayName = useCourseDisplayName();
     const toast = useToast();
     const [cohort, setCohort] = useState(null);
     const [members, setMembers] = useState([]);
@@ -608,7 +639,10 @@ function CohortRoster({ cohortId, onBack, initialSection = 'manage', initialRepo
                                 <div className="text-xs font-semibold uppercase tracking-[0.16em] text-neutral-500">
                                     {t('label_course_workspace')}
                                 </div>
-                                <h3 className="mt-1 text-2xl font-bold text-white">{cohort.name}</h3>
+                                <div className="mt-1 flex flex-wrap items-center gap-2">
+                                    <h3 className="text-2xl font-bold text-white">{courseDisplayName(cohort)}</h3>
+                                    {cohort.is_default ? <DefaultCourseBadge /> : null}
+                                </div>
                                 <div className="mt-2 flex flex-wrap gap-2 text-xs text-neutral-400">
                                     <span className="rounded-full border border-neutral-700 bg-neutral-800 px-2.5 py-1">
                                         {t('card_enrolled_students', { count: students.length })}

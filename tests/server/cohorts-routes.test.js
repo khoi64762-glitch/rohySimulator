@@ -185,6 +185,39 @@ describe('/api/cohorts routes', () => {
         expect(res.status).toBe(404);
     });
 
+    // Regression lock: renaming the default course created a duplicate on next boot.
+    // The default course is `is_default = 1` (0044) — server-owned. The list
+    // endpoints expose the flag so the UI can badge/translate it, an admin may
+    // rename it freely, and no PATCH body can flip the flag in either direction.
+    it('GET /cohorts exposes is_default; PATCH may rename the default but never sets/clears is_default', async () => {
+        const list = (await (await admin('/api/cohorts')).json()).cohorts;
+        const defaults = list.filter((c) => c.is_default === 1);
+        expect(defaults).toHaveLength(1);
+        expect(defaults[0].name).toBe('Basic course');
+        expect(list.find((c) => c.id === cohortId).is_default).toBe(0);
+
+        // Rename the default + try to clear the flag in the same body.
+        const renamed = await admin(`/api/cohorts/${defaults[0].id}`, {
+            method: 'PATCH', body: JSON.stringify({ name: 'Corso base', is_default: 0 }),
+        });
+        expect(renamed.status).toBe(200);
+        const renamedBody = (await renamed.json()).cohort;
+        expect(renamedBody.name).toBe('Corso base');
+        expect(renamedBody.is_default).toBe(1);
+
+        // Try to promote a teacher cohort to default via the body — ignored.
+        const promoted = await teacherA(`/api/cohorts/${cohortId}`, {
+            method: 'PATCH', body: JSON.stringify({ name: 'Cardiology 201', is_default: 1 }),
+        });
+        expect(promoted.status).toBe(200);
+        expect((await promoted.json()).cohort.is_default).toBe(0);
+
+        // Restore the seeded name so later tests keep their expectations.
+        await admin(`/api/cohorts/${defaults[0].id}`, {
+            method: 'PATCH', body: JSON.stringify({ name: 'Basic course' }),
+        });
+    });
+
     it('add member by username', async () => {
         const res = await teacherA(`/api/cohorts/${cohortId}/members`, {
             method: 'POST', body: JSON.stringify({ identifier: 'coh-student' }),
@@ -366,6 +399,12 @@ describe('/api/cohorts routes', () => {
         expect(row.joined_at).toBeTruthy();
         expect(row.status).toBe('active');
         expect(row.member_role).toBe('student');
+        expect(row.is_default).toBe(0);
+        // The login auto-enrolled the student into the tenant default course,
+        // which /mine flags so the student UI can translate/badge it.
+        const def = body.cohorts.find(c => c.is_default === 1);
+        expect(def).toBeTruthy();
+        expect(def.name).toBe('Basic course');
 
         const res2 = await student2('/api/cohorts/mine');
         expect(res2.status).toBe(200);

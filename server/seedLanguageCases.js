@@ -196,13 +196,14 @@ async function ensureCase(tenantId, c) {
     return caseId;
 }
 
-// Link a case into the tenant's single default course ("Basic course").
+// Link a case into the tenant's single default course (cohorts.is_default = 1;
+// seeded as "Basic course" but renameable — never match on the name).
 async function linkToBasicCourse(tenantId, caseId) {
     await dbAdapter.run(
         `INSERT INTO cohort_cases (cohort_id, case_id)
          SELECT co.id, ?
            FROM cohorts co
-          WHERE co.tenant_id = ? AND co.name = 'Basic course' AND co.deleted_at IS NULL
+          WHERE co.tenant_id = ? AND co.is_default = 1 AND co.deleted_at IS NULL
             AND NOT EXISTS (
                 SELECT 1 FROM cohort_cases cc
                  WHERE cc.cohort_id = co.id AND cc.case_id = ? AND cc.deleted_at IS NULL)`,
