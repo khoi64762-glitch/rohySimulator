@@ -1,8 +1,8 @@
 {
   "$schema": "https://github.com/mohsaqr/rohySimulator/blob/main/server/data/treatment_effects.schema.json",
   "data_source_key": "curated",
-  "release_version": "rohy-2026-05",
-  "notes": "Hand-curated PK + vitals-effects rows. Each medication row carries pk_source + pk_evidence_url. RxCUIs populated where canonical id is unambiguous; remaining null until import-rxnorm script runs (Session 2).",
+  "release_version": "rohy-2026-08",
+  "notes": "Hand-curated PK + vitals-effects rows forming the teaching formulary. 264 rows: 204 medications, 16 IV fluids / blood products, 13 oxygen / airway, 31 nursing. Every medication carries an RxNorm ingredient RxCUI (looked up live from RxNav) plus pk_source + pk_evidence_url; fluids, oxygen and nursing carry rxcui null and pk_source Curated (rohy). Drugs with no acute haemodynamic effect (antibiotics, statins, PPIs, ...) have all-zero effects with onset/peak/duration reflecting dosing so they remain orderable and scorable. Rows are grouped by treatment_type; the rohy-2026-08 additions are alphabetical within each block. Do not rename rows: case_treatments overlays reference treatment_name.",
   "rows": [
     {
       "treatment_type": "medication", "treatment_name": "Epinephrine", "route": "IV",
@@ -362,7 +362,7 @@
       "hr_effect": 3, "bp_sys_effect": 3, "bp_dia_effect": 0, "rr_effect": 3, "spo2_effect": 3,
       "dose_dependent": 1, "base_dose": 0.2, "base_dose_unit": "mg",
       "description": "Benzodiazepine antagonist - seizure risk in chronic BZD users",
-      "rxcui": "4337", "pk_source": "StatPearls", "pk_evidence_url": "https://www.ncbi.nlm.nih.gov/books/NBK470180/"
+      "rxcui": "4457", "pk_source": "StatPearls", "pk_evidence_url": "https://www.ncbi.nlm.nih.gov/books/NBK470180/"
     },
     {
       "treatment_type": "medication", "treatment_name": "Protamine", "route": "IV",
@@ -386,7 +386,7 @@
       "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
       "dose_dependent": 1, "base_dose": 400, "base_dose_unit": "mg",
       "description": "Factor Xa inhibitor reversal (apixaban/rivaroxaban) - thrombotic risk",
-      "rxcui": null, "pk_source": "FDA SPL", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/lookup.cfm?setid=andexxa"
+      "rxcui": "2045114", "pk_source": "FDA SPL", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/lookup.cfm?setid=andexxa"
     },
     {
       "treatment_type": "medication", "treatment_name": "Idarucizumab", "route": "IV",
@@ -418,7 +418,7 @@
       "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
       "dose_dependent": 1, "base_dose": 1500, "base_dose_unit": "mg/m2",
       "description": "Lead poisoning chelator - nephrotoxic; ensure hydration",
-      "rxcui": null, "pk_source": "StatPearls", "pk_evidence_url": "https://www.ncbi.nlm.nih.gov/books/NBK541071/"
+      "rxcui": "1903", "pk_source": "StatPearls", "pk_evidence_url": "https://www.ncbi.nlm.nih.gov/books/NBK541071/"
     },
     {
       "treatment_type": "medication", "treatment_name": "Digoxin Immune Fab", "route": "IV",
@@ -426,7 +426,7 @@
       "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
       "dose_dependent": 1, "base_dose": 40, "base_dose_unit": "mg per 0.5 mg ingested",
       "description": "Digoxin toxicity reversal - rapid restoration of conduction",
-      "rxcui": null, "pk_source": "FDA SPL", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/lookup.cfm?setid=digifab"
+      "rxcui": "203223", "pk_source": "FDA SPL", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/lookup.cfm?setid=digifab"
     },
     {
       "treatment_type": "medication", "treatment_name": "Octreotide", "route": "IV",
@@ -693,6 +693,950 @@
       "rxcui": "9997", "pk_source": "StatPearls", "pk_evidence_url": "https://www.ncbi.nlm.nih.gov/books/NBK554421/"
     },
     {
+      "treatment_type": "medication", "treatment_name": "Acetaminophen", "route": "oral",
+      "onset_minutes": 30, "peak_minutes": 60, "duration_minutes": 360,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0, "temp_effect": -1,
+      "dose_dependent": 1, "base_dose": 1000, "base_dose_unit": "mg",
+      "description": "Antipyretic + analgesic (paracetamol) oral - max 4 g/day; hepatotoxic in overdose",
+      "rxcui": "161", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Acetaminophen"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Activated charcoal", "route": "oral",
+      "onset_minutes": 15, "peak_minutes": 30, "duration_minutes": 240,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 50, "base_dose_unit": "g",
+      "description": "Adsorbent - most ingestions <1 h; not for corrosives, metals, alcohols; aspiration risk if obtunded",
+      "rxcui": "272", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Activated%20charcoal"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Acyclovir", "route": "IV",
+      "onset_minutes": 30, "peak_minutes": 60, "duration_minutes": 480,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 10, "base_dose_unit": "mg/kg",
+      "description": "Antiviral - empiric HSV encephalitis cover until PCR back; nephrotoxic, hydrate",
+      "rxcui": "281", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Acyclovir"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Albuterol/Ipratropium (nebulised)", "route": "inhaled",
+      "onset_minutes": 5, "peak_minutes": 30, "duration_minutes": 300,
+      "hr_effect": 10, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": -3, "spo2_effect": 4,
+      "dose_dependent": 0,
+      "description": "Combined beta-2 agonist + anticholinergic nebuliser - acute asthma / COPD; tachycardia, tremor",
+      "rxcui": "214199", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Albuterol%2FIpratropium"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Aminophylline", "route": "IV",
+      "onset_minutes": 15, "peak_minutes": 30, "duration_minutes": 360,
+      "hr_effect": 10, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": -2, "spo2_effect": 2,
+      "dose_dependent": 1, "base_dose": 5, "base_dose_unit": "mg/kg",
+      "description": "Methylxanthine - refractory acute asthma; narrow window, arrhythmias, seizures",
+      "rxcui": "689", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Aminophylline"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Amiodarone", "route": "oral",
+      "onset_minutes": 120, "peak_minutes": 360, "duration_minutes": 1440,
+      "hr_effect": -8, "bp_sys_effect": -3, "bp_dia_effect": -2, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 400, "base_dose_unit": "mg",
+      "description": "Class III antiarrhythmic oral - AF / VT maintenance; thyroid, lung, liver toxicity",
+      "rxcui": "703", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Amiodarone"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Amlodipine", "route": "oral",
+      "onset_minutes": 120, "peak_minutes": 480, "duration_minutes": 1440,
+      "hr_effect": 2, "bp_sys_effect": -10, "bp_dia_effect": -6, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 5, "base_dose_unit": "mg",
+      "description": "Dihydropyridine CCB - hypertension, stable angina; ankle oedema",
+      "rxcui": "17767", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Amlodipine"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Amoxicillin", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 120, "duration_minutes": 480,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 500, "base_dose_unit": "mg",
+      "description": "Aminopenicillin - otitis, sinusitis, CAP step-down, H. pylori",
+      "rxcui": "723", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Amoxicillin"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Amoxicillin-clavulanate", "route": "IV",
+      "onset_minutes": 15, "peak_minutes": 60, "duration_minutes": 480,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 1.2, "base_dose_unit": "g",
+      "description": "Aminopenicillin + beta-lactamase inhibitor IV - CAP, intra-abdominal, skin infection (non-US formulary)",
+      "rxcui": "19711", "pk_source": "RxNav", "pk_evidence_url": "https://mor.nlm.nih.gov/RxNav/search?searchBy=RXCUI&searchTerm=19711"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Amoxicillin-clavulanate", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 120, "duration_minutes": 480,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 875, "base_dose_unit": "mg",
+      "description": "Aminopenicillin + beta-lactamase inhibitor - bites, aspiration, sinusitis; diarrhoea",
+      "rxcui": "19711", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Amoxicillin-clavulanate"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Ampicillin", "route": "IV",
+      "onset_minutes": 15, "peak_minutes": 60, "duration_minutes": 360,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 2, "base_dose_unit": "g",
+      "description": "Aminopenicillin - Listeria cover in meningitis (<1 mo, >50 y, immunocompromised); enterococci",
+      "rxcui": "733", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Ampicillin"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Apixaban", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 180, "duration_minutes": 720,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 5, "base_dose_unit": "mg",
+      "description": "Factor Xa inhibitor DOAC - AF, VTE; reversal with andexanet alfa",
+      "rxcui": "1364430", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Apixaban"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Atenolol", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 180, "duration_minutes": 1440,
+      "hr_effect": -10, "bp_sys_effect": -6, "bp_dia_effect": -4, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 50, "base_dose_unit": "mg",
+      "description": "Beta-1 blocker oral - hypertension, angina; renal clearance",
+      "rxcui": "1202", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Atenolol"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Atorvastatin", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 120, "duration_minutes": 1440,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 80, "base_dose_unit": "mg",
+      "description": "HMG-CoA reductase inhibitor - high-intensity statin post-ACS / stroke; myalgia, LFTs",
+      "rxcui": "83367", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Atorvastatin"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Bisoprolol", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 180, "duration_minutes": 1440,
+      "hr_effect": -10, "bp_sys_effect": -6, "bp_dia_effect": -4, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 5, "base_dose_unit": "mg",
+      "description": "Beta-1 selective blocker oral - HFrEF, AF rate control, angina",
+      "rxcui": "19484", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Bisoprolol"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Budesonide", "route": "inhaled",
+      "onset_minutes": 60, "peak_minutes": 240, "duration_minutes": 720,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 0.5, "base_dose_unit": "mg",
+      "description": "Inhaled corticosteroid (nebulised) - asthma maintenance, croup adjunct",
+      "rxcui": "19831", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Budesonide"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Calcium carbonate", "route": "oral",
+      "onset_minutes": 30, "peak_minutes": 60, "duration_minutes": 240,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 1250, "base_dose_unit": "mg",
+      "description": "Oral calcium salt - hypocalcaemia maintenance, phosphate binder, antacid",
+      "rxcui": "1897", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Calcium%20carbonate"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Carvedilol", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 120, "duration_minutes": 720,
+      "hr_effect": -8, "bp_sys_effect": -8, "bp_dia_effect": -5, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 6.25, "base_dose_unit": "mg",
+      "description": "Alpha/beta blocker oral - HFrEF mortality benefit; dizziness, bronchospasm",
+      "rxcui": "20352", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Carvedilol"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Cefazolin", "route": "IV",
+      "onset_minutes": 15, "peak_minutes": 30, "duration_minutes": 480,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 2, "base_dose_unit": "g",
+      "description": "1st-gen cephalosporin - surgical prophylaxis, MSSA cellulitis / bacteraemia",
+      "rxcui": "2180", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Cefazolin"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Cefotaxime", "route": "IV",
+      "onset_minutes": 15, "peak_minutes": 60, "duration_minutes": 480,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 2, "base_dose_unit": "g",
+      "description": "3rd-gen cephalosporin - meningitis alternative to ceftriaxone (neonates, hyperbilirubinaemia)",
+      "rxcui": "2186", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Cefotaxime"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Cephalexin", "route": "oral",
+      "onset_minutes": 30, "peak_minutes": 60, "duration_minutes": 360,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 500, "base_dose_unit": "mg",
+      "description": "1st-gen oral cephalosporin - cellulitis, uncomplicated UTI",
+      "rxcui": "2231", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Cephalexin"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Ciprofloxacin", "route": "IV",
+      "onset_minutes": 30, "peak_minutes": 60, "duration_minutes": 720,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 400, "base_dose_unit": "mg",
+      "description": "Fluoroquinolone IV - complicated UTI, gram-negative sepsis; QT, tendinopathy",
+      "rxcui": "2551", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Ciprofloxacin"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Ciprofloxacin", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 120, "duration_minutes": 720,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 500, "base_dose_unit": "mg",
+      "description": "Fluoroquinolone - pyelonephritis, Pseudomonas; QT, tendinopathy, C. difficile",
+      "rxcui": "2551", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Ciprofloxacin"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Cisatracurium", "route": "IV",
+      "onset_minutes": 2, "peak_minutes": 5, "duration_minutes": 60,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": -10, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 0.15, "base_dose_unit": "mg/kg",
+      "description": "Non-depolarising NMBA - Hofmann elimination (organ-independent); ARDS paralysis",
+      "rxcui": "319864", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Cisatracurium"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Clindamycin", "route": "IV",
+      "onset_minutes": 30, "peak_minutes": 60, "duration_minutes": 480,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 600, "base_dose_unit": "mg",
+      "description": "Lincosamide - toxin suppression in necrotising fasciitis / TSS, anaerobes; C. difficile risk",
+      "rxcui": "2582", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Clindamycin"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Colchicine", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 120, "duration_minutes": 1440,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 0.5, "base_dose_unit": "mg",
+      "description": "Microtubule inhibitor - acute gout, pericarditis; diarrhoea, narrow window (CYP3A4 / P-gp)",
+      "rxcui": "2683", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Colchicine"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Dabigatran etexilate", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 120, "duration_minutes": 720,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 150, "base_dose_unit": "mg",
+      "description": "Direct thrombin inhibitor DOAC - AF, VTE; renal clearance; reversal idarucizumab",
+      "rxcui": "1037042", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Dabigatran%20etexilate"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Dantrolene", "route": "IV",
+      "onset_minutes": 5, "peak_minutes": 15, "duration_minutes": 360,
+      "hr_effect": -5, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0, "temp_effect": -1,
+      "dose_dependent": 1, "base_dose": 2.5, "base_dose_unit": "mg/kg",
+      "description": "Ryanodine receptor antagonist - malignant hyperthermia, NMS; hepatotoxicity",
+      "rxcui": "3105", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Dantrolene"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Deferoxamine", "route": "IV",
+      "onset_minutes": 30, "peak_minutes": 60, "duration_minutes": 480,
+      "hr_effect": 0, "bp_sys_effect": -5, "bp_dia_effect": -3, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 15, "base_dose_unit": "mg/kg/hr",
+      "description": "Iron chelator - serious iron overdose; hypotension with rapid infusion, vin-rose urine",
+      "rxcui": "3131", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Deferoxamine"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Desmopressin", "route": "IV",
+      "onset_minutes": 30, "peak_minutes": 60, "duration_minutes": 480,
+      "hr_effect": 0, "bp_sys_effect": -3, "bp_dia_effect": -2, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 0.3, "base_dose_unit": "mcg/kg",
+      "description": "V2 analogue - uraemic / von Willebrand bleeding, central DI; hyponatraemia",
+      "rxcui": "3251", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Desmopressin"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Dexamethasone", "route": "IV",
+      "onset_minutes": 30, "peak_minutes": 120, "duration_minutes": 360,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 10, "base_dose_unit": "mg",
+      "description": "Corticosteroid - give with/before first antibiotic dose in bacterial meningitis; cerebral oedema, croup, airway oedema",
+      "rxcui": "3264", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Dexamethasone"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Dexmedetomidine", "route": "IV",
+      "onset_minutes": 10, "peak_minutes": 30, "duration_minutes": 120,
+      "hr_effect": -12, "bp_sys_effect": -8, "bp_dia_effect": -5, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 0.4, "base_dose_unit": "mcg/kg/hr",
+      "description": "Alpha-2 agonist sedative - ICU sedation without respiratory depression; bradycardia, hypotension",
+      "rxcui": "48937", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Dexmedetomidine"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Diazepam", "route": "IV",
+      "onset_minutes": 1, "peak_minutes": 5, "duration_minutes": 60,
+      "hr_effect": 0, "bp_sys_effect": -8, "bp_dia_effect": -4, "rr_effect": -3, "spo2_effect": -2,
+      "dose_dependent": 1, "base_dose": 5, "base_dose_unit": "mg",
+      "description": "Benzodiazepine IV - status epilepticus, alcohol withdrawal; respiratory depression",
+      "rxcui": "3322", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Diazepam"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Diazepam", "route": "rectal",
+      "onset_minutes": 5, "peak_minutes": 15, "duration_minutes": 60,
+      "hr_effect": 0, "bp_sys_effect": -5, "bp_dia_effect": -3, "rr_effect": -2, "spo2_effect": -1,
+      "dose_dependent": 1, "base_dose": 10, "base_dose_unit": "mg",
+      "description": "Benzodiazepine rectal - seizure rescue without IV access (paediatric / prehospital)",
+      "rxcui": "3322", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Diazepam"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Diclofenac", "route": "IM",
+      "onset_minutes": 15, "peak_minutes": 30, "duration_minutes": 480,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0, "temp_effect": -0.8,
+      "dose_dependent": 1, "base_dose": 75, "base_dose_unit": "mg",
+      "description": "NSAID IM - renal colic, musculoskeletal pain; renal, GI, cardiovascular risk",
+      "rxcui": "3355", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Diclofenac"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Dimenhydrinate", "route": "IV",
+      "onset_minutes": 15, "peak_minutes": 60, "duration_minutes": 240,
+      "hr_effect": 3, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 50, "base_dose_unit": "mg",
+      "description": "H1 antihistamine antiemetic - vertigo, motion sickness; sedation, anticholinergic",
+      "rxcui": "3444", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Dimenhydrinate"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Doxycycline", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 180, "duration_minutes": 720,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 100, "base_dose_unit": "mg",
+      "description": "Tetracycline - atypical CAP, rickettsia, Lyme, chlamydia; photosensitivity, oesophagitis",
+      "rxcui": "3640", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Doxycycline"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Droperidol", "route": "IV",
+      "onset_minutes": 5, "peak_minutes": 15, "duration_minutes": 120,
+      "hr_effect": 0, "bp_sys_effect": -5, "bp_dia_effect": -3, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 1.25, "base_dose_unit": "mg",
+      "description": "Butyrophenone antiemetic / sedative - agitation, refractory nausea; QT prolongation (boxed)",
+      "rxcui": "3648", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Droperidol"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Ephedrine", "route": "IV",
+      "onset_minutes": 1, "peak_minutes": 5, "duration_minutes": 30,
+      "hr_effect": 10, "bp_sys_effect": 15, "bp_dia_effect": 8, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 10, "base_dose_unit": "mg",
+      "description": "Mixed sympathomimetic bolus - anaesthesia-related hypotension; tachyphylaxis",
+      "rxcui": "3966", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Ephedrine"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Epinephrine", "route": "IM",
+      "onset_minutes": 5, "peak_minutes": 10, "duration_minutes": 40,
+      "hr_effect": 20, "bp_sys_effect": 20, "bp_dia_effect": 10, "rr_effect": -2, "spo2_effect": 4,
+      "dose_dependent": 1, "base_dose": 0.5, "base_dose_unit": "mg",
+      "description": "Sympathomimetic IM (1:1000, anterolateral thigh) - anaphylaxis first-line; repeat q5-15 min",
+      "rxcui": "3992", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Epinephrine"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Epinephrine", "route": "inhaled",
+      "onset_minutes": 5, "peak_minutes": 20, "duration_minutes": 120,
+      "hr_effect": 10, "bp_sys_effect": 5, "bp_dia_effect": 0, "rr_effect": -3, "spo2_effect": 3,
+      "dose_dependent": 1, "base_dose": 5, "base_dose_unit": "mg",
+      "description": "Nebulised adrenaline - croup, post-extubation stridor; rebound after ~2 h, observe",
+      "rxcui": "3992", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Epinephrine"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Famotidine", "route": "IV",
+      "onset_minutes": 15, "peak_minutes": 60, "duration_minutes": 600,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 20, "base_dose_unit": "mg",
+      "description": "H2 antagonist - stress-ulcer prophylaxis, GORD; adjunct in anaphylaxis",
+      "rxcui": "4278", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Famotidine"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Flecainide", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 180, "duration_minutes": 720,
+      "hr_effect": -3, "bp_sys_effect": -3, "bp_dia_effect": -2, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 100, "base_dose_unit": "mg",
+      "description": "Class IC antiarrhythmic - pill-in-pocket AF; avoid in structural heart disease (CAST)",
+      "rxcui": "4441", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Flecainide"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Fluconazole", "route": "IV",
+      "onset_minutes": 30, "peak_minutes": 120, "duration_minutes": 1440,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 400, "base_dose_unit": "mg",
+      "description": "Azole antifungal - candidaemia, cryptococcal consolidation; CYP inhibitor, QT",
+      "rxcui": "4450", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Fluconazole"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Fluconazole", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 120, "duration_minutes": 1440,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 200, "base_dose_unit": "mg",
+      "description": "Azole antifungal - oesophageal / vaginal candidiasis; CYP inhibitor",
+      "rxcui": "4450", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Fluconazole"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Fludrocortisone", "route": "oral",
+      "onset_minutes": 120, "peak_minutes": 360, "duration_minutes": 1440,
+      "hr_effect": 0, "bp_sys_effect": 5, "bp_dia_effect": 3, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 0.1, "base_dose_unit": "mg",
+      "description": "Mineralocorticoid - replacement in primary adrenal insufficiency (Addison, post Waterhouse-Friderichsen); hypokalaemia, oedema",
+      "rxcui": "4452", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Fludrocortisone"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Folic acid", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 120, "duration_minutes": 1440,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 5, "base_dose_unit": "mg",
+      "description": "Vitamin B9 - megaloblastic anaemia, alcohol misuse, methotrexate rescue",
+      "rxcui": "4511", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Folic%20acid"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Fomepizole", "route": "IV",
+      "onset_minutes": 15, "peak_minutes": 60, "duration_minutes": 720,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 15, "base_dose_unit": "mg/kg",
+      "description": "Alcohol dehydrogenase inhibitor - methanol / ethylene glycol poisoning; q12h",
+      "rxcui": "15226", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Fomepizole"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Fondaparinux", "route": "SC",
+      "onset_minutes": 120, "peak_minutes": 180, "duration_minutes": 1440,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 2.5, "base_dose_unit": "mg",
+      "description": "Synthetic pentasaccharide Xa inhibitor - VTE prophylaxis, HIT alternative; renal",
+      "rxcui": "321208", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Fondaparinux"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Furosemide", "route": "oral",
+      "onset_minutes": 30, "peak_minutes": 90, "duration_minutes": 360,
+      "hr_effect": 0, "bp_sys_effect": -6, "bp_dia_effect": -3, "rr_effect": 0, "spo2_effect": 1,
+      "dose_dependent": 1, "base_dose": 40, "base_dose_unit": "mg",
+      "description": "Loop diuretic oral - chronic heart failure / oedema; hypokalaemia, AKI",
+      "rxcui": "4603", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Furosemide"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Gentamicin", "route": "IV",
+      "onset_minutes": 30, "peak_minutes": 60, "duration_minutes": 1440,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 5, "base_dose_unit": "mg/kg",
+      "description": "Aminoglycoside - gram-negative sepsis, endocarditis synergy; nephro/ototoxic, level monitoring",
+      "rxcui": "1596450", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Gentamicin"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Glipizide", "route": "oral",
+      "onset_minutes": 30, "peak_minutes": 120, "duration_minutes": 720,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 5, "base_dose_unit": "mg",
+      "description": "Sulfonylurea - type 2 diabetes; hypoglycaemia (octreotide for OD)",
+      "rxcui": "4821", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Glipizide"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Glycopyrrolate", "route": "IV",
+      "onset_minutes": 2, "peak_minutes": 5, "duration_minutes": 120,
+      "hr_effect": 10, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 0.2, "base_dose_unit": "mg",
+      "description": "Antimuscarinic - secretions, offsets neostigmine bradycardia; does not cross BBB",
+      "rxcui": "4955", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Glycopyrrolate"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Haloperidol", "route": "IM",
+      "onset_minutes": 20, "peak_minutes": 45, "duration_minutes": 480,
+      "hr_effect": 2, "bp_sys_effect": -3, "bp_dia_effect": -2, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 5, "base_dose_unit": "mg",
+      "description": "Butyrophenone antipsychotic IM - acute agitation / delirium; EPS, QT prolongation",
+      "rxcui": "5093", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Haloperidol"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Haloperidol", "route": "IV",
+      "onset_minutes": 10, "peak_minutes": 30, "duration_minutes": 360,
+      "hr_effect": 2, "bp_sys_effect": -3, "bp_dia_effect": -2, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 2.5, "base_dose_unit": "mg",
+      "description": "Butyrophenone antipsychotic IV - ICU delirium; QT / torsades (ECG monitoring)",
+      "rxcui": "5093", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Haloperidol"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Heparin (UFH)", "route": "SC",
+      "onset_minutes": 60, "peak_minutes": 180, "duration_minutes": 480,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 5000, "base_dose_unit": "units",
+      "description": "Unfractionated heparin SC - VTE prophylaxis q8-12h; HIT monitoring",
+      "rxcui": "5224", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Heparin"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Hydroxocobalamin", "route": "IV",
+      "onset_minutes": 5, "peak_minutes": 15, "duration_minutes": 240,
+      "hr_effect": 0, "bp_sys_effect": 8, "bp_dia_effect": 5, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 5, "base_dose_unit": "g",
+      "description": "Cyanide antidote (smoke inhalation) - red discolouration of skin / urine, transient hypertension",
+      "rxcui": "5514", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Hydroxocobalamin"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Hyoscine butylbromide (butylscopolamine)", "route": "IV",
+      "onset_minutes": 5, "peak_minutes": 15, "duration_minutes": 120,
+      "hr_effect": 8, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 20, "base_dose_unit": "mg",
+      "description": "Antimuscarinic antispasmodic - biliary / renal colic, IBS; tachycardia (non-US formulary)",
+      "rxcui": "1085787", "pk_source": "RxNav", "pk_evidence_url": "https://mor.nlm.nih.gov/RxNav/search?searchBy=RXCUI&searchTerm=1085787"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Ibuprofen", "route": "oral",
+      "onset_minutes": 30, "peak_minutes": 90, "duration_minutes": 480,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0, "temp_effect": -1,
+      "dose_dependent": 1, "base_dose": 400, "base_dose_unit": "mg",
+      "description": "NSAID - antipyretic / analgesic; GI bleed, AKI, platelet inhibition",
+      "rxcui": "5640", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Ibuprofen"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Insulin Aspart", "route": "SC",
+      "onset_minutes": 15, "peak_minutes": 60, "duration_minutes": 240,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 0.1, "base_dose_unit": "units/kg",
+      "description": "Rapid-acting prandial / correction insulin",
+      "rxcui": "51428", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Insulin%20Aspart"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Insulin Detemir", "route": "SC",
+      "onset_minutes": 60, "peak_minutes": 360, "duration_minutes": 1200,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 0.2, "base_dose_unit": "units/kg/day",
+      "description": "Long-acting basal insulin - once or twice daily",
+      "rxcui": "139825", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Insulin%20Detemir"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Intravenous lipid emulsion 20% (Intralipid)", "route": "IV",
+      "onset_minutes": 2, "peak_minutes": 10, "duration_minutes": 60,
+      "hr_effect": 5, "bp_sys_effect": 8, "bp_dia_effect": 5, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 1.5, "base_dose_unit": "mL/kg",
+      "description": "Lipid rescue - local anaesthetic systemic toxicity, lipophilic drug overdose (bolus 1.5 mL/kg)",
+      "rxcui": "9949", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Intravenous%20lipid%20emulsion"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Isoproterenol", "route": "IV",
+      "onset_minutes": 1, "peak_minutes": 3, "duration_minutes": 10,
+      "hr_effect": 25, "bp_sys_effect": 5, "bp_dia_effect": -10, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 2, "base_dose_unit": "mcg/min",
+      "description": "Non-selective beta agonist - bradycardia / heart block bridge, torsades overdrive; drops diastolic BP",
+      "rxcui": "6054", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Isoproterenol"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Isosorbide mononitrate", "route": "oral",
+      "onset_minutes": 30, "peak_minutes": 60, "duration_minutes": 720,
+      "hr_effect": 3, "bp_sys_effect": -8, "bp_dia_effect": -4, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 30, "base_dose_unit": "mg",
+      "description": "Long-acting nitrate - angina prophylaxis; headache, tolerance (nitrate-free interval)",
+      "rxcui": "28004", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Isosorbide%20mononitrate"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Lacosamide", "route": "IV",
+      "onset_minutes": 15, "peak_minutes": 60, "duration_minutes": 720,
+      "hr_effect": -3, "bp_sys_effect": -3, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 200, "base_dose_unit": "mg",
+      "description": "Sodium-channel antiepileptic - status epilepticus second-line; PR prolongation, dizziness",
+      "rxcui": "623400", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Lacosamide"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Lactulose", "route": "oral",
+      "onset_minutes": 120, "peak_minutes": 240, "duration_minutes": 720,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 20, "base_dose_unit": "g",
+      "description": "Osmotic laxative - hepatic encephalopathy (2-3 soft stools/day), constipation",
+      "rxcui": "6218", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Lactulose"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Levothyroxine", "route": "oral",
+      "onset_minutes": 1440, "peak_minutes": 4320, "duration_minutes": 10080,
+      "hr_effect": 2, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 100, "base_dose_unit": "mcg",
+      "description": "Thyroid hormone replacement - hypothyroidism; weeks to steady state",
+      "rxcui": "10582", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Levothyroxine"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Linezolid", "route": "IV",
+      "onset_minutes": 30, "peak_minutes": 120, "duration_minutes": 720,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 600, "base_dose_unit": "mg",
+      "description": "Oxazolidinone - MRSA / VRE pneumonia and skin infection; serotonin syndrome with SSRIs, thrombocytopenia",
+      "rxcui": "190376", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Linezolid"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Lisinopril", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 360, "duration_minutes": 1440,
+      "hr_effect": 0, "bp_sys_effect": -10, "bp_dia_effect": -6, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 10, "base_dose_unit": "mg",
+      "description": "ACE inhibitor - hypertension, HFrEF, post-MI; cough, hyperkalaemia, angioedema",
+      "rxcui": "29046", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Lisinopril"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Loperamide", "route": "oral",
+      "onset_minutes": 30, "peak_minutes": 60, "duration_minutes": 480,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 4, "base_dose_unit": "mg",
+      "description": "Peripheral opioid antidiarrhoeal - avoid in bloody diarrhoea / C. difficile",
+      "rxcui": "6468", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Loperamide"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Losartan", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 360, "duration_minutes": 1440,
+      "hr_effect": 0, "bp_sys_effect": -8, "bp_dia_effect": -5, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 50, "base_dose_unit": "mg",
+      "description": "Angiotensin receptor blocker - hypertension, HFrEF if ACEi cough; hyperkalaemia",
+      "rxcui": "52175", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Losartan"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Magnesium oxide", "route": "oral",
+      "onset_minutes": 120, "peak_minutes": 240, "duration_minutes": 720,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 400, "base_dose_unit": "mg",
+      "description": "Oral magnesium - mild hypomagnesaemia; diarrhoea limits absorption",
+      "rxcui": "6582", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Magnesium%20oxide"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Mannitol 20%", "route": "IV",
+      "onset_minutes": 15, "peak_minutes": 45, "duration_minutes": 360,
+      "hr_effect": 0, "bp_sys_effect": -5, "bp_dia_effect": -3, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 1, "base_dose_unit": "g/kg",
+      "description": "Osmotic diuretic - lowers ICP in herniation / cerebral oedema; monitor osmolality (<320) and hypovolaemia",
+      "rxcui": "6628", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Mannitol"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Metformin", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 180, "duration_minutes": 720,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 500, "base_dose_unit": "mg",
+      "description": "Biguanide - first-line type 2 diabetes; hold with contrast / AKI (lactic acidosis)",
+      "rxcui": "6809", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Metformin"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Methylene blue", "route": "IV",
+      "onset_minutes": 5, "peak_minutes": 30, "duration_minutes": 240,
+      "hr_effect": 0, "bp_sys_effect": 5, "bp_dia_effect": 3, "rr_effect": 0, "spo2_effect": -2,
+      "dose_dependent": 1, "base_dose": 1, "base_dose_unit": "mg/kg",
+      "description": "Methaemoglobinaemia antidote; refractory vasoplegia; falsely lowers pulse-oximetry reading",
+      "rxcui": "6878", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Methylene%20blue"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Metoprolol", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 120, "duration_minutes": 720,
+      "hr_effect": -10, "bp_sys_effect": -6, "bp_dia_effect": -4, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 50, "base_dose_unit": "mg",
+      "description": "Beta-1 blocker oral - AF rate control, angina, post-MI",
+      "rxcui": "6918", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Metoprolol"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Midazolam", "route": "IM",
+      "onset_minutes": 5, "peak_minutes": 15, "duration_minutes": 60,
+      "hr_effect": 0, "bp_sys_effect": -8, "bp_dia_effect": -4, "rr_effect": -3, "spo2_effect": -2,
+      "dose_dependent": 1, "base_dose": 10, "base_dose_unit": "mg",
+      "description": "Benzodiazepine IM - prehospital status epilepticus (RAMPART); respiratory depression",
+      "rxcui": "6960", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Midazolam"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Naloxone", "route": "IM",
+      "onset_minutes": 5, "peak_minutes": 15, "duration_minutes": 60,
+      "hr_effect": 5, "bp_sys_effect": 5, "bp_dia_effect": 0, "rr_effect": 5, "spo2_effect": 6,
+      "dose_dependent": 1, "base_dose": 0.4, "base_dose_unit": "mg",
+      "description": "Opioid antagonist IM - no IV access / community; shorter than most opioids, repeat dosing",
+      "rxcui": "7242", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Naloxone"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Naproxen", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 120, "duration_minutes": 720,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0, "temp_effect": -0.8,
+      "dose_dependent": 1, "base_dose": 500, "base_dose_unit": "mg",
+      "description": "NSAID - gout, musculoskeletal pain; longer half-life; GI and renal risk",
+      "rxcui": "7258", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Naproxen"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Neostigmine", "route": "IV",
+      "onset_minutes": 5, "peak_minutes": 10, "duration_minutes": 60,
+      "hr_effect": -10, "bp_sys_effect": -3, "bp_dia_effect": 0, "rr_effect": 6, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 0.05, "base_dose_unit": "mg/kg",
+      "description": "Anticholinesterase - NMB reversal (pair with glycopyrrolate), Ogilvie syndrome; bradycardia",
+      "rxcui": "7315", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Neostigmine"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Nimodipine", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 90, "duration_minutes": 240,
+      "hr_effect": 3, "bp_sys_effect": -8, "bp_dia_effect": -5, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 60, "base_dose_unit": "mg",
+      "description": "Dihydropyridine CCB - vasospasm prophylaxis in aneurysmal SAH q4h; never give IV",
+      "rxcui": "7426", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Nimodipine"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Nitrofurantoin", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 120, "duration_minutes": 360,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 100, "base_dose_unit": "mg",
+      "description": "Urinary antiseptic - uncomplicated cystitis only; avoid if eGFR <30, pulmonary fibrosis long-term",
+      "rxcui": "7454", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Nitrofurantoin"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Nitroglycerin", "route": "sublingual",
+      "onset_minutes": 2, "peak_minutes": 5, "duration_minutes": 30,
+      "hr_effect": 5, "bp_sys_effect": -12, "bp_dia_effect": -6, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 0.4, "base_dose_unit": "mg",
+      "description": "Venodilator SL - acute angina; headache, hypotension; avoid with PDE-5 inhibitors",
+      "rxcui": "4917", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Nitroglycerin"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Olanzapine", "route": "IM",
+      "onset_minutes": 15, "peak_minutes": 45, "duration_minutes": 480,
+      "hr_effect": 5, "bp_sys_effect": -5, "bp_dia_effect": -3, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 10, "base_dose_unit": "mg",
+      "description": "Atypical antipsychotic IM - acute agitation; hypotension, avoid with parenteral benzodiazepines",
+      "rxcui": "61381", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Olanzapine"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Omeprazole", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 120, "duration_minutes": 1440,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 20, "base_dose_unit": "mg",
+      "description": "Proton pump inhibitor - GORD, ulcer, H. pylori regimen",
+      "rxcui": "7646", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Omeprazole"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Ondansetron", "route": "oral",
+      "onset_minutes": 30, "peak_minutes": 90, "duration_minutes": 240,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 8, "base_dose_unit": "mg",
+      "description": "5-HT3 antagonist oral - nausea / vomiting; QT prolongation, constipation",
+      "rxcui": "26225", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Ondansetron"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Oseltamivir", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 180, "duration_minutes": 720,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 75, "base_dose_unit": "mg",
+      "description": "Neuraminidase inhibitor - influenza within 48 h or any hospitalised patient; nausea",
+      "rxcui": "260101", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Oseltamivir"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Oxycodone", "route": "oral",
+      "onset_minutes": 30, "peak_minutes": 60, "duration_minutes": 240,
+      "hr_effect": -3, "bp_sys_effect": -5, "bp_dia_effect": -3, "rr_effect": -3, "spo2_effect": -1,
+      "dose_dependent": 1, "base_dose": 5, "base_dose_unit": "mg",
+      "description": "Opioid oral - moderate-severe pain; respiratory depression, constipation, dependence",
+      "rxcui": "7804", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Oxycodone"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Oxytocin", "route": "IV",
+      "onset_minutes": 1, "peak_minutes": 5, "duration_minutes": 60,
+      "hr_effect": 8, "bp_sys_effect": -8, "bp_dia_effect": -5, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 10, "base_dose_unit": "units",
+      "description": "Uterotonic - postpartum haemorrhage / third stage; hypotension with rapid bolus",
+      "rxcui": "7824", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Oxytocin"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Pantoprazole", "route": "IV",
+      "onset_minutes": 15, "peak_minutes": 120, "duration_minutes": 1440,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 40, "base_dose_unit": "mg",
+      "description": "Proton pump inhibitor IV - upper GI bleed (80 mg then 8 mg/h), NPO patients",
+      "rxcui": "40790", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Pantoprazole"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Pantoprazole", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 150, "duration_minutes": 1440,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 40, "base_dose_unit": "mg",
+      "description": "Proton pump inhibitor - GORD, ulcer, NSAID gastroprotection",
+      "rxcui": "40790", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Pantoprazole"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Penicillin G", "route": "IV",
+      "onset_minutes": 15, "peak_minutes": 30, "duration_minutes": 240,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 4, "base_dose_unit": "million units",
+      "description": "Benzylpenicillin - meningococcal disease, streptococcal / pneumococcal infection, syphilis",
+      "rxcui": "7980", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Penicillin%20G"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Phenobarbital", "route": "IV",
+      "onset_minutes": 5, "peak_minutes": 30, "duration_minutes": 720,
+      "hr_effect": 0, "bp_sys_effect": -10, "bp_dia_effect": -5, "rr_effect": -4, "spo2_effect": -2,
+      "dose_dependent": 1, "base_dose": 20, "base_dose_unit": "mg/kg",
+      "description": "Barbiturate - refractory status epilepticus; hypotension, respiratory depression",
+      "rxcui": "8134", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Phenobarbital"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Polyethylene glycol 3350 (macrogol)", "route": "oral",
+      "onset_minutes": 120, "peak_minutes": 240, "duration_minutes": 1440,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 17, "base_dose_unit": "g",
+      "description": "Osmotic laxative - constipation, bowel preparation",
+      "rxcui": "221147", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Polyethylene%20glycol%203350"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Potassium chloride", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 120, "duration_minutes": 360,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 20, "base_dose_unit": "mEq",
+      "description": "Oral potassium - mild-moderate hypokalaemia; GI irritation",
+      "rxcui": "8591", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Potassium%20chloride"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Potassium phosphate", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 180, "duration_minutes": 480,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 250, "base_dose_unit": "mg phosphorus",
+      "description": "Oral phosphate - mild hypophosphataemia, refeeding; diarrhoea",
+      "rxcui": "34322", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Potassium%20phosphate"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Prednisolone", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 120, "duration_minutes": 1440,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 40, "base_dose_unit": "mg",
+      "description": "Corticosteroid oral - asthma / COPD exacerbation (5 days), croup; hyperglycaemia",
+      "rxcui": "8638", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Prednisolone"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Prednisone", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 120, "duration_minutes": 1440,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 40, "base_dose_unit": "mg",
+      "description": "Corticosteroid oral - asthma / COPD exacerbation, autoimmune flare; hyperglycaemia",
+      "rxcui": "8640", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Prednisone"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Prochlorperazine", "route": "IV",
+      "onset_minutes": 10, "peak_minutes": 30, "duration_minutes": 240,
+      "hr_effect": 0, "bp_sys_effect": -5, "bp_dia_effect": -3, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 10, "base_dose_unit": "mg",
+      "description": "Phenothiazine antiemetic - migraine, vertigo; EPS / akathisia, hypotension",
+      "rxcui": "8704", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Prochlorperazine"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Quetiapine", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 90, "duration_minutes": 480,
+      "hr_effect": 8, "bp_sys_effect": -8, "bp_dia_effect": -5, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 25, "base_dose_unit": "mg",
+      "description": "Atypical antipsychotic oral - delirium / agitation, psychosis; orthostatic hypotension, sedation",
+      "rxcui": "51272", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Quetiapine"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Remifentanil", "route": "IV",
+      "onset_minutes": 1, "peak_minutes": 2, "duration_minutes": 8,
+      "hr_effect": -8, "bp_sys_effect": -10, "bp_dia_effect": -6, "rr_effect": -6, "spo2_effect": -2,
+      "dose_dependent": 1, "base_dose": 0.1, "base_dose_unit": "mcg/kg/min",
+      "description": "Ultra-short opioid infusion - context-insensitive offset; apnoea, chest-wall rigidity",
+      "rxcui": "73032", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Remifentanil"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Rifampin", "route": "oral",
+      "onset_minutes": 120, "peak_minutes": 240, "duration_minutes": 1440,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 600, "base_dose_unit": "mg",
+      "description": "Rifamycin - meningococcal contact chemoprophylaxis, TB; orange secretions, potent CYP inducer",
+      "rxcui": "9384", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Rifampin"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Rivaroxaban", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 180, "duration_minutes": 1440,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 20, "base_dose_unit": "mg",
+      "description": "Factor Xa inhibitor DOAC - AF, VTE (take with food); reversal andexanet alfa",
+      "rxcui": "1114195", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Rivaroxaban"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Rosuvastatin", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 180, "duration_minutes": 1440,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 20, "base_dose_unit": "mg",
+      "description": "HMG-CoA reductase inhibitor - high-intensity statin; myopathy, renal dose cap",
+      "rxcui": "301542", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Rosuvastatin"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Senna (sennosides)", "route": "oral",
+      "onset_minutes": 360, "peak_minutes": 480, "duration_minutes": 720,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 8.6, "base_dose_unit": "mg",
+      "description": "Stimulant laxative - opioid-induced constipation; onset 6-12 h",
+      "rxcui": "36387", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Senna"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Sodium nitroprusside", "route": "IV",
+      "onset_minutes": 0.5, "peak_minutes": 2, "duration_minutes": 5,
+      "hr_effect": 8, "bp_sys_effect": -25, "bp_dia_effect": -15, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 0.5, "base_dose_unit": "mcg/kg/min",
+      "description": "Direct arterio-venodilator - hypertensive emergency, acute HF; cyanide toxicity >48 h, light-sensitive",
+      "rxcui": "7476", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Sodium%20nitroprusside"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Sodium thiosulfate", "route": "IV",
+      "onset_minutes": 5, "peak_minutes": 30, "duration_minutes": 240,
+      "hr_effect": 0, "bp_sys_effect": -3, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 12.5, "base_dose_unit": "g",
+      "description": "Cyanide antidote (sulfur donor) - after hydroxocobalamin; calciphylaxis off-label",
+      "rxcui": "36726", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Sodium%20thiosulfate"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Sotalol", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 180, "duration_minutes": 720,
+      "hr_effect": -12, "bp_sys_effect": -6, "bp_dia_effect": -4, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 80, "base_dose_unit": "mg",
+      "description": "Class III + beta-blocker - AF / VT; QT monitoring at initiation, renal adjust",
+      "rxcui": "9947", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Sotalol"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Sucralfate", "route": "oral",
+      "onset_minutes": 30, "peak_minutes": 60, "duration_minutes": 360,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 1, "base_dose_unit": "g",
+      "description": "Mucosal protectant - stress ulcer, oesophagitis; separate from other drugs by 2 h",
+      "rxcui": "10156", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Sucralfate"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Sugammadex", "route": "IV",
+      "onset_minutes": 1, "peak_minutes": 3, "duration_minutes": 60,
+      "hr_effect": -3, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 8, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 4, "base_dose_unit": "mg/kg",
+      "description": "Selective relaxant binding agent - reverses rocuronium / vecuronium; bradycardia, hypersensitivity",
+      "rxcui": "1726988", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Sugammadex"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Terbutaline", "route": "SC",
+      "onset_minutes": 5, "peak_minutes": 30, "duration_minutes": 240,
+      "hr_effect": 15, "bp_sys_effect": 3, "bp_dia_effect": -3, "rr_effect": -2, "spo2_effect": 3,
+      "dose_dependent": 1, "base_dose": 0.25, "base_dose_unit": "mg",
+      "description": "Beta-2 agonist SC - severe asthma when nebulisation ineffective; tachycardia, hypokalaemia",
+      "rxcui": "10368", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Terbutaline"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Terlipressin", "route": "IV",
+      "onset_minutes": 15, "peak_minutes": 30, "duration_minutes": 240,
+      "hr_effect": -5, "bp_sys_effect": 12, "bp_dia_effect": 8, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 1, "base_dose_unit": "mg",
+      "description": "V1 agonist - variceal bleeding, hepatorenal syndrome; ischaemic complications, respiratory failure",
+      "rxcui": "57048", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Terlipressin"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Thiamine", "route": "IV",
+      "onset_minutes": 30, "peak_minutes": 60, "duration_minutes": 720,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 500, "base_dose_unit": "mg",
+      "description": "Vitamin B1 - Wernicke prophylaxis / treatment in alcohol misuse; give before glucose",
+      "rxcui": "10454", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Thiamine"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Tramadol", "route": "oral",
+      "onset_minutes": 30, "peak_minutes": 120, "duration_minutes": 360,
+      "hr_effect": 0, "bp_sys_effect": -2, "bp_dia_effect": 0, "rr_effect": -1, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 50, "base_dose_unit": "mg",
+      "description": "Weak opioid + SNRI - moderate pain; lowers seizure threshold, serotonin syndrome",
+      "rxcui": "10689", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Tramadol"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Tranexamic acid", "route": "IV",
+      "onset_minutes": 10, "peak_minutes": 30, "duration_minutes": 480,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 1, "base_dose_unit": "g",
+      "description": "Antifibrinolytic - trauma haemorrhage <3 h (CRASH-2), PPH, haemoptysis; seizures at high dose",
+      "rxcui": "10691", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Tranexamic%20acid"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Trimethoprim-sulfamethoxazole (TMP-SMX)", "route": "oral",
+      "onset_minutes": 60, "peak_minutes": 240, "duration_minutes": 720,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 160, "base_dose_unit": "mg TMP",
+      "description": "Folate antagonist combination - UTI, PJP, MRSA skin infection; hyperkalaemia, SJS",
+      "rxcui": "10831", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Trimethoprim-sulfamethoxazole"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Valproate (sodium valproate)", "route": "IV",
+      "onset_minutes": 15, "peak_minutes": 60, "duration_minutes": 480,
+      "hr_effect": 0, "bp_sys_effect": -3, "bp_dia_effect": -2, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 40, "base_dose_unit": "mg/kg",
+      "description": "Antiepileptic IV - status epilepticus second-line; hepatotoxicity, hyperammonaemia, teratogenic",
+      "rxcui": "40254", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Valproate"
+    },
+    {
+      "treatment_type": "medication", "treatment_name": "Vecuronium", "route": "IV",
+      "onset_minutes": 2, "peak_minutes": 4, "duration_minutes": 45,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": -10, "spo2_effect": 0,
+      "dose_dependent": 1, "base_dose": 0.1, "base_dose_unit": "mg/kg",
+      "description": "Non-depolarising NMBA - intermediate duration; hepatic / renal elimination",
+      "rxcui": "71535", "pk_source": "DailyMed", "pk_evidence_url": "https://dailymed.nlm.nih.gov/dailymed/search.cfm?query=Vecuronium"
+    },
+    {
       "treatment_type": "iv_fluid", "treatment_name": "Normal Saline 500ml Bolus", "route": "IV",
       "onset_minutes": 5, "peak_minutes": 20, "duration_minutes": 60,
       "hr_effect": -5, "bp_sys_effect": 10, "bp_dia_effect": 5, "rr_effect": 0, "spo2_effect": 0,
@@ -733,6 +1677,94 @@
       "pk_source": "SAFE 2004"
     },
     {
+      "treatment_type": "iv_fluid", "treatment_name": "Albumin 20% 100ml", "route": "IV",
+      "onset_minutes": 10, "peak_minutes": 30, "duration_minutes": 240,
+      "hr_effect": -3, "bp_sys_effect": 10, "bp_dia_effect": 6, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 0,
+      "description": "Concentrated colloid - large-volume paracentesis, hepatorenal syndrome, hypoalbuminaemia",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "iv_fluid", "treatment_name": "Dextrose 10% 500ml", "route": "IV",
+      "onset_minutes": 5, "peak_minutes": 15, "duration_minutes": 60,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 0,
+      "description": "Glucose infusion - hypoglycaemia (peripheral-safe alternative to D50), paediatric / neonatal",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "iv_fluid", "treatment_name": "Fresh Frozen Plasma 1 unit", "route": "IV",
+      "onset_minutes": 15, "peak_minutes": 60, "duration_minutes": 720,
+      "hr_effect": -3, "bp_sys_effect": 5, "bp_dia_effect": 3, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 0,
+      "description": "Blood product - coagulation factors; massive transfusion 1:1:1, warfarin reversal when PCC unavailable",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "iv_fluid", "treatment_name": "Half-Normal Saline (0.45%) 1000ml", "route": "IV",
+      "onset_minutes": 15, "peak_minutes": 45, "duration_minutes": 120,
+      "hr_effect": -3, "bp_sys_effect": 5, "bp_dia_effect": 3, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 0,
+      "description": "Hypotonic crystalloid - free water + sodium; HHS after initial NS; not for resuscitation",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "iv_fluid", "treatment_name": "Hypertonic Saline 3% 250ml", "route": "IV",
+      "onset_minutes": 5, "peak_minutes": 20, "duration_minutes": 240,
+      "hr_effect": 0, "bp_sys_effect": 8, "bp_dia_effect": 5, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 0,
+      "description": "Osmotherapy - raised ICP / herniation, severe symptomatic hyponatraemia; central line preferred, monitor Na",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "iv_fluid", "treatment_name": "Lactated Ringers 1000ml Bolus", "route": "IV",
+      "onset_minutes": 10, "peak_minutes": 30, "duration_minutes": 90,
+      "hr_effect": -10, "bp_sys_effect": 15, "bp_dia_effect": 8, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 0,
+      "description": "Balanced crystalloid - significant volume expansion, sepsis-preferred",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "iv_fluid", "treatment_name": "Normal Saline 2000ml Bolus", "route": "IV",
+      "onset_minutes": 15, "peak_minutes": 45, "duration_minutes": 120,
+      "hr_effect": -15, "bp_sys_effect": 20, "bp_dia_effect": 10, "rr_effect": 1, "spo2_effect": -1,
+      "dose_dependent": 0,
+      "description": "Crystalloid - large-volume resuscitation; hyperchloraemic acidosis, fluid overload",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "iv_fluid", "treatment_name": "Normal Saline 250ml Bolus", "route": "IV",
+      "onset_minutes": 3, "peak_minutes": 10, "duration_minutes": 45,
+      "hr_effect": -3, "bp_sys_effect": 5, "bp_dia_effect": 3, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 0,
+      "description": "Crystalloid - small-volume challenge (heart failure / dialysis patients)",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "iv_fluid", "treatment_name": "Packed Red Blood Cells 1 unit", "route": "IV",
+      "onset_minutes": 15, "peak_minutes": 60, "duration_minutes": 1440,
+      "hr_effect": -5, "bp_sys_effect": 8, "bp_dia_effect": 5, "rr_effect": 0, "spo2_effect": 2,
+      "dose_dependent": 0,
+      "description": "Blood product - raises Hb ~1 g/dL per unit over 2-4 h; consent, crossmatch, transfusion reactions",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "iv_fluid", "treatment_name": "Plasma-Lyte 1000ml Bolus", "route": "IV",
+      "onset_minutes": 10, "peak_minutes": 30, "duration_minutes": 90,
+      "hr_effect": -10, "bp_sys_effect": 15, "bp_dia_effect": 8, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 0,
+      "description": "Balanced crystalloid (acetate / gluconate) - resuscitation, DKA",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "iv_fluid", "treatment_name": "Platelets 1 unit (pool)", "route": "IV",
+      "onset_minutes": 15, "peak_minutes": 60, "duration_minutes": 720,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 0,
+      "description": "Blood product - platelets <10 (or <50 with bleeding / procedure); ABO-compatible preferred",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
       "treatment_type": "oxygen", "treatment_name": "Nasal Cannula 2L/min", "route": "inhaled",
       "onset_minutes": 2, "peak_minutes": 5, "duration_minutes": -1,
       "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 4,
@@ -768,6 +1800,70 @@
       "description": "FiO2 ~80-100%"
     },
     {
+      "treatment_type": "oxygen", "treatment_name": "Bag-Valve-Mask Ventilation", "route": "airway",
+      "onset_minutes": 0.5, "peak_minutes": 2, "duration_minutes": -1,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 14, "etco2_effect": -5,
+      "dose_dependent": 0,
+      "description": "Manual ventilation with reservoir 15 L/min - apnoea / inadequate ventilation; two-person technique, avoid hyperventilation",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "oxygen", "treatment_name": "BiPAP 10/5 cmH2O", "route": "inhaled",
+      "onset_minutes": 2, "peak_minutes": 10, "duration_minutes": -1,
+      "hr_effect": -3, "bp_sys_effect": -3, "bp_dia_effect": -2, "rr_effect": -5, "spo2_effect": 12, "etco2_effect": -5,
+      "dose_dependent": 0,
+      "description": "Bilevel NIV - hypercapnic COPD exacerbation (pH 7.25-7.35), pulmonary oedema; watch for failure at 1 h",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "oxygen", "treatment_name": "CPAP 5 cmH2O", "route": "inhaled",
+      "onset_minutes": 2, "peak_minutes": 10, "duration_minutes": -1,
+      "hr_effect": -3, "bp_sys_effect": -3, "bp_dia_effect": -2, "rr_effect": -3, "spo2_effect": 10,
+      "dose_dependent": 0,
+      "description": "Continuous positive airway pressure - cardiogenic pulmonary oedema, OSA; reduces preload",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "oxygen", "treatment_name": "Endotracheal Intubation + Mechanical Ventilation", "route": "airway",
+      "onset_minutes": 1, "peak_minutes": 5, "duration_minutes": -1,
+      "hr_effect": -5, "bp_sys_effect": -8, "bp_dia_effect": -5, "rr_effect": 0, "spo2_effect": 15, "etco2_effect": -3,
+      "dose_dependent": 0,
+      "description": "Definitive airway - GCS <=8, failure to oxygenate / ventilate, airway protection; expect post-intubation hypotension",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "oxygen", "treatment_name": "High-Flow Nasal Cannula 40L/min FiO2 60%", "route": "inhaled",
+      "onset_minutes": 2, "peak_minutes": 10, "duration_minutes": -1,
+      "hr_effect": -3, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": -3, "spo2_effect": 13,
+      "dose_dependent": 0,
+      "description": "Heated humidified high flow - PEEP-like effect, dead-space washout; hypoxaemic respiratory failure",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "oxygen", "treatment_name": "Nasal Cannula 1L/min", "route": "inhaled",
+      "onset_minutes": 2, "peak_minutes": 5, "duration_minutes": -1,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 2,
+      "dose_dependent": 0,
+      "description": "FiO2 ~24%",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "oxygen", "treatment_name": "Venturi Mask 28%", "route": "inhaled",
+      "onset_minutes": 1, "peak_minutes": 3, "duration_minutes": -1,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 5,
+      "dose_dependent": 0,
+      "description": "Fixed FiO2 28% - controlled oxygen in COPD (target 88-92%)",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "oxygen", "treatment_name": "Venturi Mask 40%", "route": "inhaled",
+      "onset_minutes": 1, "peak_minutes": 3, "duration_minutes": -1,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 9,
+      "dose_dependent": 0,
+      "description": "Fixed FiO2 40% - moderate hypoxaemia with predictable delivery",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
       "treatment_type": "nursing", "treatment_name": "Trendelenburg Position", "route": "position",
       "onset_minutes": 1, "peak_minutes": 3, "duration_minutes": -1,
       "hr_effect": -5, "bp_sys_effect": 10, "bp_dia_effect": 5, "rr_effect": 0, "spo2_effect": -1,
@@ -801,6 +1897,214 @@
       "hr_effect": 0, "bp_sys_effect": 5, "bp_dia_effect": 3, "rr_effect": 0, "spo2_effect": 0,
       "dose_dependent": 0,
       "description": "Improves cardiac output in pregnancy"
+    },
+    {
+      "treatment_type": "nursing", "treatment_name": "Active Cooling Measures", "route": "procedure",
+      "onset_minutes": 5, "peak_minutes": 60, "duration_minutes": -1,
+      "hr_effect": -3, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0, "temp_effect": -1,
+      "dose_dependent": 0,
+      "description": "Tepid sponging, ice packs, cooled fluids - hyperthermia >39.5 °C, heat stroke; shivering counteracts",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "nursing", "treatment_name": "Active Warming Blanket", "route": "procedure",
+      "onset_minutes": 5, "peak_minutes": 60, "duration_minutes": -1,
+      "hr_effect": 2, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0, "temp_effect": 0.8,
+      "dose_dependent": 0,
+      "description": "Forced-air warming - hypothermia, peri-operative; ~0.5-1 °C/h; monitor core temperature",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "nursing", "treatment_name": "Aspiration Precautions", "route": "precaution",
+      "onset_minutes": 1, "peak_minutes": 2, "duration_minutes": -1,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 0,
+      "description": "Head up, swallow screen before oral intake, suction ready - stroke, reduced consciousness",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "nursing", "treatment_name": "Bladder Scan", "route": "procedure",
+      "onset_minutes": 1, "peak_minutes": 3, "duration_minutes": 5,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 0,
+      "description": "Bedside ultrasound residual volume - retention screen before catheterisation",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "nursing", "treatment_name": "Chest Physiotherapy", "route": "procedure",
+      "onset_minutes": 5, "peak_minutes": 20, "duration_minutes": 60,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": -1, "spo2_effect": 2,
+      "dose_dependent": 0,
+      "description": "Airway clearance techniques - atelectasis, retained secretions, bronchiectasis",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "nursing", "treatment_name": "Contact Isolation Precautions", "route": "precaution",
+      "onset_minutes": 1, "peak_minutes": 2, "duration_minutes": -1,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 0,
+      "description": "Gloves + gown, dedicated equipment - MRSA, C. difficile, ESBL",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "nursing", "treatment_name": "Continuous Cardiac Monitoring", "route": "monitoring",
+      "onset_minutes": 1, "peak_minutes": 2, "duration_minutes": -1,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 0,
+      "description": "3/5-lead telemetry - arrhythmia, electrolyte derangement, drugs with cardiac toxicity",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "nursing", "treatment_name": "Continuous Pulse Oximetry", "route": "monitoring",
+      "onset_minutes": 1, "peak_minutes": 2, "duration_minutes": -1,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 0,
+      "description": "Continuous SpO2 - respiratory compromise, sedation, oxygen titration",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "nursing", "treatment_name": "Droplet Isolation Precautions", "route": "precaution",
+      "onset_minutes": 1, "peak_minutes": 2, "duration_minutes": -1,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 0,
+      "description": "Surgical mask within 1 m, single room - meningococcal disease until 24 h of effective antibiotics, influenza",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "nursing", "treatment_name": "Fall Precautions", "route": "precaution",
+      "onset_minutes": 1, "peak_minutes": 2, "duration_minutes": -1,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 0,
+      "description": "Low bed, call bell, non-slip footwear, supervised mobilisation - delirium, sedation, weakness",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "nursing", "treatment_name": "Graduated Compression Stockings", "route": "procedure",
+      "onset_minutes": 5, "peak_minutes": 30, "duration_minutes": -1,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 0,
+      "description": "Mechanical VTE prophylaxis - contraindicated in stroke (CLOTS 3) and peripheral arterial disease",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "nursing", "treatment_name": "Head of Bed Elevated 30°", "route": "position",
+      "onset_minutes": 1, "peak_minutes": 5, "duration_minutes": -1,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 1,
+      "dose_dependent": 0,
+      "description": "Neuroprotective positioning - lowers ICP (venous drainage), aspiration / VAP prevention; keep neck neutral",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "nursing", "treatment_name": "Nasogastric Tube Insertion", "route": "procedure",
+      "onset_minutes": 2, "peak_minutes": 5, "duration_minutes": 15,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 0,
+      "description": "NG tube - gastric decompression (obstruction, ileus), enteral feeding / drugs; confirm position (pH / X-ray)",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "nursing", "treatment_name": "Neurological Observations (GCS / pupils) hourly", "route": "monitoring",
+      "onset_minutes": 1, "peak_minutes": 2, "duration_minutes": -1,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 0,
+      "description": "Hourly GCS, pupils, limb power - meningitis, head injury, raised ICP; escalate on any drop",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "nursing", "treatment_name": "Nil by Mouth (NPO)", "route": "precaution",
+      "onset_minutes": 1, "peak_minutes": 2, "duration_minutes": -1,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 0,
+      "description": "Withhold oral intake - pre-procedure, aspiration risk, bowel obstruction; review IV fluids and drugs",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "nursing", "treatment_name": "Oropharyngeal Suction", "route": "procedure",
+      "onset_minutes": 1, "peak_minutes": 2, "duration_minutes": 10,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 2,
+      "dose_dependent": 0,
+      "description": "Clears secretions / vomitus from the oropharynx - reduced consciousness, aspiration risk",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "nursing", "treatment_name": "Peripheral IV Access (18G)", "route": "procedure",
+      "onset_minutes": 1, "peak_minutes": 5, "duration_minutes": 15,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 0,
+      "description": "Large-bore peripheral cannula - fluids, drugs, blood sampling at insertion",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "nursing", "treatment_name": "Point-of-Care Blood Glucose", "route": "procedure",
+      "onset_minutes": 1, "peak_minutes": 2, "duration_minutes": 5,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 0,
+      "description": "Capillary glucose - every altered mental state / seizure; repeat after treatment",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "nursing", "treatment_name": "Pressure-Area Care (2-hourly repositioning)", "route": "precaution",
+      "onset_minutes": 1, "peak_minutes": 2, "duration_minutes": -1,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 0,
+      "description": "Skin integrity bundle - immobility, sedation, malnutrition; heel offloading",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "nursing", "treatment_name": "Prone Position", "route": "position",
+      "onset_minutes": 5, "peak_minutes": 60, "duration_minutes": -1,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 6,
+      "dose_dependent": 0,
+      "description": "Prone positioning - severe ARDS (P/F <150) >=16 h/day; secure tubes, pressure-area care",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "nursing", "treatment_name": "Recovery Position", "route": "position",
+      "onset_minutes": 1, "peak_minutes": 2, "duration_minutes": -1,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 1,
+      "dose_dependent": 0,
+      "description": "Lateral recovery position - airway protection in reduced consciousness / post-ictal; not with suspected spinal injury",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "nursing", "treatment_name": "Second Peripheral IV Access (large-bore)", "route": "procedure",
+      "onset_minutes": 1, "peak_minutes": 5, "duration_minutes": 15,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 0,
+      "description": "Second large-bore cannula - haemorrhage / sepsis resuscitation, incompatible infusions",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "nursing", "treatment_name": "Seizure Precautions", "route": "precaution",
+      "onset_minutes": 1, "peak_minutes": 2, "duration_minutes": -1,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 0,
+      "description": "Padded rails, suction and oxygen at bedside, benzodiazepine available - meningitis, epilepsy, withdrawal",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "nursing", "treatment_name": "Strict Fluid Balance Chart", "route": "monitoring",
+      "onset_minutes": 1, "peak_minutes": 2, "duration_minutes": -1,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 0,
+      "description": "Hourly intake / output - shock, AKI, heart failure, DKA",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "nursing", "treatment_name": "Urinary Catheter Insertion", "route": "procedure",
+      "onset_minutes": 2, "peak_minutes": 5, "duration_minutes": 15,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 0,
+      "description": "Indwelling urinary catheter - hourly urine output in shock, retention; remove early (CAUTI)",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
+    },
+    {
+      "treatment_type": "nursing", "treatment_name": "Wound Dressing", "route": "procedure",
+      "onset_minutes": 2, "peak_minutes": 5, "duration_minutes": 15,
+      "hr_effect": 0, "bp_sys_effect": 0, "bp_dia_effect": 0, "rr_effect": 0, "spo2_effect": 0,
+      "dose_dependent": 0,
+      "description": "Aseptic wound care - assess, irrigate, dress; document size and exudate",
+      "rxcui": null, "pk_source": "Curated (rohy)", "pk_evidence_url": null
     }
   ]
 }

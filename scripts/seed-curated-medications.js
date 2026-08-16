@@ -142,7 +142,9 @@ export async function seedCuratedMedications(db, { dataPath = DATA_PATH, log = c
                   OR (m.route = 'im' AND treatment_effects.route IN ('IM', 'im'))
                   OR (m.route = 'sc' AND treatment_effects.route IN ('SC', 'sc'))
                   OR (m.route = 'oral' AND treatment_effects.route IN ('oral', 'PO'))
-                  OR (m.route = 'inhaled' AND treatment_effects.route = 'inhaled')
+                  OR (m.route = 'inhaled' AND treatment_effects.route IN ('inhaled', 'neb', 'nebulised', 'nebulized'))
+                  OR (m.route = 'sublingual' AND treatment_effects.route IN ('sublingual', 'SL', 'sl'))
+                  OR (m.route = 'rectal' AND treatment_effects.route IN ('rectal', 'PR', 'pr'))
               )
             LIMIT 1
         )

@@ -79,10 +79,11 @@ describe('migration 0007 + Session 1 catalogue seeders', () => {
     });
 
     describe('treatment_effects seeder', () => {
-        it('upserts ~100 curated rows', async () => {
+        it('upserts the curated formulary (>= 200 rows since rohy-2026-08)', async () => {
+            // Exact shape + floors per type are locked in
+            // tests/server/treatment-effects-seed.test.js; this is the join gate.
             const { n } = await ctx.get('SELECT COUNT(*) AS n FROM treatment_effects');
-            expect(n).toBeGreaterThanOrEqual(95);
-            expect(n).toBeLessThanOrEqual(110);
+            expect(n).toBeGreaterThanOrEqual(200);
         });
 
         it('stamps data_source_id pointing at the curated source', async () => {
@@ -91,7 +92,7 @@ describe('migration 0007 + Session 1 catalogue seeders', () => {
                 JOIN data_sources s ON s.id = t.data_source_id
                 WHERE s.source_key = 'curated'
             `);
-            expect(n).toBeGreaterThanOrEqual(95);
+            expect(n).toBeGreaterThanOrEqual(200);
         });
 
         it('records pk_source on most medication rows', async () => {
@@ -114,8 +115,7 @@ describe('migration 0007 + Session 1 catalogue seeders', () => {
     describe('curated medications seeder', () => {
         it('inserts a medications row per medication-type treatment_effects row', async () => {
             const { n } = await ctx.get('SELECT COUNT(*) AS n FROM medications WHERE is_curated = 1');
-            expect(n).toBeGreaterThanOrEqual(75);
-            expect(n).toBeLessThanOrEqual(110);
+            expect(n).toBeGreaterThanOrEqual(150);
         });
 
         it('back-fills treatment_effects.medication_id for medication-type rows', async () => {
@@ -125,7 +125,7 @@ describe('migration 0007 + Session 1 catalogue seeders', () => {
             // Not 100% match because of route-name normalisation edge cases
             // (e.g. "position" route on nursing rows) — but the medication
             // rows should join cleanly.
-            expect(n).toBeGreaterThanOrEqual(70);
+            expect(n).toBeGreaterThanOrEqual(150);
         });
     });
 

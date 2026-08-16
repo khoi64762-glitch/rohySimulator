@@ -9,6 +9,25 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.48] — 2026-08-16
+
+### Added
+
+- **Curated treatment formulary widened 101 → 264 rows** (204 medications,
+  16 IV fluids, 13 oxygen/airway, 31 nursing procedures): a realistic
+  teaching formulary — antibiotics incl. the meningitis set
+  (dexamethasone, ampicillin, acyclovir, cefotaxime, gentamicin,
+  linezolid, penicillin G), osmotherapy (mannitol 20 %, hypertonic saline
+  3 %), oral cardiovascular / endocrine / GI staples, antiemetics,
+  anticoagulants, sedation/ICU drugs, antidotes, blood products, NIV/HFNC
+  devices and ward nursing procedures (isolation precautions, head-of-bed
+  30°, neuro obs, seizure precautions …). Every medication carries an
+  RxCUI looked up live against RxNav and a DailyMed/RxNav evidence link;
+  drugs without acute haemodynamic effect are orderable and scored with
+  zero vital effects. Existing rows unchanged except four RxCUI
+  corrections (Flumazenil carried fentanyl's; three nulls resolved). The
+  medications mirror now links sublingual and rectal rows too.
+
 ## [2.9.47] — 2026-08-16
 
 ### Fixed
