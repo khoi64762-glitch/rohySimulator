@@ -9,6 +9,25 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.57] — 2026-08-25
+
+### Fixed
+
+- **`package-lock.json` claimed rohy was MIT.** rohy is licensed under the
+  **Carm Research License v1.4** ("all rights reserved"), and `package.json`
+  correctly says `SEE LICENSE IN LICENSE` — but the lockfile's ROOT entry still
+  carried a stale `"license": "MIT"` from before that change. npm only rewrites
+  the field when the lockfile is regenerated, so it survived indefinitely, and
+  the lockfile ships: it was a false licensing statement about a proprietary
+  product. Regenerated; the only change is that one line. (`../dynajs` already
+  read correctly, and `MIT` on actual third-party packages is untouched and
+  right.)
+- **A test now pins it.** `tests/server/license-contract.test.js` checked
+  embedded licence FILES, NOTICE links and the Docker image, but nothing checked
+  what rohy declares about *itself* — which is why this sat unnoticed. It now
+  locks `package.json`'s licence field, the LICENSE file being the Carm Research
+  License, and the lockfile root matching `package.json`.
+
 ## [2.9.56] — 2026-08-25
 
 ### Added

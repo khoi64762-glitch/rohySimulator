@@ -281,3 +281,34 @@ describe('license contract', () => {
         );
     });
 });
+
+// Regression lock: package-lock.json's ROOT entry claimed "MIT" while rohy is
+// licensed under the Carm Research License (package.json says
+// "SEE LICENSE IN LICENSE"). npm only rewrites that field when the lockfile is
+// regenerated, so a stale value survives indefinitely — and the lockfile ships,
+// so it was a false licensing statement about a proprietary product. The rest
+// of this file checks embedded licence FILES and NOTICE links; nothing checked
+// what rohy declares about itself.
+describe('rohy declares its own licence consistently', () => {
+    const readJson = (rel) => JSON.parse(read(rel));
+
+    it('package.json points at the bundled LICENSE, never a bare SPDX id', () => {
+        expect(readJson('package.json').license).toBe('SEE LICENSE IN LICENSE');
+    });
+
+    it('the LICENSE file is the Carm Research License', () => {
+        const text = read('LICENSE');
+        expect(text).toMatch(/Carm Research License/i);
+        expect(text).toMatch(/All rights reserved/i);
+    });
+
+    it('package-lock.json\'s root entry matches package.json', () => {
+        const pkg = readJson('package.json');
+        const lock = readJson('package-lock.json');
+        const root = lock.packages[''];
+        expect(root.name).toBe(pkg.name);
+        expect(root.license).toBe(pkg.license);
+        // Belt and braces: the exact value that was wrong.
+        expect(root.license).not.toBe('MIT');
+    });
+});
