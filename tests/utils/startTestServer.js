@@ -156,6 +156,27 @@ export async function startTestServer(opts = {}) {
 function buildHandle({ child, baseUrl, port, dbPath, cleanupDb, stdoutChunks, stderrChunks }) {
 
     let closed = false;
+
+    // A child that dies AFTER readiness used to be invisible: nothing watched
+    // it, so every later request just failed ECONNREFUSED in ~1 ms and the
+    // suite reported a pile of unrelated-looking assertion failures. The
+    // stderr was only dumped in afterAll, by which point it is far from the
+    // failing test (and gets truncated in CI logs). Surface it the moment it
+    // happens, next to the test that tripped over it.
+    let exitInfo = null;
+    child.once('exit', (code, signal) => {
+        if (closed) return;   // expected — close() is shutting it down
+        exitInfo = { code, signal, at: new Date().toISOString() };
+        const err = Buffer.concat(stderrChunks).toString('utf8');
+        console.error(
+            `\n=== TEST SERVER DIED UNEXPECTEDLY (port ${port}) ===\n` +
+            `exit code=${code} signal=${signal}\n` +
+            `Every request after this point fails with ECONNREFUSED, so any\n` +
+            `test failures below are consequences, not causes.\n` +
+            `--- server stderr ---\n${err || '(empty)'}\n` +
+            `=== end test server death ===\n`,
+        );
+    });
     async function close() {
         if (closed) return;
         closed = true;
@@ -178,10 +199,15 @@ function buildHandle({ child, baseUrl, port, dbPath, cleanupDb, stdoutChunks, st
         baseUrl,
         port,
         dbPath,
+        pid: child.pid,
         close,
         // Logs are useful in test failures.
         getStdout: () => Buffer.concat(stdoutChunks).toString('utf8'),
         getStderr: () => Buffer.concat(stderrChunks).toString('utf8'),
+        // null while healthy; {code, signal, at} once the child has died
+        // without close() being called. Lets a test assert "the server is
+        // still up" instead of guessing at an ECONNREFUSED.
+        getExitInfo: () => exitInfo,
     };
 }
 

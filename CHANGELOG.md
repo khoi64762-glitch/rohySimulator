@@ -9,6 +9,29 @@ repo root (this updates `package.json` + `package-lock.json` and creates a
 tag in one step). Add a new section at the top of this file for every
 release before tagging.
 
+## [2.9.58] — 2026-08-26
+
+### Fixed
+
+- **A test server that died mid-run was invisible.** `startTestServer` only
+  watched the child until readiness; after that nothing did. When the process
+  died mid-file every later request failed `ECONNREFUSED` in ~1 ms, so the run
+  reported a pile of unrelated-looking assertion failures, and the child's
+  stderr was dumped only in `afterAll` — far from the failing test, and
+  truncated in CI logs. The handle now reports an unexpected exit the moment it
+  happens, with the exit code, signal and full stderr, and states plainly that
+  the failures below it are consequences rather than causes. It also exposes
+  `getExitInfo()` (null while healthy) and `pid`.
+  - This is a **diagnosability** fix, not a fix for the underlying crash. It was
+    written while chasing the intermittent `cohorts-routes.test.js` failure
+    (CI run 32849292369): six tests went red including one that shares no state
+    with the others, which is what revealed the server had died rather than the
+    assertions being wrong. The crash itself is still unidentified — the
+    captured stderr points into `phonemizer` (a `kokoro-js` dependency, pulled
+    in by the static import in `kokoroTts.js`) about 7 s after boot, but the CI
+    log truncates at the error text and the failure did not reproduce across
+    five full local runs.
+
 ## [2.9.57] — 2026-08-25
 
 ### Fixed
