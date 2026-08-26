@@ -34,6 +34,7 @@ export default defineConfig({
   server: {
     host: true, // Listen on all network interfaces (0.0.0.0)
     port: 5173,
+    allowedHosts: true,
     // Cross-origin isolation: enables SharedArrayBuffer so ONNX Runtime Web
     // can run multi-threaded WASM (5–10× faster inference, the difference
     // between a 4-second-per-frame pill and a 150ms-per-frame one).
