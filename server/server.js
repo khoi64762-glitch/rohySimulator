@@ -170,14 +170,15 @@ if (fs.existsSync(docsDist)) {
 app.use('/', express.static(path.join(__dirname, "..", "frontend")));
 app.use(errorHandler);
 
-// Start server with port fallback — bind to :: with ipv6Only:false for dual-stack (IPv4 + IPv6)
+// Start server - bind directly to PORT (prevent auto port-hopping on production)
 function startServer(port, maxRetries = 10) {
-        const server = app.listen(port, '0.0.0.0', () => {
+    const server = app.listen(port, '0.0.0.0', () => {
         bootLog.info('http server listening', { host: '0.0.0.0', port });
     });
 
     server.on('error', (err) => {
-        if (err.code === 'EADDRINUSE' && maxRetries > 0) {
+        // Tránh tự đổi port trên Render production để không bị lỗi 502
+        if (err.code === 'EADDRINUSE' && maxRetries > 0 && process.env.NODE_ENV !== 'production') {
             bootLog.warn('http port in use, retrying', { port, next_port: port + 1 });
             server.close();
             startServer(port + 1, maxRetries - 1);
@@ -189,7 +190,6 @@ function startServer(port, maxRetries = 10) {
 
     return server;
 }
-
 // Optional HTTPS listener. Only starts when TLS_CERT_PATH + TLS_KEY_PATH
 // point at readable PEM files. Failures here are non-fatal — the HTTP
 // listener stays up so the rest of the app remains usable; the warning
